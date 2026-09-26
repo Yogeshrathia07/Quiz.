@@ -1,0 +1,71 @@
+/*
+ * The navigation bar (components/SiteHeader.jsx); colours come from theme.css.
+ * Laptop: brand, links, one account button with a menu. Phone
+ * (760px and below): brand and a menu button that opens a full-width panel.
+ * The bar keeps the height the page layout expects (56px, 52px on phones).
+ */
+.nav-bar{display:flex;align-items:center;gap:28px;justify-content:flex-start;border-bottom:1px solid rgba(255,255,255,.1);background:#1598D1}
+/* Same side margins as the wide admin pages (.main-wide), so the brand lines up with the content. */
+.site-header.nav-bar{padding-left:max(calc((100% - min(100% - clamp(28px,5vw,72px),1460px)) / 2),env(safe-area-inset-left));padding-right:max(calc((100% - min(100% - clamp(28px,5vw,72px),1460px)) / 2),env(safe-area-inset-right))}
+
+.nav-brand{flex:0 0 auto;display:flex;align-items:center;gap:9px;color:#F7FAFC;line-height:1;text-decoration:none}
+.nav-brand:hover{color:#F7FAFC}
+.nav-brand .emblem{flex:0 0 auto}
+.nav-brand-name{font-size:1.35rem;font-weight:700;letter-spacing:-.06em}
+.nav-brand-dot{color:#1598D1}
+.nav-brand-org{padding-left:9px;border-left:1px solid rgba(255,255,255,.22);color:#1598D1;font-size:.72rem;font-weight:700;letter-spacing:.06em}
+
+.nav-links{display:flex;align-items:center;gap:4px;height:100%}
+.nav-links a{position:relative;display:flex;align-items:center;height:100%;padding:0 12px;color:#AAB6BC;font-size:.86rem;font-weight:700;text-decoration:none;transition:color .15s}
+.nav-links a:hover{color:#F7FAFC}
+.nav-links a.is-active{color:#F7FAFC}
+.nav-links a.is-active::after{content:"";position:absolute;left:12px;right:12px;bottom:0;height:3px;border-radius:3px 3px 0 0;background:#1598D1}
+.nav-links a:focus-visible,.nav-account-button:focus-visible,.nav-menu-button:focus-visible,.nav-brand:focus-visible{outline:2px solid #1598D1;outline-offset:2px;border-radius:8px}
+
+/* Account button and its menu */
+.nav-account{position:relative;margin-left:auto}
+.nav-account-button{display:flex;align-items:center;gap:9px;max-width:260px;padding:4px 10px 4px 4px;border:1px solid rgba(255,255,255,.16);border-radius:99px;background:rgba(255,255,255,.06);color:#F7FAFC;font:inherit;font-size:.84rem;font-weight:700;cursor:pointer;transition:background .15s,border-color .15s}
+.nav-account-button:hover,.nav-account-button[aria-expanded="true"]{background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.28)}
+.nav-avatar{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;border-radius:50%;background:#1598D1;color:#F7FAFC;font-size:.75rem;font-weight:700;letter-spacing:.02em}
+.nav-account-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav-caret{flex:0 0 auto;color:#AAB6BC}
+.nav-dropdown{position:absolute;top:calc(100% + 8px);right:0;z-index:5;display:grid;min-width:240px;padding:6px;border-radius:14px;background:#2A2D31;color:#F7FAFC;box-shadow:0 18px 44px rgba(0,0,0,0.55);animation:nav-drop .14s ease-out}
+.nav-dropdown-who{display:grid;gap:2px;padding:10px 12px 12px;margin-bottom:4px;border-bottom:1px solid #474C52}
+.nav-dropdown-who strong{font-size:.9rem}
+.nav-dropdown-who span{overflow:hidden;color:#AAB6BC;font-size:.78rem;text-overflow:ellipsis;white-space:nowrap}
+.nav-dropdown button{padding:10px 12px;border:0;border-radius:9px;background:transparent;color:#F7FAFC;font:inherit;font-size:.86rem;font-weight:700;text-align:left;cursor:pointer}
+.nav-dropdown button:hover{background:#33373B}
+.nav-dropdown button.is-danger{color:#EF5B5F}
+.nav-dropdown button.is-danger:hover{background:rgba(239,91,95,.14)}
+@keyframes nav-fade{from{opacity:0}to{opacity:1}}
+@keyframes nav-drop{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+
+/* Phone menu */
+.nav-menu-button{display:none;place-items:center;width:42px;height:38px;margin-left:auto;padding:0;border:1px solid rgba(255,255,255,.18);border-radius:8px;background:rgba(255,255,255,.06);color:#F7FAFC;cursor:pointer}
+.nav-panel{display:none}
+
+/* Behind the phone menu:dims the page, and a tap on it only closes the menu. */
+.nav-backdrop{display:none}
+
+@media (max-width:760px){
+  .nav-bar{gap:12px}
+  .site-header.nav-bar{padding-left:max(16px,env(safe-area-inset-left));padding-right:max(16px,env(safe-area-inset-right))}
+  .nav-backdrop{position:fixed;inset:calc(52px + env(safe-area-inset-top)) 0 0;z-index:4;display:block;background:rgba(14,15,17,0.6);animation:nav-fade .16s ease-out}
+  .nav-brand-name{font-size:1.2rem}
+  .nav-links,.nav-account{display:none}
+  .nav-menu-button{display:grid}
+  .nav-panel{position:fixed;top:calc(52px + env(safe-area-inset-top));left:0;right:0;z-index:5;display:grid;gap:14px;max-height:calc(100dvh - 52px - env(safe-area-inset-top));overflow-y:auto;padding:10px 16px calc(18px + env(safe-area-inset-bottom));border-bottom:1px solid rgba(255,255,255,.12);background:#1598D1;box-shadow:0 24px 40px rgba(0,0,0,0.55);animation:nav-drop .16s ease-out}
+  .nav-panel nav{display:grid;gap:2px}
+  .nav-panel nav a{display:flex;align-items:center;min-height:48px;padding:0 14px;border-radius:12px;color:#AAB6BC;font-size:1rem;font-weight:700;text-decoration:none}
+  .nav-panel nav a:active{background:rgba(255,255,255,.08)}
+  .nav-panel nav a.is-active{background:rgba(21,152,209,0.14);color:#1598D1;box-shadow:inset 3px 0 0 #1598D1}
+  .nav-panel-account{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;background:rgba(255,255,255,.07)}
+  .nav-panel-account .nav-avatar{flex-basis:40px;width:40px;height:40px;font-size:.9rem}
+  .nav-panel-account div{display:grid;gap:2px;min-width:0}
+  .nav-panel-account strong{color:#F7FAFC;font-size:.95rem}
+  .nav-panel-account div span{overflow:hidden;color:#AAB6BC;font-size:.8rem;text-overflow:ellipsis;white-space:nowrap}
+  .nav-panel-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .nav-panel-actions .button{min-height:46px}
+  .nav-panel-actions .button:only-child{grid-column:1/-1}
+  .nav-panel-actions .button-secondary{background:#2A2D31;color:#F7FAFC;border-color:#474C52}
+}

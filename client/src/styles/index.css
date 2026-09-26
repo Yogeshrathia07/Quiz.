@@ -1,0 +1,14 @@
+/* base.css is the portal skin (tokens, buttons, cards, forms, tables). */
+@import "./base.css";
+/* app.css layers the React screens on top of it. */
+@import "./app.css";
+/* attendance.css styles the attendance pages. */
+@import "./attendance.css";
+/* filters.css styles the tick-box filter and the search box shared by lists. */
+@import "./filters.css";
+/* nav.css styles the navigation bar. */
+@import "./nav.css";
+/* craft.css is the portal finishing layer (never the test pages). */
+@import "./craft.css";
+/* theme.css is the dark theme, over everything above (every page). */
+@import "./theme.css";

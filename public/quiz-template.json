@@ -1,0 +1,72 @@
+{
+  "title": "Sample quiz",
+  "instructions": "Choose the best answer for each question.",
+  "durationMinutes": 45,
+  "strictTiming": false,
+  "typeSeconds": {
+    "mcq": 60,
+    "msq": 60,
+    "short": 120
+  },
+  "questionMix": {
+    "mcq": 2,
+    "msq": 1,
+    "short": 1
+  },
+  "allowGuests": false,
+  "locationRequired": false,
+  "locationRadiusMeters": 250,
+  "fullscreenExitLimit": 3,
+  "fullscreenAbsenceLimitSeconds": 60,
+  "warningsBeforeLock": 0,
+  "violationAction": "lock",
+  "resultReleaseMode": "admin",
+  "questionLayout": "one",
+  "questions": [
+    {
+      "prompt": "Which data structure uses **first-in, first-out** (FIFO) order?",
+      "type": "mcq",
+      "options": [
+        "Stack",
+        "Queue",
+        "Tree",
+        "Graph"
+      ],
+      "correctOptions": [
+        "1"
+      ],
+      "timeSeconds": 45
+    },
+    {
+      "prompt": "A binary search repeats these steps on a **sorted** list:\n- Compare the middle item with the target\n- Throw away the half that cannot hold it\n- Search the half that is left\nHow long does it take on a list of n items?",
+      "type": "mcq",
+      "options": [
+        "O(1)",
+        "O(log n)",
+        "O(n)",
+        "O(n log n)"
+      ],
+      "correctOptions": [
+        "1"
+      ]
+    },
+    {
+      "prompt": "Which of these are valid HTTP methods?\nSelect **every** correct answer.",
+      "type": "msq",
+      "options": [
+        "GET",
+        "POST",
+        "FETCH",
+        "SEND"
+      ],
+      "correctOptions": [
+        "GET",
+        "POST"
+      ]
+    },
+    {
+      "prompt": "Briefly explain why an HTTP status code is useful. In your answer:\n1. Say what the client learns from it.\n2. Give **one** example code and what it means.",
+      "type": "short"
+    }
+  ]
+}

@@ -1,0 +1,164 @@
+/*
+ * Attendance pages. Colours come from theme.css; page titles sit on the
+ * page background, content in cards, the primary button for the one
+ * main action on each screen.
+ */
+.min-page{--faint:#AAB6BC;display:grid;gap:16px}
+.min-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;color:#F7FAFC}
+.min-head h1{margin:0;color:#F7FAFC;font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em;line-height:1.2}
+.min-head p{margin:6px 0 0;color:#AAB6BC;font-size:.92rem}
+.min-back{justify-self:start;margin-bottom:-6px;color:#AAB6BC;font-size:.85rem;font-weight:600;text-decoration:none}
+.min-back:hover{color:#1598D1}
+.min-card{padding:22px}
+.min-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+
+.min-list{margin:0;padding:0;list-style:none;border-radius:16px;background:#2A2D31;color:var(--ink);overflow:hidden}
+.min-list li+li{border-top:1px solid var(--line)}
+.min-list a{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 20px;color:inherit;text-decoration:none}
+.min-list a:hover{background:var(--wash)}
+.min-list-main{display:grid;gap:3px;min-width:0}
+.min-list-main strong{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.min-list-main small,.min-list-side{color:var(--muted);font-size:.82rem}
+.min-list-side{display:flex;align-items:center;gap:14px;white-space:nowrap}
+.min-state{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:700}
+.min-state::before{content:"";width:8px;height:8px;border-radius:50%;background:#3A3E43}
+.min-state.is-open{color:var(--success)}
+.min-state.is-open::before{background:#27B66F}
+
+/* Create */
+.att-create{background:#2A2D31;color:var(--ink)}
+.att-create .text-input{margin-bottom:6px}
+.att-create-options{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-top:10px}
+.att-create .location-settings{margin-top:10px;padding-top:12px;border-top:1px solid var(--line)}
+
+/* Live session */
+/* The list on the left, the QR and the count on the right */
+.att-board{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,440px);gap:16px;align-items:start}
+.att-board-side{display:flex;flex-direction:column;gap:16px;min-width:0}
+.att-qr{display:grid;justify-items:center;align-content:center;gap:10px;padding:24px;border-radius:16px;background:#2A2D31;color:var(--ink);text-align:center}
+.att-qr-button{padding:0;border:0;background:none;cursor:zoom-in;line-height:0}
+.att-qr img{width:min(100%,340px);height:auto;border-radius:4%}
+.att-qr p{margin:0;color:var(--muted);font-size:.85rem}
+.att-qr-closed{min-height:260px}
+.att-qr-closed strong{font-size:1.1rem}
+.att-qr-closed p{max-width:340px;line-height:1.5}
+/* Full screen: the page stays behind, blurred - the same scrim as the test's QR preview. */
+.att-qr-full{position:fixed;inset:0;z-index:300;display:grid;place-content:center;justify-items:center;gap:10px;padding:24px;background:rgba(14,15,17,.5);backdrop-filter:blur(10px) saturate(115%);color:#F7FAFC;text-align:center;cursor:zoom-out;animation:modal-fade-in .16s ease-out}
+/* The build adds the -webkit- copy Safari needs; writing both by hand made it keep only that one. */
+@supports not (backdrop-filter:blur(1px)){.att-qr-full{background:rgba(14,15,17,.92)}}
+.att-qr-full h1{margin:0;font-size:clamp(1.3rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em}
+.att-qr-full img{width:min(90vw,76vh);height:auto;margin-top:14px;border-radius:4%}
+.att-qr-full p{margin:0;color:#AAB6BC;font-size:clamp(.95rem,1.6vw,1.2rem)}
+/* Over the list: search, filter, Add student */
+.att-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px 14px;border-bottom:1px solid #474C52}
+.att-toolbar .button{display:inline-flex;align-items:center;gap:6px;flex:none}
+
+/* Add a student: registered user or guest */
+.student-analysis-sheet.att-add-dialog{position:relative;width:min(100%,520px)}
+.att-add-dialog h1{margin:0 48px 4px 0;font-size:1.4rem;font-weight:700;letter-spacing:-.03em}
+.att-add-intro{margin:0 0 16px;color:var(--muted);font-size:.9rem}
+.att-add-dialog .segmented{margin-bottom:16px}
+.att-add-body{height:min(300px,52vh)}
+.att-add-registered{display:grid;grid-template-rows:auto minmax(0,1fr);align-content:start;gap:10px;height:100%}
+.att-add-registered .help{margin:0}
+.att-search-error{color:var(--danger,#EF5B5F)}
+.att-people{display:grid;align-self:start;max-height:100%;margin:0;padding:0;overflow:auto;list-style:none;border:1px solid #474C52;border-radius:12px}
+.att-people li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px}
+.att-people li+li{border-top:1px solid #474C52}
+.att-person{display:grid;gap:2px;min-width:0}
+.att-person strong,.att-person small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.att-person small{color:var(--muted);font-size:.8rem}
+.att-person-done{display:inline-flex;align-items:center;gap:4px;color:#1BA566;font-size:.82rem;font-weight:700;white-space:nowrap}
+.att-add-guest{display:grid;gap:6px}
+.att-add-guest .button{margin-top:10px}
+.att-add-dialog .min-actions{margin-top:18px}
+
+.att-side{display:flex;flex-direction:column;gap:12px;padding:24px;border-radius:16px;background:#2A2D31;color:var(--ink)}
+.att-count{display:flex;align-items:baseline;gap:8px}
+.att-count strong{font-size:3rem;font-weight:700;letter-spacing:-.05em;line-height:1;font-variant-numeric:tabular-nums}
+.att-count span{color:var(--muted);font-weight:600}
+.att-breakdown{display:grid;gap:6px;margin:0;padding-bottom:4px;font-size:.9rem}
+.att-breakdown span{display:flex;align-items:center;gap:8px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%}
+.dot.is-present{background:#27B66F}
+.dot.is-pending{background:#1598D1}
+.dot.is-rejected{background:#3A3E43}
+.att-hint{margin:0;color:var(--muted);font-size:.8rem;text-align:center}
+
+.att-table{padding:4px 0;overflow-x:auto;background:#2A2D31;color:var(--ink)}
+.att-table table{width:100%;border-collapse:collapse;font-size:.9rem}
+.att-table th{padding:12px 16px;color:var(--muted);font-size:.7rem;font-weight:700;letter-spacing:.06em;text-align:left;text-transform:uppercase}
+.att-table td{padding:11px 16px;border-top:1px solid #474C52;vertical-align:middle}
+.att-table tr.is-removed td:not(.att-status-cell){opacity:.5}
+.att-num{width:36px;color:var(--faint)}
+.att-name{display:block;font-weight:700}
+.att-sub{display:block;color:var(--muted);font-size:.8rem}
+.att-flag{display:block;color:var(--danger);font-size:.78rem;font-weight:600}
+td .att-flag{display:inline}
+.att-sub+.att-flag{display:block}
+.att-time{white-space:nowrap;font-variant-numeric:tabular-nums}
+/* Status pills: green present, blue pending, red removed - white, with the
+   colour in the border and the word (a shade darker, to read on white). */
+.att-table .att-status{display:inline-flex;align-items:center;height:24px;padding:0 11px;border:1.5px solid;border-radius:999px;background:#FFFFFF;font-size:.75rem;font-weight:700;line-height:1;white-space:nowrap}
+.att-table .att-status::before{display:none}
+.att-table .att-status.is-present{border-color:#1BA566;color:#13804E}
+.att-table .att-status.is-pending{border-color:#1598D1;color:#0F6E99}
+.att-table .att-status.is-rejected{border-color:#C93443;color:#C93443}
+.att-breakdown .dot.is-present{background:#1BA566}
+.att-breakdown .dot.is-pending{background:#1598D1}
+.att-breakdown .dot.is-rejected{background:#C93443}
+.att-row-action{text-align:right;white-space:nowrap}
+.att-row-action .link-button{color:var(--muted);font-size:.82rem;text-decoration:none}
+.att-row-action .link-button:hover{color:var(--danger)}
+.att-empty{margin:0;padding:28px;color:var(--muted);text-align:center}
+
+/* Student page */
+.att-student{width:min(100%,430px);margin:24px auto 0;padding:28px;background:#2A2D31;color:var(--ink)}
+.att-student h1{margin:2px 0 18px;font-size:1.5rem;font-weight:700;letter-spacing:-.04em;line-height:1.25}
+.att-kicker{margin:0;color:#F39A4A;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.att-student .auth-title{display:none}
+.att-lead,.att-message{margin:0 0 14px;line-height:1.5}
+.att-message{padding:14px;border-radius:12px;background:rgba(21,152,209,.12);color:#F39A4A}
+.att-message strong{display:block;margin-bottom:2px;color:var(--ink)}
+.att-mark-form{display:grid;gap:6px}
+.att-mark-form>p:first-child{margin:0 0 8px}
+.att-mark-button{margin-top:10px;min-height:54px;font-size:1.05rem}
+.att-result{display:grid;justify-items:center;gap:6px;padding:24px 8px 8px;text-align:center;line-height:1.5}
+.att-result-icon{display:grid;place-items:center;width:58px;height:58px;margin-bottom:6px;border-radius:50%;font-size:1.5rem;font-weight:700}
+.att-result strong{font-size:1.15rem;font-weight:700}
+.att-result span:last-child{color:var(--muted);font-size:.9rem}
+.att-result.is-present .att-result-icon{background:rgba(39,182,111,.14);color:var(--success)}
+.att-result.is-pending .att-result-icon{background:rgba(21,152,209,.12);color:#F39A4A}
+.att-result.is-rejected .att-result-icon{background:rgba(239,91,95,.14);color:var(--danger)}
+.att-guest{margin-top:18px}
+.att-or{display:flex;align-items:center;gap:10px;margin:0 0 12px;color:var(--faint,#AAB6BC);font-size:.8rem}
+.att-or::before,.att-or::after{content:"";flex:1;height:1px;background:var(--line)}
+.att-guest-button{margin-top:10px}
+
+@media (max-width:760px){
+  .att-board{grid-template-columns:1fr}
+  .att-board-side{order:-1}
+  .att-create-options{grid-template-columns:1fr}
+  .min-list-side span:first-child{display:none}
+  .att-student{margin-top:8px;padding:22px}
+}
+
+/* One screen, no page scroll: on a laptop or a projector the teacher sees
+   the list and the QR together. The list scrolls inside its own card, its
+   headings staying put, and the QR shrinks to the height that is left. A
+   narrow or very short screen, or the edit form open, and the page scrolls
+   as usual. */
+@media (min-width:901px) and (min-height:560px){
+  .shell:has(.att-session:not(.is-editing)){height:100vh;height:100dvh;min-height:0;overflow:hidden}
+  .main:has(.att-session:not(.is-editing)){display:flex;flex-direction:column;height:calc(100dvh - 56px - env(safe-area-inset-top))}
+  .att-session:not(.is-editing){display:flex;flex-direction:column;flex:1;min-height:0}
+  .att-session:not(.is-editing) .att-board{flex:1;min-height:0;align-items:stretch}
+  .att-session:not(.is-editing) .att-table{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden}
+  .att-session:not(.is-editing) .att-table-scroll{flex:1;min-height:0;overflow:auto}
+  .att-session:not(.is-editing) .att-table thead th{position:sticky;top:0;z-index:1;background:var(--bg-card,#2A2D31)}
+  .att-session:not(.is-editing) .att-board-side{min-height:0}
+  .att-session:not(.is-editing) .att-qr{display:flex;flex-direction:column;justify-content:center;flex:1;min-height:0;padding:16px}
+  .att-session:not(.is-editing) .att-qr-button{display:flex;align-items:center;justify-content:center;flex:1;min-height:0;width:100%}
+  .att-session:not(.is-editing) .att-qr-button img{width:auto;height:auto;max-width:100%;max-height:100%}
+  .att-session:not(.is-editing) .att-side{flex:none;gap:10px;padding:18px}
+}

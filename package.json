@@ -1,0 +1,46 @@
+{
+  "name": "campus-quiz",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mobile-first, integrity-aware campus assessment app",
+  "type": "module",
+  "scripts": {
+    "build:client": "vite build --config client/vite.config.js",
+    "dev": "npm run build:client && node --watch src/server.js",
+    "dev:client": "vite --config client/vite.config.js",
+    "start": "npm run build:client && node src/server.js",
+    "test:regression": "node scripts/regression-check.js",
+    "test:attendance": "node scripts/attendance-check.js",
+    "test": "node --test \"tests/*.test.js\"",
+    "audit": "node scripts/audit.js",
+    "check:http": "node scripts/http-check.js",
+    "check:load": "node scripts/load-check.js",
+    "check:concurrency": "node scripts/concurrency-check.js",
+    "check:redis": "node scripts/redis-lock-check.js",
+    "check:migration": "node scripts/migration-check.js",
+    "db:backup": "node scripts/db-backup.js",
+    "db:restore": "node scripts/db-restore.js"
+  },
+  "dependencies": {
+    "@fontsource-variable/manrope": "^5.3.0",
+    "cloudflare": "^7.1.0",
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "detectincognitojs": "^1.9.0",
+    "dotenv": "^16.6.1",
+    "exceljs": "^4.4.0",
+    "express": "^5.1.0",
+    "ioredis": "^5.11.1",
+    "lucide-react": "^1.48.0",
+    "mongodb": "^7.6.0",
+    "nosleep.js": "^0.12.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "redlock": "^5.0.0-beta.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

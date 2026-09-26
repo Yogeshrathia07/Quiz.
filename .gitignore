@@ -1,0 +1,27 @@
+# Dependencies and generated client build
+node_modules/
+client/dist/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+
+# Local databases, backups, logs, and temporary files
+data/*.sqlite
+data/*.sqlite-*
+data/*.log
+backups/
+*.log
+*.log.*
+*.tmp
+*.temp
+coverage/
+
+# Tool and operating-system files
+.vite/
+.cache/
+.eslintcache
+*.tsbuildinfo
+.DS_Store
+Thumbs.db

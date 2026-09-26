@@ -1,0 +1,1180 @@
+/*
+ * The dark theme. Loaded last, over every other stylesheet, and for every
+ * page - the test pages included. Surfaces step up in lightness for depth
+ * (page, navigation, card, raised, input); blue is the one action colour;
+ * green, red and orange are kept for feedback.
+ */
+:root{
+  color-scheme:dark;
+  --bg-page:#1E2124;--bg-nav:#232629;--bg-card:#2A2D31;--bg-raised:#33373B;--bg-input:#3A3E43;--border:#474C52;
+  --primary:#1598D1;--primary-hover:#1186BA;--primary-pressed:#0D719E;
+  --text:#F7FAFC;--text-2:#AAB6BC;--text-3:#75848B;
+  --ok:#27B66F;--bad:#EF5B5F;--warn:#F39A4A;
+  /* The full stop after the name in the navigation bar, and the tail of the Q in the tab icon */
+  --brand-dot:#FFC53D;
+  /* The older names every stylesheet already uses */
+  --ink:var(--text);--muted:var(--text-2);--faint:var(--text-3);--line:var(--border);--surface:var(--bg-card);--wash:var(--bg-raised);
+  --brand:var(--primary);--brand-dark:var(--primary-hover);--danger:var(--bad);--warning:var(--warn);--success:var(--ok);
+  --r-sm:8px;--r-md:10px;--r-lg:12px;
+  --font:"Manrope Variable",Manrope,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --head-font:var(--font);
+  font-family:var(--font)
+}
+html,body{background:var(--bg-page);color:var(--text)}
+body{font-family:var(--font);font-size:15px;line-height:1.5;letter-spacing:0}
+button,input,select,textarea{font-family:var(--font)}
+.shell{background:var(--bg-page)}
+::selection{background:rgba(21,152,209,.35)}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Typography: semibold, never heavy */
+h1,h2,h3,h4{color:var(--text);font-family:var(--font);letter-spacing:-.015em}
+h1{font-weight:600}
+h2,h3{font-weight:600}
+strong,b{font-weight:650}
+.page-title-row h1,.min-head h1,.ql-head h1,.dashboard-head h1{font-size:clamp(1.9rem,3.2vw,2.6rem);font-weight:600;line-height:1.2;letter-spacing:-.02em}
+.students-toolbar h2{font-size:1.4rem}
+.help,.table-subtext{color:var(--text-2)}
+.page-kicker{margin:0 0 6px;color:var(--primary);font-size:.75rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+[data-area] .eyebrow{color:var(--text-3)}
+
+/* Navigation */
+.site-header.nav-bar{background:var(--bg-nav);border-bottom:1px solid var(--border);box-shadow:none}
+.nav-brand-name{color:var(--text);font-family:var(--font);font-weight:800}
+.nav-brand-dot{color:var(--brand-dot)}
+.nav-links a{color:var(--text-3);font-weight:600;font-size:.9rem}
+.nav-links a:hover{color:var(--text)}
+.nav-links a.is-active{color:var(--text)}
+.nav-links a.is-active::after{left:50%;right:auto;width:22px;height:2px;border-radius:2px;background:var(--primary);transform:translateX(-50%)}
+.nav-account-button{background:var(--bg-raised);border-color:var(--border);color:var(--text)}
+.nav-account-button:hover,.nav-account-button[aria-expanded="true"]{background:var(--bg-input);border-color:#5A6066}
+.nav-avatar{background:var(--primary);color:#fff;font-weight:700}
+.nav-caret{color:var(--text-2)}
+.nav-dropdown{background:var(--bg-raised);border:1px solid var(--border);color:var(--text);box-shadow:0 16px 40px rgba(0,0,0,.45)}
+.nav-dropdown-who{border-color:var(--border)}
+.nav-dropdown-who span{color:var(--text-2)}
+.nav-dropdown button{color:var(--text);font-weight:600}
+.nav-dropdown button:hover{background:var(--bg-input)}
+.nav-dropdown button.is-danger{color:var(--bad)}
+.nav-dropdown button.is-danger:hover{background:rgba(239,91,95,.12)}
+.nav-menu-button{background:var(--bg-raised);border-color:var(--border);color:var(--text)}
+.nav-panel{background:var(--bg-nav);border-color:var(--border)}
+.nav-panel nav a{color:var(--text-2)}
+.nav-panel nav a.is-active{background:rgba(21,152,209,.12);color:var(--text);box-shadow:inset 3px 0 0 var(--primary)}
+.nav-panel-account{background:var(--bg-raised)}
+.nav-backdrop{background:rgba(14,15,17,.7)}
+.dashboard-head{background:var(--bg-page);box-shadow:0 1px 0 var(--border)}
+
+/* Surfaces */
+.card,.form-section,.join-card,.success-card,.question-editor,.exam-card,.min-list,.att-qr,.att-side,.att-table,.att-create,.att-student,
+.students-card,.overview-panel,.qr-panel,.sign-in-card,.guest-home,.skeleton-card,.test-id-card,.away-gate-card,.confirm-gate-card,.lock-card{
+  background:var(--bg-card);color:var(--text);border:0;border-radius:var(--r-lg);box-shadow:0 1px 2px rgba(0,0,0,.25)
+}
+.student-analysis-sheet,.qr-share-sheet{background:var(--bg-card);color:var(--text);border:0;border-radius:var(--r-lg);box-shadow:0 24px 60px rgba(0,0,0,.55)}
+.qr-preview-overlay{background:rgba(14,15,17,.78);backdrop-filter:none}
+.menu-items,.menu-list{background:var(--bg-raised);border:1px solid var(--border);border-radius:var(--r-md);box-shadow:0 16px 40px rgba(0,0,0,.45)}
+/* Menus: roomy rows, an icon on each, and the red actions set apart by a line. */
+.menu-items.menu-floating{min-width:224px;padding:6px;border-radius:14px}
+.menu-items button{position:relative;display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:9px;color:var(--text);font-size:.84rem;font-weight:600}
+.menu-items button svg{flex:0 0 auto;color:var(--text-2)}
+.menu-items button:hover{background:var(--bg-input)}
+.menu-items button:hover svg{color:var(--text)}
+.menu-items button.danger,.menu-items button.danger svg{color:var(--bad)}
+.menu-items button.danger:hover{background:rgba(239,91,95,.12)}
+/* Each action in the colour of what it does (ActionMenu `tone`): green keeps
+   or approves, blue adjusts, amber starts over - red (danger) wipes. */
+.menu-items button.is-ok,.menu-items button.is-ok svg{color:#43CF88}
+.menu-items button.is-ok:hover{background:rgba(39,182,111,.12)}
+.menu-items button.is-info,.menu-items button.is-info svg{color:#3DB3E6}
+.menu-items button.is-info:hover{background:rgba(21,152,209,.12)}
+.menu-items button.is-warn,.menu-items button.is-warn svg{color:#F5A45C}
+.menu-items button.is-warn:hover{background:rgba(243,154,74,.12)}
+.menu-items button:not(.danger)+button.danger{margin-top:9px}
+.menu-items button:not(.danger)+button.danger::before{content:"";position:absolute;left:8px;right:8px;top:-5px;height:1px;background:var(--border)}
+.notice{background:var(--bg-raised);border:1px solid var(--border);color:#D5DEE2;border-radius:var(--r-md)}
+.notice strong{color:var(--text)}
+.notice.danger{background:rgba(239,91,95,.1);border-color:rgba(239,91,95,.35);color:#FFB1B3}
+.notice.success{background:rgba(39,182,111,.1);border-color:rgba(39,182,111,.35);color:#9BE6C0}
+.schedule-banner{background:var(--bg-raised);border:1px solid var(--border);color:var(--text)}
+.schedule-banner span{color:var(--text-2)}
+.empty{color:var(--text-2)}
+/* Messages: plain white frosted glass with no outline, so the edges fade
+   into the page, which stays faintly visible behind.
+   One look for every kind; only a warning's triangle is red.
+   Phones get the full width; wider screens a centred strip. */
+.toast{--toast-shift:10px;display:flex;align-items:center;gap:12px;left:12px;right:12px;width:auto;max-width:560px;margin:0 auto;transform:none;padding:12px 16px;background:rgba(255,255,255,.16);backdrop-filter:blur(20px) saturate(140%);color:#fff;border:0;border-radius:14px;box-shadow:0 10px 36px rgba(0,0,0,.22);font-size:.9rem;line-height:1.45;animation:toast-in .28s ease-out both}
+.toast.is-leaving{animation:toast-out 900ms ease-in forwards}
+.toast-icon{flex:0 0 auto;color:#fff}
+/* A warning's triangle (and an error's mark) is red; everything else stays white. */
+.toast.is-warn .toast-icon,.toast.is-error .toast-icon{color:var(--bad)}
+.toast-body{flex:1;min-width:0;display:grid;gap:1px}
+.toast-title{font-size:.92rem;font-weight:700;line-height:1.35}
+.toast-text{font-size:.85rem;line-height:1.4;color:rgba(255,255,255,.86)}
+.toast-text:only-child{font-size:.9rem;color:#fff}
+/* During a test every warning becomes a full-width glass strip. A very light
+   scrim separates it from the paper without hiding the student's work. */
+.shell.is-exam~.toast{left:0;right:0;width:100%;max-width:none;margin:0;padding:15px max(18px,calc((100vw - 720px)/2 + 18px));border-radius:0 0 18px 18px;background:rgba(42,45,49,.72);backdrop-filter:blur(22px) saturate(135%);box-shadow:0 12px 34px rgba(0,0,0,.24);--toast-shift:-10px}
+body:has(.shell.is-exam~.toast)::before{content:"";position:fixed;inset:0;z-index:1250;pointer-events:none;background:rgba(14,15,17,.2);backdrop-filter:blur(2px);animation:toast-scrim-in .2s ease-out both}
+@keyframes toast-scrim-in{from{opacity:0}}
+@supports not (backdrop-filter:blur(1px)){.toast{background:#4A4E53}}
+/* Above dialogs and their blurred backdrop (200) and floating menus (1100): a
+   message said while a dialog is open must be seen, not hidden behind the blur. */
+.toast{z-index:1300}
+@keyframes toast-in{from{opacity:0;translate:0 var(--toast-shift)}}
+@keyframes toast-out{to{opacity:0;translate:0 var(--toast-shift)}}
+@media (prefers-reduced-motion:reduce){.toast{--toast-shift:0px}}
+.update-banner{background:var(--bg-raised);color:var(--text);border:1px solid var(--border)}
+
+/* Inputs */
+.text-input,.text-area,.select,select.text-input,textarea.text-input{background:var(--bg-input);color:var(--text);border:1px solid var(--border);border-radius:var(--r-sm);box-shadow:none}
+.text-input::placeholder,.text-area::placeholder{color:var(--text-3)}
+.text-input:hover,.text-area:hover,.select:hover{border-color:#565C62}
+.text-input:focus,.text-area:focus,.select:focus,.text-input:focus-visible{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(21,152,209,.25)}
+.select{padding-right:32px}
+.field-label{color:var(--text-2);font-weight:600}
+.stepper{background:var(--bg-input);border-color:var(--border)}
+.stepper button{background:var(--bg-raised);color:var(--text)}
+.stepper button:hover:not(:disabled){background:#43474C;color:var(--text)}
+.switch{background:#50555B}
+.switch-row.is-on .switch,.toggle-option.is-on .switch{background:var(--primary)}
+.switch-row.is-on .switch::after{background:#fff}
+input[type="checkbox"],input[type="radio"]{accent-color:var(--primary)}
+
+/* Buttons */
+.button{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 16px;border:1px solid transparent;border-radius:var(--r-sm);font-size:.9rem;font-weight:600;letter-spacing:0;box-shadow:none;transition:background .15s,border-color .15s,color .15s,box-shadow .15s}
+.button:focus-visible,.link-button:focus-visible,.icon-button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.button:active:not(:disabled){transform:none}
+.button-primary{background:var(--primary);color:#fff;border-color:var(--primary);box-shadow:0 4px 14px rgba(21,152,209,.22)}
+.button-primary:hover:not(:disabled){background:var(--primary-hover);border-color:var(--primary-hover);color:#fff}
+.button-primary:active:not(:disabled){background:var(--primary-pressed);border-color:var(--primary-pressed)}
+.button-tinted{background:rgba(21,152,209,.12);color:#35AEE3;border-color:rgba(21,152,209,.45)}
+.button-tinted:hover:not(:disabled){background:#1488BC;color:#5CC1EC;border-color:rgba(21,152,209,.7)}
+.button-tinted:active:not(:disabled){background:rgba(21,152,209,.28)}
+.button-secondary,.notice .button-secondary,.table-wrap .button-secondary,.join-card .button-secondary,.success-card .button-secondary,
+.link-box .button-secondary,.dashboard-actions .button-secondary,.overview-actions .button-secondary,.qr-share-sheet .button-secondary,.nav-panel-actions .button-secondary{
+  background:transparent;color:var(--text);border-color:var(--border)
+}
+.button-secondary:hover:not(:disabled),.overview-actions .button-secondary:hover:not(:disabled),.test-list-row .button-secondary:hover:not(:disabled),
+.dashboard-actions .button-secondary:hover:not(:disabled),.nav-panel-actions .button-secondary:hover{background:var(--bg-raised);color:var(--text);border-color:#5A6066}
+.button-secondary svg{color:var(--text-2)}
+.button-danger{background:rgba(239,91,95,.1);color:var(--bad);border-color:rgba(239,91,95,.35)}
+.button-danger:hover:not(:disabled){background:rgba(239,91,95,.18);color:#FF8285;border-color:rgba(239,91,95,.6)}
+.button-danger-solid{background:var(--bad);color:#fff;border-color:var(--bad)}
+.button-danger-solid:hover:not(:disabled){background:#D94A4E;border-color:#D94A4E}
+.button-quiet{background:transparent;color:var(--text-2);border-color:transparent}
+.button-quiet:hover:not(:disabled){background:var(--bg-raised);color:var(--text)}
+.button-small{min-height:34px;padding:0 12px;font-size:.82rem}
+.button:disabled,.button[disabled]{background:#313438;color:var(--text-3);border-color:var(--border);box-shadow:none;cursor:not-allowed;opacity:.7}
+.icon-button{width:40px;min-width:40px;height:40px;min-height:40px;padding:0;background:var(--bg-raised);color:var(--text-2);border:1px solid var(--border);border-radius:var(--r-sm)}
+.icon-button:hover:not(:disabled){background:var(--bg-input);color:var(--text);border-color:#5A6066}
+.icon-button.is-on{background:rgba(21,152,209,.14);color:var(--primary);border-color:rgba(21,152,209,.5)}
+.link-button{color:var(--primary);font-weight:600;text-decoration:none}
+.link-button:hover{color:#35AEE3;text-decoration:underline}
+a{color:var(--primary)}
+.quick-picks button{background:var(--bg-raised);color:var(--text-2);border:1px solid var(--border)}
+.quick-picks button:hover{border-color:#5A6066;color:var(--text)}
+.quick-picks button.is-chosen,.quick-picks button.is-on{background:rgba(21,152,209,.14);border-color:var(--primary);color:var(--text)}
+.segmented,.dashboard-tabs,.mode-switch,.activity-filter{background:var(--bg-card);border:1px solid var(--border);box-shadow:none}
+.segmented button,.dashboard-tabs button,.mode-switch button,.activity-filter button{color:var(--text-2)}
+.segmented button:hover,.dashboard-tabs button:hover{color:var(--text)}
+.segmented button.is-on,.segmented button[aria-checked="true"],.dashboard-tabs button[aria-selected="true"],.mode-switch button[aria-selected="true"],.activity-filter button.is-on{background:var(--primary);color:#fff;box-shadow:none}
+.tab-count{background:var(--bg-input);color:var(--text-2)}
+.dashboard-tabs button[aria-selected="true"] .tab-count{background:rgba(255,255,255,.2);color:#fff}
+.tab-count .tab-badge{background:var(--warn)}
+.choice-card{background:var(--bg-raised);border-color:var(--border);color:var(--text)}
+.choice-card.is-on,.apply-choice.is-on{background:rgba(21,152,209,.1);border-color:var(--primary);box-shadow:0 0 0 1px var(--primary)}
+
+/* Status badges: compact, soft background, never a big pill */
+.badge,.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 8px;border-radius:6px;background:var(--bg-input);color:var(--text-2);font-size:.75rem;font-weight:650;line-height:1.35;white-space:nowrap}
+.pill::before{display:none}
+.badge.is-success,.pill.success{background:rgba(39,182,111,.14);color:#3CCB82}
+.badge.is-danger,.pill.danger{background:rgba(239,91,95,.14);color:#FF7C7F}
+.badge.is-warn,.pill.warn{background:rgba(243,154,74,.14);color:var(--warn)}
+.badge.is-info{background:rgba(21,152,209,.14);color:#35AEE3}
+.badge.is-neutral,.pill.muted{background:var(--bg-input);color:var(--text-2)}
+.badge.is-live{background:rgba(21,152,209,.14);color:#35AEE3}
+.badge.is-live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px rgba(39,182,111,.2)}
+.test-list-row .pill.success,.test-list-row .pill.warn,.test-list-row .pill.danger,.test-list-row .pill.muted{background:none}
+
+/* Tables */
+.live-table th,.att-table th{color:var(--text-3);font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.live-table td,.att-table td{border-color:var(--border)}
+.students-card .live-table tbody tr:hover{background:#2F3236}
+.students-card .live-table thead th{background:var(--bg-card)}
+.live-table tbody tr:focus-visible{box-shadow:inset 3px 0 0 var(--primary);background:rgba(21,152,209,.08)}
+.person-avatar{background:rgba(21,152,209,.16);color:#7CCBEF}
+kbd{background:var(--bg-raised);border-color:var(--border);color:var(--text-2)}
+
+/* Progress */
+.progress,.exam-timer-bar{background:var(--bg-input)}
+.progress>span,.exam-timer-bar>span{background:var(--primary)}
+
+/* Skeletons on dark */
+[data-area] .skeleton span{background:linear-gradient(90deg,#2F3236,#3A3E43,#2F3236);background-size:200% 100%}
+[data-area] .skeleton-card span{background:linear-gradient(90deg,#33373B,#41454A,#33373B);background-size:200% 100%}
+
+/* ------------------------------------------------------ My quizzes page */
+.ql-page{display:grid;gap:24px}
+.ql-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px}
+.ql-head h1{margin:0}
+.ql-head p:not(.page-kicker){margin:8px 0 0;color:var(--text-2);font-size:1rem}
+.ql-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
+.ql-stat{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"icon value" "icon label";align-items:center;column-gap:14px;padding:16px 18px;border:0;border-radius:var(--r-lg);background:var(--bg-card)}
+.ql-stat-icon{grid-area:icon;display:grid;place-items:center;width:40px;height:40px;border-radius:var(--r-sm)}
+.ql-stat-icon.is-blue{background:rgba(21,152,209,.14);color:var(--primary)}
+.ql-stat-icon.is-green{background:rgba(39,182,111,.14);color:var(--ok)}
+.ql-stat-icon.is-orange{background:rgba(243,154,74,.14);color:var(--warn)}
+.ql-stat-label{grid-area:label;color:var(--text-2);font-size:.82rem;font-weight:600}
+.ql-stat-value{grid-area:value;color:var(--text);font-size:1.5rem;font-weight:650;line-height:1.2;font-variant-numeric:tabular-nums}
+
+.ql-toolbar{display:flex;align-items:center;gap:12px}
+.ql-search{position:relative;flex:1 1 auto;min-width:0}
+.ql-search svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--text-3);pointer-events:none}
+.ql-search .text-input{width:100%;height:44px;padding-left:42px}
+.ql-filters{display:flex;gap:12px}
+.ql-select .select{height:44px;min-width:150px}
+.ql-filter-toggle{display:none}
+
+.ql-list{display:grid;gap:16px}
+/* One row per quiz: what it is, where it stands, how it went, what to do */
+.ql-list{gap:10px}
+.ql-card{display:grid;grid-template-columns:minmax(0,1.7fr) 110px minmax(170px,1fr) 80px auto;align-items:center;gap:24px;padding:16px 20px;border:0;border-radius:var(--r-lg);background:var(--bg-card);transition:background .15s}
+.ql-card .badge{justify-self:start}
+.ql-progress{display:grid;gap:8px;min-width:0}
+.ql-progress-text{color:var(--text-2);font-size:.85rem;white-space:nowrap}
+.ql-progress-text strong{color:var(--text);font-size:1rem;font-weight:650}
+.ql-progress-text em{margin-left:8px;color:var(--warn);font-style:normal;font-weight:600}
+.ql-meter-track{display:block;height:6px}
+.ql-average{display:grid;justify-items:end}
+.ql-average strong{color:var(--text);font-size:1.15rem;font-weight:650;font-variant-numeric:tabular-nums}
+.ql-average span{color:var(--text-3);font-size:.78rem}
+.ql-card:hover{background:#2E3135}
+.ql-card.is-archived{opacity:.7}
+.ql-card-title{min-width:0}
+.ql-card-title h2{margin:0;font-size:1.05rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;line-height:1.35}
+.ql-card-title h2 a{color:var(--text);text-decoration:none}
+.ql-card-title h2 a:hover{color:#35AEE3}
+.ql-card-title p{margin:3px 0 0;color:var(--text-3);font-size:.8rem}
+.ql-meter-track{flex:1;height:6px;border-radius:3px;background:var(--bg-input);overflow:hidden}
+.ql-meter-fill{display:block;height:100%;border-radius:4px;background:var(--primary);transform-origin:left;animation:ql-grow .7s cubic-bezier(.2,.8,.2,1)}
+.ql-meter-fill.is-full{background:var(--ok)}
+@keyframes ql-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+.ql-actions{display:flex;align-items:center;gap:8px}
+.ql-empty,.ql-error{display:grid;justify-items:center;gap:10px;padding:48px 24px;border:1px dashed var(--border);border-radius:var(--r-lg);background:var(--bg-card);color:var(--text-2);text-align:center}
+.ql-empty svg{color:var(--text-3)}
+.ql-empty strong,.ql-error strong{color:var(--text);font-size:1.1rem;font-weight:600}
+.ql-empty p,.ql-error p{max-width:420px;margin:0}
+.ql-error{border-style:solid;border-color:rgba(239,91,95,.35)}
+
+/* Dialogs */
+.dialog{display:grid;gap:14px;max-width:460px}
+.dialog h1{margin:0;font-size:1.35rem}
+.dialog p{margin:0;color:var(--text-2);line-height:1.55}
+.check-row{display:flex;align-items:center;gap:10px;color:var(--text);font-size:.92rem}
+.dialog-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:6px}
+.student-analysis-sheet:has(.dialog){width:min(100%,520px)}
+
+/* Dashboard numbers on the dark cards */
+[data-area] .dash-stats>div{background:var(--bg-raised);border:0}
+[data-area] .dash-stats strong{color:var(--text);font-family:var(--font);font-weight:650}
+[data-area] .dash-stats span{color:var(--text-2)}
+[data-area] .dash-stats>div.is-attention{background:rgba(243,154,74,.1);border-color:rgba(243,154,74,.35);box-shadow:none}
+[data-area] .dash-stats>div.is-attention strong{color:var(--warn)}
+[data-area] .dash-settings{color:var(--text-2)}
+[data-area] .dash-code,[data-area] .test-code-small{color:var(--text-3)}
+.status-dot.is-live{background:var(--ok)}
+.qr-panel .qr,.success-card .qr{background:#fff;border-color:var(--border)}
+
+/* Tablet */
+@media (max-width:1100px){
+  .ql-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ql-card{grid-template-columns:minmax(0,1fr) auto;row-gap:14px}
+  .ql-progress{grid-column:1}
+  .ql-average{grid-column:2;grid-row:2}
+  .ql-actions{grid-column:1/-1;justify-content:flex-end}
+}
+/* Phone */
+@media (max-width:760px){
+  .ql-head{flex-direction:column;align-items:stretch;gap:16px}
+  .ql-head .button{width:100%}
+  .ql-stats{grid-template-columns:1fr;gap:12px}
+  .ql-toolbar{flex-wrap:wrap}
+  .ql-filter-toggle{display:inline-flex}
+  .ql-filters{display:none;flex:1 1 100%;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--border);border-radius:var(--r-lg);background:var(--bg-card)}
+  .ql-toolbar.is-open .ql-filters{display:flex}
+  .ql-select .select{width:100%}
+  .ql-card{padding:14px 16px;gap:12px}
+  .ql-actions{display:flex}
+  .ql-actions .button{flex:1}
+  .page-title-row h1,.min-head h1,.ql-head h1,.dashboard-head h1{font-size:1.75rem}
+}
+
+/* Waiting is a warning state: orange, not the action blue */
+.dot.is-pending,.att-status.is-pending::before{background:var(--warn)}
+
+/* ---------------------------------------------------------- Test pages */
+.shell.is-exam,body:has(.shell.is-exam){background:var(--bg-page)}
+.exam-screen{--teal:var(--primary);--teal-soft:rgba(21,152,209,.2);--accent:var(--primary);--rule:var(--border);color:var(--text)}
+.exam-heading{color:var(--text);font-weight:600}
+.exam-timer-card{color:var(--text)}
+.exam-timer-label,.exam-sub{color:var(--text-2)}
+.exam-timer-card.is-low .exam-timer-value{color:var(--warn)}
+.exam-timer-card.is-critical .exam-timer-value{color:var(--bad)}
+.exam-timer-bar{height:4px;border-radius:2px;background:var(--bg-input)}
+.exam-timer-bar span{background:var(--primary)}
+.exam-timer-card.is-critical .exam-timer-bar span{background:var(--bad)}
+.exam-integrity-badge{background:rgba(243,154,74,.14);color:var(--warn)}
+.q-card{background:var(--bg-card);border:0;border-radius:var(--r-lg);box-shadow:none}
+/* A long question scrolls inside this box. Rounding the box too keeps the card
+   rounded at its edges while it is scrolled, not cut off square. */
+.exam-body{border-radius:var(--r-lg)}
+.q-prompt{color:var(--text);font-weight:600}
+.q-count{color:var(--text)}
+.q-hint,.q-state{color:var(--text-3)}
+.q-state.is-saved{color:var(--ok)}
+/* Round like the buttons: a one-line option is a pill (the radius is over half
+   its height), a longer one keeps the same round ends. The letter sits in the
+   middle of the left end. */
+.q-option{background:var(--bg-input);border:1px solid var(--border);border-radius:28px;padding-left:11px;padding-right:18px;color:var(--text)}
+@media (max-width:560px){.q-option{padding-left:9px;padding-right:16px}}
+.q-option:hover:not(:disabled){background:#404449;border-color:#5A6066}
+.q-letter{background:var(--bg-raised);color:var(--text-2)}
+.q-option.is-selected{background:rgba(21,152,209,.14);border-color:var(--primary);box-shadow:0 0 0 1px var(--primary);color:var(--text)}
+.q-option.is-selected .q-letter{background:var(--primary);color:#fff}
+.q-text{background:var(--bg-input);border-color:var(--border);color:var(--text)}
+.q-text[readonly]{background:var(--bg-raised);color:var(--text-2)}
+.q-clear{color:var(--text-2)}
+.q-dot{color:var(--text-2)}
+.q-dot:hover{background:var(--bg-raised)}
+.q-dot.is-done{background:rgba(21,152,209,.2);color:#7CCBEF}
+.q-dot.is-current,.q-dot.is-current.is-done{background:var(--primary);color:#fff;box-shadow:none}
+.q-dot.is-timed-out{background:rgba(239,91,95,.16);color:var(--bad)}
+.exam-arrow{background:var(--primary);color:#fff;border-radius:var(--r-sm)}
+.exam-arrow:hover:not(:disabled){background:var(--primary-hover)}
+.exam-arrow:disabled{background:var(--bg-raised);color:var(--text-3)}
+.exam-submit{background:transparent;color:var(--primary);border:1.5px solid var(--primary);border-radius:var(--r-sm)}
+.exam-submit:hover:not(:disabled){background:rgba(21,152,209,.14);color:#35AEE3}
+.strict-foot .exam-submit:not(.is-secondary){background:var(--primary);color:#fff}
+.strict-foot .exam-submit:not(.is-secondary):hover:not(:disabled){background:var(--primary-hover);border-color:var(--primary-hover)}
+.question-clock,.exam-clock.is-question{background:var(--bg-raised);color:var(--text);border:1px solid var(--border)}
+.connection-strip{background:var(--bg-raised);color:var(--text-2);border-color:var(--border)}
+.connection-dot{background:var(--ok)}
+.connection-strip.is-down .connection-dot{background:var(--bad)}
+.screenshot-shield,.exam-body .screenshot-shield{background:var(--bg-raised);color:var(--text)}
+.away-gate{background:var(--bg-page)}
+.away-gate .eyebrow{color:var(--text-3)}
+.confirm-gate{background:rgba(14,15,17,.7)}
+.soft-lock{background:rgba(14,15,17,.96)}
+.strict-switching{background:var(--bg-card);color:var(--text-2)}
+/* Moving to the next question usually takes a moment. The closed question is
+   only dimmed at once (and takes no more taps); "Opening the next question…"
+   covers it only if the move is slow, so a quick one looks instant. */
+.exam-body .strict-switching{background:transparent;color:transparent;animation:strict-wait .85s linear forwards}
+@keyframes strict-wait{
+  0%{background:rgba(42,45,49,0);color:transparent}
+  18%,70%{background:rgba(42,45,49,.4);color:transparent}
+  100%{background:rgba(42,45,49,1);color:var(--text-2)}
+}
+.start-countdown,.join-card>p.start-countdown,.join-card>p.start-countdown:not(.eyebrow):not(.help){color:var(--text)}
+.join-card .eyebrow,.lock-card .eyebrow{color:var(--primary)}
+.ql-actions .button{white-space:nowrap}
+@media (max-width:760px){.ql-actions .button{padding:0 10px}}
+
+/* Quiz rows without score or bar: title · status · submitted · actions */
+.ql-card{grid-template-columns:minmax(0,1fr) 110px 190px auto}
+p.ql-progress-text{margin:0}
+@media (max-width:1100px){.ql-card{grid-template-columns:minmax(0,1fr) auto}.ql-progress-text{grid-column:1}.ql-actions{grid-column:1/-1}}
+@media (max-width:760px){.ql-card{grid-template-columns:minmax(0,1fr) auto}.ql-progress-text{grid-column:1/-1}}
+
+/* User pop-up: actions beside the name, and a placeholder while their tests load */
+.user-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:8px}
+.user-head h1{margin:2px 0 4px}
+.user-head p{margin:0;color:var(--text-2)}
+.user-actions{display:flex;gap:8px;flex-wrap:wrap}
+.user-loading{display:grid;gap:12px;margin-top:18px}
+.user-loading-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.user-loading-tiles span,.user-loading-row{display:block;border-radius:var(--r-md);background:linear-gradient(90deg,#33373B,#41454A,#33373B);background-size:200% 100%;animation:skeleton-shine 1.2s linear infinite}
+.user-loading-tiles span{height:64px}
+.user-loading-row{height:44px}
+@keyframes skeleton-shine{from{background-position:200% 0}to{background-position:-200% 0}}
+@media (max-width:760px){.user-actions{width:100%}.user-actions .button{flex:1}.user-loading-tiles{grid-template-columns:1fr 1fr}}
+
+/* ------------------------------------------------------------ Phone pass */
+@media (max-width:760px){
+  /* My quizzes: the four totals as a compact 2 × 2, the quiz rows tighter */
+  .ql-page{gap:16px}
+  .ql-head p:not(.page-kicker){font-size:.9rem}
+  .ql-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .ql-stat{grid-template-columns:1fr;grid-template-areas:"value" "label";padding:12px 14px}
+  .ql-stat-icon{display:none}
+  .ql-stat-value{font-size:1.3rem}
+  .ql-card{grid-template-columns:minmax(0,1fr) auto;row-gap:10px}
+  .ql-card .badge{justify-self:end}
+  .ql-progress-text{grid-column:1;align-self:center;font-size:.85rem}
+  .ql-actions{grid-column:2;justify-content:flex-end}
+  .ql-actions .button{flex:0 0 auto;min-height:40px}
+
+  /* Dashboard tables: no empty gap above the search, no row-height toggle, long emails wrap */
+  [data-area] .students-toolbar>div:first-child{flex:0 0 auto}
+  .students-toolbar .icon-button{display:none}
+  .person-detail{min-width:0}
+  .person-detail .table-subtext,.live-table td .person-detail .table-subtext{white-space:normal;overflow-wrap:anywhere}
+
+  /* Users: filters in one scrollable line; a person's card has no dangling divider */
+  .users-filters{gap:8px}
+  .users-filters .segmented{display:flex;flex-wrap:nowrap;max-width:100%;overflow-x:auto;scrollbar-width:none}
+  .users-filters .segmented::-webkit-scrollbar{display:none}
+  .users-filters .segmented button{flex:0 0 auto;white-space:nowrap}
+  .live-table tr:not(.is-open) td[data-label="Person"]{border-bottom:0;padding-bottom:0;margin-bottom:0}
+
+  /* User pop-up: both actions on one line */
+  .user-head{gap:12px}
+  .user-actions .button{flex:1 1 0;min-width:0;padding:0 10px;white-space:nowrap}
+}
+.ql-meta-part{white-space:nowrap}
+@media (max-width:760px){.ql-card-title h2{white-space:normal;overflow:visible}.ql-card .badge{align-self:start}}
+
+/* -------------------------------------------- Students and Results tables */
+/* Toolbar: one line, every control the same height */
+.students-toolbar{align-items:center;gap:16px;padding-bottom:14px}
+.students-toolbar h2{margin:0;font-size:1.2rem}
+.students-toolbar p{margin:2px 0 0;font-size:.82rem}
+.students-toolbar .controls{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.students-toolbar .controls .text-input,.students-toolbar .controls .select,.students-toolbar .controls .button{height:40px;min-height:40px}
+.students-toolbar .controls .text-input{width:240px}
+.students-toolbar .controls .select{width:auto;min-width:150px}
+.students-toolbar .controls .button{padding:0 14px;font-size:.86rem}
+/* (menu button uses the shared tinted style) */
+
+/* Rows: one line each. Student rows combine the related state badges so the
+   wide desktop card reads as one compact summary instead of six islands. */
+.students-card .live-table th{padding:10px 12px}
+.student-accordion-table{table-layout:fixed}
+.students-card .student-accordion-table th:first-child,.students-card .student-accordion-table .xrow>td:first-child{width:34%}
+.students-card .student-accordion-table th:nth-child(2),.students-card .student-accordion-table .xrow>td:nth-child(2){width:auto}
+.students-card .student-accordion-table th:nth-child(3),.students-card .student-accordion-table .xrow>td:nth-child(3){width:88px}
+.students-card .student-accordion-table th:last-child,.students-card .student-accordion-table .xrow>td:last-child{width:150px;padding-right:12px}
+.students-card .student-accordion-table .xrow-details>td{width:auto;white-space:normal;padding-right:18px}
+.student-status-cluster{gap:6px}
+.xrow{cursor:pointer}
+.xrow>td{padding-top:8px!important;padding-bottom:8px!important;vertical-align:middle}
+.xrow:hover>td,.xrow.is-open>td{background:#2F3236}
+.xrow:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.xrow .person-avatar{width:28px;height:28px;font-size:.66rem}
+.xrow .person-detail{flex-wrap:nowrap;gap:8px}
+.xrow .person-detail strong{font-size:.9rem;white-space:nowrap}
+.xrow .person-detail .table-subtext{font-size:.78rem;white-space:nowrap}
+.row-caret{flex:0 0 auto;margin-left:2px;color:var(--text-3);transition:transform .15s}
+.xrow.is-open .row-caret{transform:rotate(180deg);color:var(--text)}
+.cell-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.cell-muted{color:var(--text-3);font-size:.84rem;white-space:nowrap}
+.cell-num{text-align:right;font-variant-numeric:tabular-nums}
+th.cell-num{text-align:right}
+.xrow .table-actions{justify-content:flex-end;gap:6px;flex-wrap:nowrap}
+.xrow .icon-button{width:32px;min-width:32px;height:32px;min-height:32px}
+.xrow .button-small{min-height:32px;height:32px}
+
+/* Signs: a small icon, the detail on hover */
+.issue{display:inline-flex;align-items:center;gap:3px;height:22px;padding:0 6px;border-radius:6px;font-size:.74rem;font-weight:650;cursor:help;white-space:nowrap}
+.issue.is-warn{background:rgba(243,154,74,.14);color:var(--warn)}
+.issue.is-danger{background:rgba(239,91,95,.14);color:#FF7C7F}
+.issue.is-ok{background:rgba(39,182,111,.12);color:#3CCB82;padding:0 5px}
+.issue svg{flex:0 0 auto}
+
+/* Actions appear on hover, keyboard focus, or while the row is open (always, on touch screens) */
+@media (hover:hover) and (min-width:761px){
+  .xrow .xrow-actions .table-actions{opacity:0;transition:opacity .12s}
+  .xrow:hover .xrow-actions .table-actions,.xrow:focus-within .xrow-actions .table-actions,.xrow.is-open .xrow-actions .table-actions{opacity:1}
+}
+
+/* Opened row: keep the facts together even on an ultrawide display. */
+.xrow-details>td{padding:6px 18px 16px!important;background:#2F3236;border-top:0!important}
+.detail-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 28px;width:100%;max-width:1080px;margin:0 auto}
+.detail-grid dt{color:var(--text-3);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.detail-grid dd{margin:2px 0 0;color:var(--text);font-size:.86rem;overflow-wrap:anywhere}
+
+@media (max-width:760px){
+  .students-toolbar .controls{width:100%}
+  .students-toolbar .controls .text-input,.students-toolbar .controls .select{width:100%;flex:1 1 100%}
+  .students-toolbar .controls .action-menu,.students-toolbar .controls>.button{flex:1 1 0}
+  .students-toolbar .controls .action-menu .button{width:100%}
+  .students-card .student-accordion-table .xrow>td:first-child,
+  .students-card .student-accordion-table .xrow>td:nth-child(2),
+  .students-card .student-accordion-table .xrow>td:nth-child(3),
+  .students-card .student-accordion-table .xrow>td:last-child{width:100%}
+  .live-table tr.xrow{margin-bottom:0}
+  .live-table tr.xrow.is-open{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom:0}
+  .live-table tr.xrow-details{margin:0 0 10px;padding:0 12px 12px;border:1px solid var(--border);border-top:0;border-radius:0 0 14px 14px;background:#2F3236}
+  .live-table tr.xrow-details>td{display:block;padding:8px 0 0!important;background:transparent}
+  .live-table tr.xrow-details>td::before{display:none}
+  .live-table tr.xrow+tr.xrow{margin-top:10px}
+  .detail-grid{grid-template-columns:1fr;gap:0}
+  .detail-grid>div{display:grid;grid-template-columns:minmax(88px,32%) minmax(0,1fr);gap:10px;padding:8px 0;border-top:1px solid var(--border)}
+  .detail-grid>div:first-child{border-top:0}
+  .detail-grid dt{padding-top:2px}
+  .detail-grid dd{margin:0}
+  .xrow .person-detail{flex-wrap:wrap;gap:2px 8px}
+}
+.cell-num .cell-row{justify-content:flex-end}
+.xrow-details>td,.detail-grid,.detail-grid dt,.detail-grid dd{text-align:left}
+.detail-grid>div{min-width:0}
+.detail-grid dd{white-space:normal;overflow-wrap:anywhere}
+@media (max-width:760px){
+  .students-toolbar{align-items:stretch}
+  .students-toolbar .controls{flex-direction:row;flex-wrap:wrap}
+  .students-toolbar .controls .action-menu,.students-toolbar .controls>.button{flex:1 1 0;min-width:0}
+  .students-toolbar .controls .action-menu>.button{width:100%;justify-content:center}
+  .xrow .cell-num{text-align:left}
+  .xrow .cell-num .cell-row{justify-content:flex-start}
+}
+@media (max-width:760px){.live-table tr.xrow-details>td{display:block!important}}
+
+/* A student's card on a phone. The status and its signs (Guest, locked, left
+   the test…) sit in an even grid - every badge the same width and height -
+   rather than stacking at whatever width each word needs. The card opens and
+   closes with a tap anywhere on it, so it has no arrow; its menu sits at the
+   top right, in the name row, instead of alone on a line of its own. */
+@media (max-width:760px){
+  .student-accordion-table .student-status-cluster{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:6px;width:100%}
+  .student-accordion-table .student-status-cluster>.pill,
+  .student-accordion-table .student-status-cluster>.issue{width:100%;min-width:0;height:28px;padding:0 6px;justify-content:center}
+  .live-table tr.xrow .row-caret{display:none}
+  .live-table tr.xrow{position:relative}
+  .live-table tr.xrow:has(.action-menu)>td[data-label="Student"]{padding-right:48px}
+  .live-table tr.xrow .xrow-actions .action-menu{position:absolute;top:13px;right:12px}
+  .live-table tr.xrow .xrow-actions .action-menu .icon-button{width:36px;min-width:36px;height:36px;min-height:36px}
+  /* Nothing else to do on the row: no empty action line under a divider. */
+  .live-table tr.xrow>td.xrow-actions:not(:has(.button-small)){padding:0!important;margin:0;border:0;background:transparent!important}
+  /* Closed, a card still shows its menu - and nothing else of its actions. */
+  .live-table tr.xrow:not(.is-open)>td.xrow-actions:has(.action-menu){display:block!important;height:0;padding:0!important;margin:0;border:0;background:transparent!important}
+  .live-table tr.xrow:not(.is-open)>td.xrow-actions .table-actions>.button{display:none}
+  /* Approve / Reject (or Revive) share their line evenly. */
+  .live-table tr.xrow>td.xrow-actions .table-actions>.button{flex:1 1 0}
+}
+
+/* Pop-ups: Close is a square icon in the corner, like every other icon button */
+.student-analysis-sheet{position:relative}
+.student-analysis-sheet>.modal-close{position:absolute;top:18px;right:18px;float:none;width:36px;min-width:36px;height:36px;min-height:36px;z-index:2}
+.student-analysis-sheet>h1:first-of-type{padding-right:48px}
+
+/* User pop-up: header, one line of facts, the tests */
+.student-analysis-sheet:has(.user-head){width:min(100%,720px);padding:24px}
+.user-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin:0 0 14px;padding-right:48px}
+.user-who{min-width:0}
+.user-who h1{margin:0;font-size:1.5rem;padding-right:0!important}
+.user-who p{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:4px 0 0;color:var(--text-2);font-size:.88rem;overflow-wrap:anywhere}
+.user-actions{display:flex;gap:8px}
+.user-actions .button{min-height:36px;height:36px}
+.user-facts{display:flex;flex-wrap:wrap;gap:6px 20px;padding:12px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border);color:var(--text-2);font-size:.86rem}
+.user-fact strong{color:var(--text);font-weight:650}
+.user-sap{display:inline-flex;align-items:center;gap:8px;margin-left:4px}
+.user-sap .link-button{padding:0;font-size:.82rem}
+.user-fact .user-sap-form{display:inline-flex;gap:6px;margin-left:6px;vertical-align:middle}
+.user-fact .user-sap-form .text-input{width:130px;height:32px}
+.user-tests-toolbar{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:14px 0 0}.user-tests-toolbar>.text-input{flex:1 1 210px;min-height:38px}.user-test-date{display:grid;gap:4px;color:var(--text-2);font-size:.72rem;font-weight:700}.user-test-date .text-input{min-height:38px}.user-tests-toolbar .link-button{min-height:38px}.user-tests-count,.user-refresh-error{margin:8px 0 0;color:var(--text-3);font-size:.8rem}.user-refresh-error{color:var(--bad)}.user-load-error{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;padding:13px;border:1px solid rgba(239,91,95,.35);border-radius:var(--r-md);background:rgba(239,91,95,.08)}.user-load-error p{margin:0;color:var(--text-2);line-height:1.45}
+.user-tests{display:grid;gap:6px;margin:14px 0 0;padding:0;list-style:none}
+.user-tests li{display:flex;align-items:center;gap:6px}
+.user-test{flex:1;display:grid;grid-template-columns:minmax(0,1fr) auto 70px 16px;align-items:center;gap:14px;min-width:0;padding:10px 12px;border:0;border-radius:var(--r-md);background:var(--bg-raised);color:var(--text);font:inherit;text-align:left;cursor:pointer;transition:background .12s}
+.user-test:hover{background:var(--bg-input)}
+.user-test:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.user-test-name{display:grid;min-width:0}
+.user-test-name strong{font-size:.92rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-test-name small{color:var(--text-3);font-size:.76rem}
+.user-test-score{display:grid;justify-items:end;font-weight:650;font-variant-numeric:tabular-nums}
+.user-test-score small{color:var(--warn);font-size:.72rem;font-weight:600}
+.user-test-go{color:var(--text-3)}
+.user-test-download{width:36px;min-width:36px;height:36px;min-height:36px}
+.user-empty{margin:14px 0 0;color:var(--text-3)}
+@media (max-width:760px){
+  .student-analysis-sheet:has(.user-head){padding:18px 16px 22px}
+  .user-head{padding-right:44px}
+  .user-actions{width:100%}
+  .user-actions .button{flex:1}
+  .user-tests-toolbar{align-items:stretch}.user-test-date{flex:1}.user-load-error{align-items:flex-start;flex-direction:column}
+  .user-test{grid-template-columns:minmax(0,1fr) auto 16px;gap:10px}
+  .user-test .pill{display:none}
+}
+
+/* ---------------------------------------------------------------- Buttons */
+/* A shared soft-pill button language: inspired by the rounded reference
+   system, but deliberately using the portal's cyan, green, orange and red
+   feedback colours instead of introducing a second palette. */
+.button{
+  min-height:42px;
+  padding:0 18px;
+  border-radius:999px;
+  font-weight:700;
+  letter-spacing:-.01em;
+  box-shadow:none;
+  transition:transform .16s ease,background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease;
+}
+.button:not(:disabled):hover{transform:translateY(-1px)}
+.button:active:not(:disabled){transform:translateY(0) scale(.975)}
+.button-primary{
+  background:var(--primary);
+  border-color:var(--primary);
+  color:#fff;
+  box-shadow:0 7px 18px rgba(21,152,209,.25);
+}
+.button-primary:hover:not(:disabled){background:var(--primary-hover);border-color:var(--primary-hover);box-shadow:0 10px 22px rgba(21,152,209,.3)}
+.button-secondary,
+.notice .button-secondary,.table-wrap .button-secondary,.join-card .button-secondary,.success-card .button-secondary,
+.link-box .button-secondary,.dashboard-actions .button-secondary,.overview-actions .button-secondary,.qr-share-sheet .button-secondary,.nav-panel-actions .button-secondary{
+  background:#1488BC;
+  border-color:transparent;
+  color:#FFFFFF;
+}
+.button-secondary:hover:not(:disabled),.overview-actions .button-secondary:hover:not(:disabled),.test-list-row .button-secondary:hover:not(:disabled),
+.dashboard-actions .button-secondary:hover:not(:disabled),.nav-panel-actions .button-secondary:hover:not(:disabled){
+  background:#1598D1;
+  border-color:transparent;
+  color:#FFFFFF;
+}
+.button-secondary svg{color:inherit}
+/* One brightness for every tinted button: clearly coloured, never a solid block.
+   Primary stays solid - it is the one main action on a screen. */
+.button-tinted{background:#1488BC;border-color:transparent;color:#FFFFFF}
+.button-tinted:hover:not(:disabled){background:#1598D1;border-color:transparent;color:#FFFFFF}
+.button-warning{background:#E6BF24;border-color:transparent;color:#1E2124}
+.button-warning:hover:not(:disabled){background:#FFD326;border-color:transparent;color:#1E2124}
+.button-success{background:#1BA566;border-color:transparent;color:#FFFFFF}
+.button-success:hover:not(:disabled){background:#1EBA70;border-color:transparent;color:#FFFFFF}
+.button-danger{background:#C93443;border-color:transparent;color:#FFFFFF}
+.button-danger:hover:not(:disabled){background:#DE2739;border-color:transparent;color:#FFFFFF}
+.button-danger-solid{background:var(--bad);border-color:var(--bad);box-shadow:0 7px 18px rgba(239,91,95,.2)}
+.button-danger-solid:hover:not(:disabled){background:#D94A4E;border-color:#D94A4E}
+.button-quiet{border-color:transparent;border-radius:999px;color:var(--text-2)}
+.button-quiet:hover:not(:disabled){background:var(--bg-raised);color:var(--text)}
+.button-small{min-height:34px;padding:0 13px;border-radius:999px;font-size:.8rem}
+.button:disabled,.button[disabled]{background:#313438;border-color:#3F4449;color:var(--text-3);box-shadow:none;opacity:.68}
+.button.icon-button,.icon-button{
+  width:42px;
+  min-width:42px;
+  height:42px;
+  min-height:42px;
+  padding:0;
+  border-radius:50%;
+  background:#1488BC;
+  border-color:transparent;
+  color:#FFFFFF;
+}
+.button.icon-button:hover:not(:disabled),.icon-button:hover:not(:disabled){background:#1598D1;border-color:transparent;color:#FFFFFF}
+.button.icon-button.is-on,.icon-button.is-on{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 6px 16px rgba(21,152,209,.25)}
+.button.icon-button.button-danger,.icon-button.button-danger{background:#C93443;border-color:transparent;color:#FFFFFF}
+.button.icon-button.button-danger:hover:not(:disabled),.icon-button.button-danger:hover:not(:disabled){background:rgba(239,91,95,.23);border-color:rgba(239,91,95,.44);color:#FFFFFF}
+
+/* Table actions (View, Block, Delete, Approve…) use the same tinted buttons
+   as everywhere else: easy to tell apart by colour, without solid blocks. */
+.students-card .table-actions .button-secondary{background:#1488BC;border-color:transparent;color:#FFFFFF;box-shadow:none}
+.students-card .table-actions .button-secondary:hover:not(:disabled){background:#1598D1;border-color:transparent;color:#FFFFFF}
+.students-card .table-actions .button-warning{background:#E6BF24;border-color:transparent;color:#1E2124;box-shadow:none}
+.students-card .table-actions .button-warning:hover:not(:disabled){background:#FFD326;border-color:transparent;color:#1E2124}
+.students-card .table-actions .button-danger{background:#C93443;border-color:transparent;color:#FFFFFF;box-shadow:none}
+.students-card .table-actions .button-danger:hover:not(:disabled){background:#DE2739;border-color:transparent;color:#FFFFFF}
+.students-card .table-actions .button-success{background:#1BA566;border-color:transparent;color:#FFFFFF;box-shadow:none}
+.students-card .table-actions .button-success:hover:not(:disabled){background:#1EBA70;border-color:transparent;color:#FFFFFF}
+
+/* The three dashboard views are a mutually exclusive choice. Show them as
+   real radio controls rather than making the active view look like a regular
+   action button. */
+[data-area] .dashboard-tabs{display:flex;align-items:center;gap:4px;width:auto;padding:4px;border-radius:999px}
+[data-area] .dashboard-tabs .dashboard-tab{
+  position:relative;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  min-height:38px;
+  padding:0 13px;
+  border:1px solid transparent;
+  border-radius:999px;
+  color:var(--text-2);
+  font-size:.82rem;
+  font-weight:700;
+  white-space:nowrap;
+  cursor:pointer;
+  transition:background .16s ease,border-color .16s ease,color .16s ease;
+}
+[data-area] .dashboard-tabs .dashboard-tab input{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[data-area] .dashboard-tabs .tab-radio{width:14px;height:14px;border:2px solid #7B8A93;border-radius:50%;transition:border-color .16s ease,box-shadow .16s ease}
+[data-area] .dashboard-tabs .dashboard-tab:hover{background:rgba(21,152,209,.1);color:var(--text)}
+[data-area] .dashboard-tabs .dashboard-tab.is-selected{background:rgba(21,152,209,.18);border-color:rgba(21,152,209,.48);color:#E4F8FF}
+[data-area] .dashboard-tabs .dashboard-tab.is-selected .tab-radio{border-color:#52C8F4;box-shadow:none;background:radial-gradient(circle,#52C8F4 0 2.5px,transparent 3px)}
+[data-area] .dashboard-tabs .dashboard-tab.is-selected .tab-count{background:#1598D1;color:#fff}
+[data-area] .dashboard-tabs .dashboard-tab:has(input:focus-visible){outline:2px solid #52C8F4;outline-offset:2px}
+@media (max-width:680px){
+  [data-area] .dashboard-tabs{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  [data-area] .dashboard-tabs .dashboard-tab{min-width:0;padding:0 8px;gap:5px}
+  [data-area] .dashboard-tabs .tab-label{overflow:hidden;text-overflow:ellipsis}
+}
+@media (max-width:760px){.button{min-height:40px;padding:0 16px}.button.icon-button,.icon-button{width:40px;min-width:40px;height:40px;min-height:40px}}
+
+/* ---------------------------------------------------------- Rounded buttons
+ * Every button is a pill and every icon-only button a circle; colours stay
+ * exactly as above. `[data-area]` outweighs the older corner rules.
+ */
+[data-area] .button{border-radius:999px;padding-left:20px;padding-right:20px}
+[data-area] .button-small{padding-left:14px;padding-right:14px}
+[data-area] .icon-button,[data-area] .button.icon-button,[data-area] .modal-close,[data-area] .nav-menu-button,
+[data-area] .user-test-download,[data-area] .exam-arrow{border-radius:50%;padding:0}
+[data-area] .segmented,[data-area] .dashboard-tabs,[data-area] .mode-switch,[data-area] .activity-filter{border-radius:999px;padding:4px}
+[data-area] .segmented button,[data-area] .dashboard-tabs button,[data-area] .mode-switch button,[data-area] .activity-filter button{border-radius:999px}
+[data-area] .quick-picks button{border-radius:999px;padding-left:14px;padding-right:14px}
+[data-area] .exam-submit{border-radius:999px}
+[data-area] .link-button{border-radius:999px}
+[data-area] .stepper{border-radius:999px;overflow:hidden}
+[data-area] .stepper button:first-child{border-radius:999px 0 0 999px}
+[data-area] .stepper button:last-child{border-radius:0 999px 999px 0}
+
+/* No outlines on buttons: colour alone tells them apart */
+[data-area] .quick-picks button{background:var(--bg-raised);border-color:transparent;color:var(--text)}
+[data-area] .quick-picks button:hover:not(:disabled){background:#43474C;border-color:transparent}
+[data-area] .quick-picks button.is-chosen,[data-area] .quick-picks button.is-on{background:#1488BC;border-color:transparent;color:#FFFFFF}
+[data-area] .exam-submit{background:#1488BC;border-color:transparent;color:#FFFFFF}
+[data-area] .exam-submit:hover:not(:disabled){background:#1598D1;color:#FFFFFF}
+
+/* Page switcher under long lists */
+.pager{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:14px 4px 2px;border-top:1px solid var(--border)}
+.pager-status{color:var(--text-2);font-size:.85rem}
+.pager-buttons{display:flex;align-items:center;gap:10px}
+.pager-page{color:var(--text-2);font-size:.85rem;white-space:nowrap}
+@media (max-width:760px){.pager{justify-content:center}.pager-status{width:100%;text-align:center}}
+
+/* Phone menu: a full-screen sheet under the bar, not a strip over a dimmed
+   page. Links at the top, who you are and Sign out at the thumb's end. */
+@media (max-width: 760px){
+  .nav-panel{bottom:0;display:flex;flex-direction:column;gap:12px;max-height:none;padding:14px 16px calc(20px + env(safe-area-inset-bottom));border-bottom:0;box-shadow:none;background:var(--bg-nav)}
+  .nav-panel nav{gap:4px}
+  .nav-panel nav a{min-height:54px;padding:0 16px;font-size:1.06rem}
+  .nav-panel-account{margin-top:auto}
+  .nav-panel-actions .button{min-height:50px}
+}
+
+/* Test page header: one full-width column, so the title row, timer bar and
+   warning badge span the paper (an older space-between rule shrank it). */
+.exam-screen .exam-head{grid-template-columns:minmax(0,1fr);justify-content:stretch}
+.exam-screen .exam-head-top{justify-content:space-between}
+
+/* The phone menu button is a true circle: 42 x 38 rounded is an oval. */
+.nav-menu-button{width:40px;height:40px;aspect-ratio:1;flex:0 0 40px;border-radius:50%;padding:0}
+
+/* Leaving the test: two small switches, three compact numbers, one line of summary. */
+.leave-settings{display:grid;gap:12px}
+.leave-settings>.field-label{margin:0}
+.pill-switches{display:flex;flex-wrap:wrap;gap:8px}
+.pill-switches .switch-row{flex:0 0 auto;min-height:0;padding:8px 16px 8px 10px;border:0;border-radius:999px;background:var(--bg-raised)}
+.pill-switches .switch-row.is-on{background:rgba(21,152,209,.16)}
+.compact-numbers,.leave-limits{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:12px 16px}
+.compact-numbers .stepper-field,.leave-limits .stepper-field{display:grid;gap:6px}
+.compact-numbers .stepper,.leave-limits .stepper{width:100%;height:42px}
+.compact-numbers .stepper input,.leave-limits .stepper input{flex:1;min-width:0}
+/* Questions per student: the type name is the stepper's own label again. */
+.pool-picker.compact-numbers .pool-type{display:block;padding:0;border:0;background:none}
+.pool-picker.compact-numbers .stepper-field .field-label{position:static;width:auto;height:auto;overflow:visible;clip:auto}
+.strict-fields{gap:12px}
+.leave-settings>.help{margin:0}
+@media (max-width: 560px){ .compact-numbers,.leave-limits{grid-template-columns:1fr} }
+.pool-picker.compact-numbers .stepper-field .field-label{display:block;margin:0;color:var(--text-2);font-size:.82rem;font-weight:600}
+.strict-fields>.switch-row{border-bottom:0}
+
+/* sec / min picker inside a time box: reads like the unit label, with a small caret. */
+.stepper-unit:has(.stepper-unit-select){padding:0}
+.stepper-unit-select{height:100%;padding:0 22px 0 10px;border:0;background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23AAB6BC' stroke-width='1.6'/%3E%3C/svg%3E") no-repeat right 8px center;color:var(--text-2);font:inherit;font-size:.8rem;font-weight:700;cursor:pointer;appearance:none;-webkit-appearance:none}
+.stepper-unit-select:hover{color:var(--text)}
+.stepper-unit-select:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.stepper-unit-select option{background:var(--bg-card);color:var(--text)}
+
+/* Venue: radius, latitude and longitude on one line; the locate button under them. */
+.location-settings.venue-settings{display:grid;grid-template-columns:none;gap:12px;margin:0;padding:0;border:0;background:none}
+.venue-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 16px}
+.venue-row .field-label{margin:0 0 6px}
+.input-with-unit{position:relative}
+.input-with-unit .text-input{padding-right:34px}
+.input-with-unit span{position:absolute;right:14px;top:50%;transform:translateY(-50%);color:var(--text-3);font-size:.85rem;font-weight:700;pointer-events:none}
+.venue-locate{justify-self:start}
+@media (max-width: 640px){ .venue-row{grid-template-columns:1fr} }
+
+/* The question bank folds away behind one bar. */
+.questions-bar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 12px;padding:14px 18px;border-radius:16px;background:var(--bg-card)}
+.questions-bar-title{display:flex;align-items:baseline;gap:10px;min-width:0}
+.questions-bar-title strong{color:var(--text);font-size:1.05rem}
+.questions-bar-title span{color:var(--text-3);font-size:.85rem}
+.questions-bar-caret{transition:transform .15s ease}
+.questions-bar-caret.is-open{transform:rotate(180deg)}
+.question-editors[hidden]{display:none}
+.questions-bar-title span{min-width:24px;padding:2px 8px;border-radius:999px;background:var(--bg-raised);color:var(--text-2);font-size:.78rem;font-weight:700;text-align:center}
+.questions-bar .button{white-space:nowrap}
+
+/* Create page header: Import JSON is an ordinary secondary pill, Template a quiet link. */
+.creator-head-row .json-import-actions .button,.creator-head-row .json-import-actions .button-secondary{min-height:38px;border-color:transparent;background:#1488BC;color:#fff}
+.creator-head-row .json-import-actions .button:hover{background:#1598D1;color:#fff}
+.creator-template{color:var(--text-2)}
+.creator-template:hover{color:var(--text)}
+.question-editor .choice-field{margin:4px 0 2px}
+
+/* Status badges (Submitted, Approved, Pending, Locked…) and the small issue
+   chips beside them: rounded pills like the buttons, with room around the word. */
+[data-area] .pill,[data-area] .badge,[data-area] .issue{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 11px;border:0;border-radius:999px;font-size:.75rem;font-weight:700;line-height:1;white-space:nowrap}
+[data-area] .pill::before{display:none}
+[data-area] .pill.success,[data-area] .badge.is-success{background:rgba(39,182,111,.16);color:#43CF88}
+[data-area] .pill.warn,[data-area] .badge.is-warn{background:rgba(243,154,74,.16);color:#F5A45C}
+[data-area] .pill.danger,[data-area] .badge.is-danger{background:rgba(239,91,95,.16);color:#FF8285}
+[data-area] .pill.muted,[data-area] .badge.is-neutral{background:var(--bg-raised);color:var(--text-2)}
+[data-area] .badge.is-info,[data-area] .badge.is-live{background:rgba(21,152,209,.16);color:#3DB3E6}
+[data-area] .issue{padding:0 9px}
+[data-area] .issue.is-ok{padding:0 8px}
+/* The monospaced test code in list meta stays plain text. */
+[data-area] .test-list-meta .pill.muted{height:auto;padding:0;background:transparent}
+/* Solid fills like the buttons, with white text (dark on amber for contrast). */
+[data-area] .pill.success,[data-area] .badge.is-success,[data-area] .issue.is-ok{background:#1BA566;color:#FFFFFF}
+[data-area] .pill.warn,[data-area] .badge.is-warn,[data-area] .issue.is-warn{background:#F39A4A;color:#1E2124}
+[data-area] .pill.danger,[data-area] .badge.is-danger,[data-area] .issue.is-danger{background:#C93443;color:#FFFFFF}
+[data-area] .badge.is-info,[data-area] .badge.is-live{background:#1488BC;color:#FFFFFF}
+[data-area] .pill.muted,[data-area] .badge.is-neutral{background:#474C52;color:#F7FAFC}
+[data-area] .pill.paused{background:#1488BC;color:#FFFFFF}
+[data-area] .badge.is-live::before{background:#FFFFFF;box-shadow:0 0 0 3px rgba(255,255,255,.25)}
+[data-area] .test-list-meta .pill.muted{background:transparent;color:var(--text-2)}
+
+/* Pop-ups: the page behind is dimmed and blurred. */
+.qr-preview-overlay{background:rgba(14,15,17,.5);backdrop-filter:blur(10px) saturate(115%)}
+
+/* QR pop-up: a compact card - title and close on one line, the QR as the
+   focus, then the code and the link. */
+.student-analysis-sheet.qr-modal{width:min(100%,600px);padding:18px 22px 22px;text-align:left}
+.qr-modal>.modal-close{top:18px;right:18px}
+.qr-modal-head{display:flex;align-items:center;min-height:36px;padding-right:48px}
+.qr-modal-head h1{margin:0;font-size:1.2rem;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qr-modal-code{display:grid;justify-items:center;gap:10px;margin:16px 0 18px}
+.qr-modal-code .qr{display:block;width:min(100%,480px,calc(100dvh - 232px));height:auto;aspect-ratio:1;margin:0;padding:12px;border:0;border-radius:16px;background:#fff;box-shadow:none}
+.qr-modal-code p{margin:0;color:var(--text-2);font-size:.85rem;font-weight:700;letter-spacing:.12em}
+.qr-modal-link{display:flex;gap:8px}
+.qr-modal-link .text-input{flex:1;min-width:0;height:42px;font-size:.85rem}
+.qr-modal-link .button{flex:0 0 auto;min-height:42px}
+/* The QR card never scrolls: it takes the screen's height into account, and
+   the QR alone gives way (the title, code and link keep their size). The
+   other pop-ups keep their scrolling sheet. */
+.qr-preview-overlay:has(.qr-modal){padding:20px}
+.student-analysis-sheet.qr-modal,[data-area] .student-analysis-sheet.qr-modal{max-height:calc(100dvh - 40px);overflow:hidden;border-radius:var(--r-lg)}
+@media (max-height: 520px){
+  .qr-modal-code{margin:10px 0 12px;gap:6px}
+  .qr-modal-code .qr{width:min(100%,480px,calc(100dvh - 206px));padding:8px}
+}
+
+/* My quizzes: the whole card opens the quiz. The title link is stretched over
+   the card (so middle-click and Ctrl+click still open a new tab); the Results
+   button and the menu sit above it and keep their own clicks. */
+.ql-card{position:relative;cursor:pointer}
+.ql-card-title h2 a::after{content:"";position:absolute;inset:0;border-radius:inherit}
+.ql-card-title h2 a:focus-visible{outline:none}
+.ql-card:has(.ql-card-title h2 a:focus-visible){outline:2px solid var(--primary);outline-offset:2px}
+.ql-card:hover .ql-card-title h2 a{color:#35AEE3}
+.ql-actions{position:relative;z-index:1}
+
+/* Things that swap between values keep one width, so rows line up and
+   nothing jumps when the value changes. */
+[data-area] .status-pill,[data-area] .ql-card .badge{min-width:108px;justify-content:center}
+[data-area] .swap-button{min-width:104px;justify-content:center}
+[data-area] .swap-button-wide{min-width:196px;justify-content:center}
+
+/* Dashboard actions: the main action, Edit and More - one height, one row. */
+.overview-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.overview-actions>.button,.overview-actions .action-menu>.button{min-height:44px;height:44px;padding-left:20px;padding-right:20px;font-size:.95rem}
+
+/* Dashboard status bar: where the test stands on the left, its buttons on the
+   right. A neutral card with the state's colour as a stripe down the left edge
+   and a dot by the title - green live, red closed or ending, blue waiting. */
+[data-area] .schedule-banner{--state:#1488BC;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px 20px;min-height:80px;box-sizing:border-box;margin:0 0 18px;padding:16px 18px 16px 22px;border:0;border-left:5px solid var(--state);border-radius:var(--r-lg);background:var(--bg-raised)}
+[data-area] .schedule-banner.is-waiting{--state:#1598D1}
+[data-area] .schedule-banner.is-live{--state:#1BA566}
+[data-area] .schedule-banner.is-ending,[data-area] .schedule-banner.is-done{--state:#E0414F}
+[data-area] .banner-text{min-width:0;flex:1 1 280px}
+[data-area] .schedule-banner strong{display:flex;align-items:center;gap:9px;color:var(--text);font-size:1.05rem}
+[data-area] .schedule-banner strong::before{content:"";flex:0 0 9px;width:9px;height:9px;border-radius:50%;background:var(--state)}
+[data-area] .schedule-banner.is-live strong::before,[data-area] .schedule-banner.is-ending strong::before{animation:live-pulse 1.8s ease-out infinite}
+[data-area] .schedule-banner .banner-text>span{display:block;margin-top:4px;color:var(--text-2);font-size:.82rem}
+@keyframes live-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--state) 70%,transparent)}70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+@media (prefers-reduced-motion: reduce){ [data-area] .schedule-banner strong::before{animation:none} }
+[data-area] .banner-extend{margin-top:10px}
+[data-area] .banner-extend button{min-height:30px;padding:0 12px;border:0;border-radius:999px;background:var(--bg-input);color:var(--text);font-size:.8rem}
+[data-area] .banner-extend button:hover:not(:disabled){background:#474C52}
+/* The bar's buttons are one size: equal columns, as wide as the widest. */
+[data-area] .banner-actions{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);align-items:center;gap:10px}
+[data-area] .banner-actions .action-menu{display:grid}
+[data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{width:100%;justify-content:center;gap:8px}
+[data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{min-height:42px;height:42px;padding-left:18px;padding-right:18px;font-size:.93rem}
+@media (max-width: 760px){
+  /* Phone: the main action across the top, Edit and More side by side, equal. */
+  [data-area] .banner-actions{width:100%;grid-auto-flow:row;grid-template-columns:1fr 1fr;grid-auto-columns:auto}
+  [data-area] .banner-actions>.button:first-child:not(:only-of-type){grid-column:1 / -1}
+}
+
+
+/* Test / Students / Results on a phone: no radio circles (they squashed
+   into ovals), tighter padding and a small count, so every word fits whole. */
+[data-area] .dashboard-tabs .tab-radio{flex:0 0 auto}
+@media (max-width:680px){
+  [data-area] .dashboard-tabs{gap:2px;padding:3px}
+  [data-area] .dashboard-tabs .dashboard-tab{padding:0 6px;gap:5px;font-size:.8rem;min-height:38px}
+  [data-area] .dashboard-tabs .tab-radio{display:none}
+  [data-area] .dashboard-tabs .tab-label{overflow:visible;text-overflow:clip}
+  [data-area] .dashboard-tabs .tab-count{min-width:20px;height:19px;padding:0 5px;font-size:.68rem}
+  [data-area] .dashboard-tabs .tab-count.has-badge{padding-right:13px}
+}
+
+/* Dashboard on a phone: a smaller title with its status dot beside the first
+   line, and no double gap between the status bar and the number tiles. */
+[data-area] .overview-panel .schedule-banner{margin:0}
+[data-area] .overview-panel .dash-stats{margin-top:0}
+@media (max-width:680px){
+  [data-area] .dashboard-head h1{font-size:1.45rem;line-height:1.25;align-items:flex-start}
+  [data-area] .dashboard-head h1 .status-dot{margin-top:.45em;flex:0 0 auto}
+  [data-area] .dashboard-head-copy{gap:4px 10px}
+}
+@media (max-width:420px){
+  /* "Apply to 81 shown" and "Export Excel" side by side on a small phone. */
+  [data-area] .students-card .action-menu>.button,[data-area] .students-card .button{padding-left:12px;padding-right:12px;font-size:.86rem}
+}
+
+/* Very narrow screens (a small phone, or a narrow window): nothing may push
+   past its card, tabs become icon + count, and "Edit test" becomes "Edit". */
+[data-area] .overview-panel>*,[data-area] .banner-text,[data-area] .banner-actions>*{min-width:0}
+[data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{white-space:nowrap}
+[data-area] .dashboard-tabs .tab-icon{display:none;flex:0 0 auto}
+@media (max-width:400px){
+  [data-area] .dashboard-tabs .tab-icon{display:block}
+  [data-area] .dashboard-tabs .tab-label{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  [data-area] .dashboard-tabs .dashboard-tab{gap:6px;padding:0 4px}
+  [data-area] .label-more{display:none}
+  [data-area] .overview-panel{padding:12px}
+  [data-area] .schedule-banner{padding:14px 14px 14px 16px}
+  [data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{padding-left:10px;padding-right:10px}
+  [data-area] .dashboard-head h1{font-size:1.3rem}
+}
+
+@media (max-width:400px){
+  /* Students / Results: search, filter and actions each take a full row. */
+  [data-area] .students-toolbar .controls>*{flex:1 1 100%;width:100%}
+  [data-area] .students-toolbar .controls .action-menu>.button{width:100%;justify-content:center}
+}
+
+/* Dashboard header: on a wide screen, title left and tabs right. At 1024 px
+   and below the tabs always take their own row - full width, three equal,
+   centred - rather than wrapping under the title only when it is long. */
+[data-area] .dashboard-head-copy{flex:1 1 320px;min-width:0}
+[data-area] .dashboard-head .dashboard-tabs{flex:0 0 auto}
+@media (max-width:1024px){
+  [data-area] .dashboard-head{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+  [data-area] .dashboard-head .dashboard-tabs{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));box-sizing:border-box}
+  [data-area] .dashboard-head .dashboard-tab{justify-content:center;min-width:0}
+}
+
+/* The status bar arranges its buttons by its OWN width, not the screen's: in
+   the two-column dashboard (status card + QR) it can be narrow on a wide
+   screen. Too narrow for three in a row, the main action takes the full row
+   and Edit / More share the next; narrower still, "Edit test" says "Edit". */
+[data-area] .schedule-banner{container-type:inline-size}
+@container (max-width: 620px){
+  [data-area] .banner-actions{width:100%;grid-auto-flow:row;grid-template-columns:1fr 1fr;grid-auto-columns:auto}
+  [data-area] .banner-actions>.button:first-child:not(:only-of-type){grid-column:1 / -1}
+}
+@container (max-width: 340px){
+  [data-area] .label-more{display:none}
+}
+
+/* ------------------------------------------------ GUI audit fixes (phone / tablet) */
+
+/* My results: every field on a phone (label and value); on a tablet the long
+   "marks will be shown after…" note wraps instead of pushing the table wide. */
+.results-table td[data-label="Marks"]{white-space:normal;min-width:110px;max-width:240px}
+@media (max-width:760px){
+  .results-table td[data-label="Test"]{border-bottom:1px solid var(--border);padding-bottom:10px;margin-bottom:4px}
+  /* Every cell is a full-width label/value row; the admin tables' column widths do not apply. */
+  .students-card .results-table td:nth-child(n),.students-card .results-table th:nth-child(n){width:100%;max-width:none}
+  .results-table td .table-subtext{white-space:normal}
+}
+
+/* Quiz list: on a phone the "4 waiting" note sits under the count instead of
+   running under the Results button; on a tablet the count and the buttons
+   share one row instead of leaving an empty band. */
+@media (max-width:760px){
+  .ql-progress-text{white-space:normal;min-width:0}
+  .ql-progress-text em{display:block;margin:2px 0 0}
+}
+@media (min-width:761px) and (max-width:1100px){
+  .ql-card{grid-template-columns:minmax(0,1fr) auto;row-gap:10px}
+  .ql-card .badge{grid-column:2;grid-row:1;justify-self:end}
+  .ql-progress-text{grid-column:1;grid-row:2;align-self:center}
+  .ql-actions{grid-column:2;grid-row:2;justify-content:flex-end}
+}
+
+/* Students / Results header on a tablet: the title block keeps its own
+   height (it was stretched into a 220px empty band) and reads left-aligned. */
+@media (max-width:850px){
+  [data-area] .students-toolbar>div:first-child{flex:0 0 auto;text-align:left;align-self:stretch}
+  [data-area] .students-toolbar{align-items:stretch}
+}
+/* Tablet tables: the least useful column gives way so the buttons stay on screen. */
+@media (min-width:761px) and (max-width:1100px){
+  .live-table .col-answered,.live-table .col-created,.results-table .col-time,.results-table .col-left{display:none}
+}
+.live-table td[data-label="Score"]{white-space:nowrap}
+.live-table td[data-label="Score"] .cell-row{flex-wrap:nowrap}
+.live-table td[data-label="Score"] .issue{margin-left:4px}
+
+/* User pop-up on a phone: name on top, status under it, score and arrow on the right. */
+@media (max-width:760px){
+  .user-test{grid-template-columns:minmax(0,1fr) auto 16px;grid-template-rows:auto auto;gap:4px 10px;align-items:center}
+  .user-test-name{grid-column:1;grid-row:1}
+  [data-area] .user-test .pill{display:inline-flex;grid-column:1;grid-row:2;justify-self:start;min-width:0;height:22px;padding:0 9px;font-size:.7rem}
+  .user-test-score{grid-column:2;grid-row:1/span 2}
+  .user-test-go{grid-column:3;grid-row:1/span 2}
+  .user-test-name small{white-space:normal}
+}
+
+/* Attendance marks on a phone: one compact card per student - number, name and
+   status on top; time and distance under the name; Remove at the right. */
+@media (max-width:640px){
+  .att-table{overflow:visible}
+  .att-table thead{display:none}
+  .att-table table,.att-table tbody{display:block}
+  .att-table tr{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:2px 10px;padding:12px 14px;border-top:1px solid var(--border)}
+  .att-table tr:first-child{border-top:0}
+  .att-table td{display:block;padding:0;border:0}
+  .att-table td.att-num{grid-column:1;grid-row:1/span 3;padding-top:2px}
+  .att-table td.att-who{grid-column:2;grid-row:1}
+  .att-table td.att-status-cell{grid-column:3;grid-row:1;justify-self:end}
+  .att-table td.att-time:not(.att-distance){grid-column:2;grid-row:2;color:var(--text-2);font-size:.82rem}
+  .att-table td.att-time:not(.att-distance)::before{content:"Marked "}
+  .att-table td.att-distance{grid-column:2;grid-row:3;color:var(--text-2);font-size:.82rem}
+  .att-table td.att-distance::before{content:"Distance "}
+  .att-table td.att-row-action{grid-column:3;grid-row:2/span 2;align-self:end;justify-self:end}
+}
+/* "New attendance" stays on one line beside the page title. */
+.att-list-head .button,.min-head .button{white-space:nowrap}
+
+/* Touch screens: text links get a finger-sized target. */
+@media (pointer:coarse){
+  [data-area] .email-sign-in-links .link-button,[data-area] .att-row-action .link-button,[data-area] .link-button.link-icon,
+  [data-area] .user-fact .link-button,[data-area] .user-tests-toolbar .link-button{display:inline-flex;align-items:center;min-height:40px;padding:0 8px}
+  [data-area] .email-sign-in-links{margin-left:-8px;margin-right:-8px}
+}
+
+/* Small labels a step larger, so they read comfortably. */
+.exam-timer-label{font-size:.72rem}
+.time-now span{font-size:.74rem}
+@media (max-width:680px){ [data-area] .dashboard-tabs .tab-count{font-size:.72rem} }
+
+/* "Ready to begin" on a phone: the Begin button stays in reach at the bottom
+   while the student reads the rules above it. */
+@media (max-width:760px){
+  .launch-begin{position:sticky;bottom:12px;z-index:5;box-shadow:0 10px 28px rgba(0,0,0,.45)}
+}
+
+/* My results: marks not shown yet - a short word with an icon, not a sentence. */
+.marks-waiting{display:inline-flex;align-items:center;gap:6px;color:var(--warn);font-size:.84rem;font-weight:650;white-space:nowrap}
+.marks-waiting svg{flex:0 0 auto}
+
+/* Reject beside Approve: white with the word in red - plainly the other
+   choice, not a second blue button. */
+[data-area] .button.button-reject{background:#FFFFFF;color:#D0303C;border-color:transparent;box-shadow:none}
+[data-area] .button.button-reject:hover:not(:disabled){background:#F1F3F5;color:#B8232F}
+
+/* The private-window check page (?page=window-check). */
+.window-check-facts{display:grid;gap:0;margin:4px 0 14px}
+.window-check-facts>div{display:grid;grid-template-columns:minmax(110px,34%) minmax(0,1fr);gap:10px;padding:9px 0;border-top:1px solid var(--border)}
+.window-check-facts>div:first-child{border-top:0}
+.window-check-facts dt{color:var(--text-3);font-size:.78rem;font-weight:700}
+.window-check-facts dd{margin:0;color:var(--text);font-size:.88rem;overflow-wrap:anywhere}
+.window-check>.button{margin-top:14px}
+
+/* An answer that arrived all at once, in the student analysis. */
+.analysis-answer-burst{margin:10px 0 0;padding:8px 12px;border-radius:10px;background:rgba(239,91,95,.12);color:#FF9A9C;font-size:.84rem;line-height:1.45}
+.away-gate-card .away-refused{margin:4px 0 0;text-align:left;font-size:.86rem}
+.away-gate-card .away-refused+.button{margin-top:4px}
+[data-area] .away-gate-card .button.away-skip{background:transparent;color:var(--text-2);border:1px solid var(--border);box-shadow:none}
+[data-area] .away-gate-card .button.away-skip:hover{color:var(--text);border-color:#5A6066}
+
+/* Question text with its formatting (components/RichText.jsx): bold, lines,
+   bullet points and numbered lists. */
+.rich-text{white-space:normal;overflow-wrap:anywhere}
+.rich-text p,.rich-text ul,.rich-text ol{margin:0}
+.rich-text>*+*{margin-top:.55em}
+.rich-text ul,.rich-text ol{padding-left:1.35em}
+.rich-text li+li{margin-top:.2em}
+.rich-text li::marker{color:var(--text-2)}
+.rich-text strong{font-weight:800;color:var(--text)}
+.q-prompt.rich-text{white-space:normal}
+.analysis-prompt{margin:0;font-size:1.1rem;line-height:1.4;font-weight:700;color:var(--text)}
+
+/* The question editor's text: formatting buttons beside its label, a hint
+   under it, and a preview of the student's view once there is formatting. */
+.prompt-field{display:grid;gap:6px}
+.prompt-field-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.prompt-field-head .field-label{margin:0}
+.prompt-tools{display:flex;gap:4px}
+.prompt-tools button{display:grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid var(--border);border-radius:9px;background:var(--bg-raised);color:var(--text-2);cursor:pointer}
+.prompt-tools button:hover{background:var(--bg-input);color:var(--text)}
+.prompt-tools button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.prompt-field-hint{margin:0;color:var(--text-3);font-size:.76rem}
+.prompt-preview{display:grid;gap:6px;padding:12px 14px;border:1px dashed var(--border);border-radius:12px;background:var(--bg-card)}
+.prompt-preview>span{color:var(--text-3);font-size:.72rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
+.prompt-preview-text{color:var(--text);font-size:.95rem;line-height:1.5}
+
+/* Phones: a long test title in a list wraps onto a second line instead of
+   being cut off after a few words. */
+@media (max-width:560px){
+  .min-list-main strong,.user-test-name strong{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+}
+/* Touch screens: a text link inside a pop-up is a finger-sized target. */
+@media (pointer:coarse){
+  .student-analysis-sheet .notice .link-button{display:inline-flex;align-items:center;min-height:36px;padding:0 4px}
+}
+/* Students' initials in the table: a touch larger, to stay readable. */
+.xrow .person-avatar{font-size:.7rem}
+
+/* ------------------------------------------------ List toolbars: final word
+   Students, Results and attendance. As little height as the width allows:
+   on a wide screen the title and every control share one line; when they do
+   not fit, the controls take the next line, still as one row; on a phone the
+   search shares a row with the filter and the menus follow. No button is
+   ever stretched - each keeps its own size at every width - and every
+   control is 40px tall. Earlier rules for this toolbar (app.css, craft.css,
+   and above) are overridden here rather than chased one by one. */
+[data-area] .students-toolbar{display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px}
+[data-area] .students-toolbar>div:first-child{flex:1 1 160px;min-width:0}
+[data-area] .students-toolbar .controls,[data-area] .att-toolbar{display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+[data-area] .students-toolbar .controls{flex:0 1 auto;width:auto;margin-left:auto}
+[data-area] .students-toolbar .controls>*,[data-area] .att-toolbar>*{flex:0 0 auto;width:auto;min-width:0}
+[data-area] .students-toolbar .controls>.search-field{flex:0 1 auto;width:clamp(150px,20vw,260px);min-width:150px}
+[data-area] .att-toolbar>.search-field{flex:1 1 200px;min-width:150px}
+[data-area] .students-toolbar .controls .text-input,[data-area] .att-toolbar .text-input{width:100%;height:40px;min-height:40px}
+[data-area] .students-toolbar .controls .button,[data-area] .att-toolbar .button{width:auto;height:40px;min-height:40px;padding:0 14px;font-size:.86rem;white-space:nowrap}
+@media (max-width:760px){
+  [data-area] .students-toolbar .controls{flex:1 1 100%;margin-left:0}
+  [data-area] .students-toolbar .controls,[data-area] .att-toolbar{flex-wrap:wrap;justify-content:flex-start}
+  [data-area] .students-toolbar .controls>.search-field,[data-area] .att-toolbar>.search-field{flex:1 1 120px;width:auto;min-width:0}
+}
+
+/* Too narrow for words: still one row. The search takes whatever is left and
+   every button becomes the same 40px square showing just its icon - its name
+   stays its tooltip and what a screen reader says. Decided by the toolbar's
+   own width, not the window's, so it holds wherever the list sits. With two
+   action menus on the row that point comes sooner. */
+[data-area] .students-toolbar,[data-area] .att-toolbar{container:toolbar/inline-size}
+.filter-trigger{position:relative}
+.filter-trigger-badge{display:none;position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:#F39A4A;color:#1E2124;font-size:.68rem;font-weight:800;line-height:18px;text-align:center}
+@container toolbar (max-width:520px){
+  [data-area] .students-toolbar .controls{flex:1 1 100%;flex-wrap:nowrap;margin-left:0;justify-content:flex-start}
+  [data-area] .students-toolbar .controls>.search-field,[data-area] .att-toolbar>.search-field{flex:1 1 0;width:auto;min-width:0}
+  [data-area] :is(.students-toolbar .controls,.att-toolbar) :is(.toolbar-text,.toolbar-chevron){display:none}
+  [data-area] :is(.students-toolbar .controls,.att-toolbar) :is(.filter-trigger,.action-menu>.button),
+  [data-area] .students-toolbar .controls>.button,[data-area] .att-toolbar>.button{flex:none;width:40px;min-width:40px;max-width:40px;padding:0;gap:0;justify-content:center}
+  [data-area] :is(.students-toolbar .controls,.att-toolbar) .filter-trigger-badge{display:block}
+}
+@container toolbar (max-width:700px){
+  [data-area] .students-toolbar .controls:has(.action-menu+.action-menu){flex:1 1 100%;flex-wrap:nowrap;margin-left:0;justify-content:flex-start}
+  [data-area] .students-toolbar .controls:has(.action-menu+.action-menu)>.search-field{flex:1 1 0;width:auto;min-width:0}
+  [data-area] .students-toolbar .controls:has(.action-menu+.action-menu) :is(.toolbar-text,.toolbar-chevron){display:none}
+  [data-area] .students-toolbar .controls:has(.action-menu+.action-menu) :is(.filter-trigger,.action-menu>.button){flex:none;width:40px;min-width:40px;max-width:40px;padding:0;gap:0;justify-content:center}
+  [data-area] .students-toolbar .controls:has(.action-menu+.action-menu) .filter-trigger-badge{display:block}
+}

@@ -1,0 +1,143 @@
+/*
+ * The portal's finishing layer (colours come from theme.css). App.jsx marks
+ * every page body[data-area="portal"] except the test pages (?test=...),
+ * which keep their own layout; every rule here is scoped to it.
+ *
+ *   - one heading face (the theme font, bundled - no external request)
+ *   - one corner scale:8px controls, 12px panels, 16px cards
+ *   - statuses as a coloured dot and a word, not a filled capsule
+ *   - labels above headings in sentence case, only where they say something
+ */
+[data-area="portal"]{--r-sm:8px;--r-md:12px;--r-lg:16px;--head-font:var(--font)}
+
+/* Headings */
+[data-area="portal"] h1,[data-area="portal"] h2{font-family:var(--head-font);font-optical-sizing:auto}
+[data-area="portal"] h1{font-weight:750;letter-spacing:-.035em}
+[data-area="portal"] h2{font-weight:700;letter-spacing:-.02em}
+[data-area="portal"] .page-title-row h1,[data-area="portal"] .min-head h1{font-size:clamp(1.7rem,3vw,2.3rem)}
+[data-area="portal"] .page-title-row{margin-bottom:18px}
+
+/* Corners */
+[data-area="portal"] .card,[data-area="portal"] .form-section,[data-area="portal"] .join-card,[data-area="portal"] .success-card,
+[data-area="portal"] .min-list,[data-area="portal"] .att-qr,[data-area="portal"] .att-side,[data-area="portal"] .student-analysis-sheet{border-radius:var(--r-lg)}
+[data-area="portal"] .notice,[data-area="portal"] .schedule-banner,[data-area="portal"] .nav-dropdown,[data-area="portal"] .menu-items,
+[data-area="portal"] .dash-stats>div,[data-area="portal"] .qr-panel .qr{border-radius:var(--r-md)}
+[data-area="portal"] .button,[data-area="portal"] .text-input,[data-area="portal"] .text-area,[data-area="portal"] .select,
+[data-area="portal"] .quick-picks button,[data-area="portal"] .stepper{border-radius:var(--r-sm)}
+
+/* Labels:sentence case, and only the ones that carry information are left in the markup */
+[data-area="portal"] .eyebrow{text-transform:none;letter-spacing:0;font-size:.82rem;font-weight:700}
+
+/* Statuses:a dot and a word */
+[data-area="portal"] .pill{display:inline-flex;align-items:center;gap:6px;padding:0;border-radius:0;background:none;font-size:.8rem;font-weight:700;white-space:nowrap}
+[data-area="portal"] .pill::before{content:"";flex:0 0 7px;width:7px;height:7px;border-radius:50%;background:currentColor}
+[data-area="portal"] .pill.success{color:#27B66F}
+[data-area="portal"] .pill.warn{color:#F39A4A}
+[data-area="portal"] .pill.danger{color:#EF5B5F}
+[data-area="portal"] .pill.muted{color:#AAB6BC}
+[data-area="portal"] .pill:not(.success):not(.warn):not(.danger):not(.muted){color:#F7FAFC}
+/* On the navy page itself (the test list), the same dots in lighter tones */
+[data-area="portal"] .test-list-row .pill.success{color:#27B66F}
+[data-area="portal"] .test-list-row .pill.warn{color:#1598D1}
+[data-area="portal"] .test-list-row .pill.danger{color:#FF9DA0}
+[data-area="portal"] .test-list-row .pill.muted{color:#AAB6BC}
+[data-area="portal"] .test-code-small{padding:0;border:0;background:none;color:#AAB6BC;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.78rem;letter-spacing:.02em}
+
+/* Icons sit on the text line */
+[data-area="portal"] .button svg,[data-area="portal"] .link-button svg,[data-area="portal"] .min-back svg,[data-area="portal"] .nav-dropdown svg{flex:0 0 auto;vertical-align:-3px}
+[data-area="portal"] .link-icon,[data-area="portal"] .min-back{display:inline-flex;align-items:center;gap:5px}
+[data-area="portal"] .nav-dropdown button{display:flex;align-items:center;gap:10px}
+[data-area="portal"] .action-menu .button{display:inline-flex;align-items:center;gap:4px}
+[data-area="portal"] .att-flag svg{vertical-align:-2px;margin-right:4px}
+[data-area="portal"] .icon-button{display:inline-grid;place-items:center;width:42px;min-width:42px;padding:0}
+[data-area="portal"] .icon-button.is-on{background:#1598D1;border-color:#1598D1;color:#F7FAFC}
+
+/* Empty states say what to do next */
+[data-area="portal"] .empty-state{display:grid;justify-items:center;gap:8px;padding:40px 24px;text-align:center}
+[data-area="portal"] .empty-state strong{color:#F7FAFC;font-family:var(--head-font);font-size:1.15rem}
+[data-area="portal"] .empty-state p{max-width:420px;margin:0;color:#AAB6BC;line-height:1.5}
+[data-area="portal"] .empty-state .button{margin-top:6px}
+
+/* Loading placeholders */
+[data-area="portal"] .skeleton{display:grid;gap:12px}
+[data-area="portal"] .skeleton span{display:block;border-radius:var(--r-sm);background:linear-gradient(90deg,rgba(255,255,255,.08),rgba(255,255,255,.16),rgba(255,255,255,.08));background-size:200% 100%;animation:skeleton-shine 1.3s linear infinite}
+[data-area="portal"] .skeleton-title{width:min(60%,280px);height:30px}
+[data-area="portal"] .skeleton-line.is-short{width:min(40%,200px);height:14px}
+[data-area="portal"] .skeleton-card{display:grid;gap:14px;padding:22px;border-radius:var(--r-lg);background:#2A2D31}
+[data-area="portal"] .skeleton-card span{background:linear-gradient(90deg,#33373B,#3A3E43,#33373B);background-size:200% 100%}
+[data-area="portal"] .skeleton-row{display:grid!important;grid-template-columns:minmax(0,1fr) 90px;gap:16px;background:none!important;animation:none!important}
+[data-area="portal"] .skeleton-row span{height:18px}
+@keyframes skeleton-shine{from{background-position:200% 0}to{background-position:-200% 0}}
+
+/* Sign-in page:one plain sentence and the form, nothing decorative */
+.main:has(.sign-in-page){display:flex;align-items:center;min-height:calc(100vh - 56px);min-height:calc(100svh - 56px);padding:32px 0}
+[data-area="portal"] .sign-in-page{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);align-items:center;gap:clamp(32px,7vw,96px);width:min(100%,1040px);margin:0 auto}
+[data-area="portal"] .sign-in-tagline{max-width:520px;margin:0 0 30px;color:#F7FAFC;font-size:clamp(2rem,4.2vw,3.1rem);line-height:1.08}
+[data-area="portal"] .sign-in-who{display:grid;gap:14px;max-width:440px;margin:0;padding:22px 0 0;border-top:1px solid rgba(255,255,255,.14);list-style:none}
+[data-area="portal"] .sign-in-who li{display:flex;gap:12px;color:#AAB6BC;font-size:.92rem;line-height:1.5}
+[data-area="portal"] .sign-in-who svg{flex:0 0 auto;margin-top:2px;color:#1598D1}
+[data-area="portal"] .sign-in-who strong{color:#F7FAFC}
+[data-area="portal"] .sign-in-card{padding:28px}
+[data-area="portal"] .guest-home{max-width:480px;margin:40px auto;padding:28px}
+[data-area="portal"] .guest-home h1{margin:0 0 8px;font-size:1.5rem}
+@media (max-width:860px){
+  .main:has(.sign-in-page){align-items:flex-start;padding:22px 0 32px}
+  [data-area="portal"] .sign-in-page{grid-template-columns:1fr;gap:22px}
+  [data-area="portal"] .sign-in-tagline{margin:6px 0 0;font-size:1.75rem}
+  [data-area="portal"] .sign-in-who{order:3;padding-top:18px}
+  [data-area="portal"] .sign-in-panel{order:2}
+  [data-area="portal"] .sign-in-intro{display:contents}
+  [data-area="portal"] .sign-in-tagline{order:1}
+  [data-area="portal"] .sign-in-card{padding:22px}
+}
+
+/* Dashboard tabs:"someone is waiting" is a yellow dot beside the total (the number itself
+   is on the Test tab and read out to screen readers), so the tab never has to squeeze. */
+[data-area="portal"] .tab-count.has-badge{display:inline-flex;align-items:center;gap:5px}
+@media (min-width:761px){[data-area="portal"] .dashboard-tabs{width:auto;grid-template-columns:repeat(3,auto)}}
+[data-area="portal"] .dashboard-tabs .tab-label{overflow:visible;text-overflow:clip;white-space:nowrap}
+[data-area="portal"] .tab-count .tab-badge{position:static;flex:0 0 8px;width:8px;min-width:8px;height:8px;padding:0;border-radius:50%;font-size:0;box-shadow:none}
+
+/* Test created */
+[data-area="portal"] .created-note{display:inline-flex;align-items:center;gap:6px;margin:0;color:#27B66F;font-weight:700}
+
+/* Dashboard:the code beside the title, four live numbers, one settings line */
+[data-area="portal"] .dashboard-head-copy{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+[data-area="portal"] .dash-code{color:#AAB6BC;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.8rem;letter-spacing:.03em}
+[data-area="portal"] .dash-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:18px}
+[data-area="portal"] .dash-stats>div{display:grid;gap:2px;padding:14px 16px;background:#33373B}
+[data-area="portal"] .dash-stats strong{color:#F7FAFC;font-family:var(--head-font);font-size:2rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+[data-area="portal"] .dash-stats span{color:#AAB6BC;font-size:.8rem;font-weight:700}
+[data-area="portal"] .dash-stats>div.is-attention{background:rgba(21,152,209,.12);box-shadow:inset 3px 0 0 #1598D1}
+[data-area="portal"] .dash-stats>div.is-attention strong{color:#F39A4A}
+[data-area="portal"] .dash-settings{margin:16px 0 0;color:#AAB6BC;font-size:.86rem;line-height:1.6}
+[data-area="portal"] .dash-settings .link-button{font-size:.86rem}
+[data-area="portal"] .students-toolbar{flex-wrap:wrap}
+[data-area="portal"] .students-toolbar>div:first-child{flex:1 1 220px}
+[data-area="portal"] .dash-keys{flex:1 1 100%;margin:0;color:#AAB6BC;font-size:.74rem}
+[data-area="portal"] kbd{display:inline-block;min-width:18px;margin:0 1px;padding:1px 5px;border:1px solid #474C52;border-bottom-width:2px;border-radius:5px;background:#2A2D31;color:#F7FAFC;font:700 .7rem/1.4 ui-monospace,SFMono-Regular,Consolas,monospace;text-align:center}
+@media (max-width:760px){
+  [data-area="portal"] .dash-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  [data-area="portal"] .dash-keys{display:none}
+}
+
+/* Tables:rows reachable by keyboard, headers stay in view, a compact mode */
+[data-area="portal"] .live-table tbody tr:focus{outline:none}
+[data-area="portal"] .live-table tbody tr:focus-visible{box-shadow:inset 3px 0 0 #1598D1;background:rgba(21,152,209,.12)}
+@media (min-width:1000px){
+  [data-area="portal"] .students-card .table-scroll{overflow:visible}
+  [data-area="portal"] .students-card .live-table thead th{position:sticky;top:calc(56px + var(--dash-head, 0px));z-index:3;background:#2A2D31;box-shadow:0 1px 0 #474C52}
+}
+[data-area="portal"] .students-card.is-compact .live-table td{padding-top:5px;padding-bottom:5px}
+[data-area="portal"] .students-card.is-compact .person-avatar{width:26px;height:26px;font-size:.66rem}
+[data-area="portal"] .students-card.is-compact .button-small{min-height:28px;padding:4px 9px}
+[data-area="portal"] .students-card.is-compact .table-subtext{font-size:.72rem}
+
+/* Attendance:a mark that has just arrived slides in, so the teacher sees who scanned */
+[data-area="portal"] .att-table tr.is-new td{animation:att-arrive 1.6s ease-out}
+@keyframes att-arrive{0%{background:rgba(21,152,209,.12);transform:translateY(-6px);opacity:0}15%{transform:none;opacity:1}100%{background:transparent}}
+[data-area="portal"] .att-kicker{color:#AAB6BC;text-transform:none;letter-spacing:0;font-size:.85rem;font-weight:700}
+
+@media (prefers-reduced-motion:reduce){
+  [data-area="portal"] *{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}
+}

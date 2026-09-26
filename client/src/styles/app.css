@@ -1,0 +1,1356 @@
+/* Composition rules for the React screens. Visual tokens stay in base.css. */
+
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+/* ------------------------------------------------------------ admin portal */
+.page-title-row{display:flex;align-items:end;justify-content:space-between;gap:18px;margin:10px 0 22px;color:#F7FAFC}
+.page-title-row h1{margin:4px 0;font-size:clamp(2rem,4vw,3rem);letter-spacing:-.06em}
+.page-title-row p:not(.eyebrow){margin:0;color:#AAB6BC}
+.page-title-row .eyebrow{color:#1598D1}
+.admin-list .empty{color:#AAB6BC;background:transparent;border-color:rgba(255,255,255,.3)}
+.test-list-row>div:first-child h2{margin:0;color:#F7FAFC;font-size:1.15rem;letter-spacing:-.03em}
+.test-list-row>div:first-child p{margin:5px 0 0;color:#AAB6BC;font-size:.87rem}
+.test-code-small{padding:5px 9px;border-radius:100px;background:rgba(21,152,209,.12);color:#F7FAFC;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:.7rem;font-weight:700}
+.test-list-row .table-actions{justify-content:flex-end}
+.test-list-openable{cursor:pointer;outline:none}
+.test-list-openable:focus-visible{box-shadow:inset 0 0 0 2px #1598D1;border-radius:10px}
+.test-list-openable:hover h2{text-decoration:underline;text-underline-offset:4px}
+.overview-actions .button-secondary{background:#2A2D31;color:#F7FAFC;border-color:#474C52}
+.overview-actions .button-secondary:hover:not(:disabled){background:#1598D1;color:#F7FAFC;border-color:#1598D1}
+.overview-actions .button-secondary:disabled{background:#33373B;color:#AAB6BC;border-color:#474C52}
+.students-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 4px 16px}
+.students-toolbar h2{margin:0;font-size:1.2rem}
+.students-toolbar p{margin:4px 0 0;color:var(--muted);font-size:.83rem}
+.students-toolbar .controls{justify-content:flex-end}
+.students-toolbar .text-input{width:270px}
+.table-scroll{overflow:auto}
+.table-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.action-menu{position:relative}
+.menu-items{position:absolute;top:calc(100% + 6px);z-index:5;display:grid;min-width:205px;padding:6px;border:1px solid #474C52;border-radius:12px;background:#2A2D31;box-shadow:0 16px 40px rgba(0,0,0,0.4)}
+.menu-items button:hover{background:#33373B}
+.menu-items button.danger{color:#EF5B5F}
+.modal-close{float:right}
+.modal-actions{display:flex;justify-content:flex-end;padding-top:18px;gap:8px}
+.setup-form{display:grid;gap:12px;margin-top:16px}
+.setup-form .form-grid{margin-top:2px}
+.setup-form .toggle-option{margin-top:2px}
+.setup-form .location-settings{margin:2px 0}
+.setup-form .wide-select{margin:0}
+.pool-picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:13px;border:1px solid #474C52;border-radius:12px;background:#33373B}
+.pool-picker label{display:grid;grid-template-columns:auto 54px;align-items:center;gap:6px;font-size:.74rem;font-weight:700;color:#F7FAFC}
+.pool-picker input{width:54px;height:35px;border:1px solid #474C52;border-radius:7px;padding:0 6px;font:inherit}
+.pool-picker small{grid-column:1/-1;color:#AAB6BC;font-weight:500}
+.pool-picker.is-empty{opacity:.55}
+/* ------------------------------------------------------- the student's paper */
+.paper-head{display:flex;justify-content:space-between;align-items:flex-start;gap:18px;margin:8px 0 18px;flex-wrap:wrap}
+.paper-head h1{margin:0;font-size:clamp(1.4rem,4vw,2rem);letter-spacing:-.045em;line-height:1.1}
+.paper-clock{display:flex;align-items:center;gap:14px;padding:12px 18px;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:0 6px 18px rgba(0,0,0,0.13)}
+.paper-clock strong{display:block;font-size:1.5rem;font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:1}
+.paper-clock span{display:block;margin-top:3px;color:var(--muted);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em}
+.paper-clock.is-low strong{color:var(--danger)}
+.paper-clock.is-over{border-color:var(--danger);background:rgba(239,91,95,.14)}
+.paper-clock.is-over strong{font-size:1.05rem;color:var(--danger)}
+.paper-layout{display:grid;grid-template-columns:minmax(0,1fr) 250px;align-items:start;gap:18px}
+.paper-palette{position:sticky;top:16px;display:grid;gap:13px;padding:17px}
+.paper-palette h2{margin:0;font-size:.95rem;letter-spacing:-.02em}
+.palette-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:8px}
+.palette-button{display:grid;place-items:center;min-height:44px;padding:0;border:1.5px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink);font:inherit;font-size:.9rem;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer;transition:transform .12s ease,border-color .12s ease}
+.palette-button:hover{transform:translateY(-1px);border-color:var(--brand-dark)}
+.palette-button.is-answered{border-color:var(--success);background:rgba(39,182,111,.14);color:#27B66F}
+.palette-button.is-locked{border-style:dashed;color:var(--muted)}
+.palette-button.is-locked.is-answered{background:#33373B;border-color:#474C52;color:#D5DEE2}
+.palette-button.is-current{outline:2px solid var(--brand-dark);outline-offset:2px}
+.palette-legend{display:grid;gap:6px;margin:0;padding-top:3px;border-top:1px solid var(--line);color:var(--muted);font-size:.74rem;line-height:1.45}
+.palette-legend span{display:flex;align-items:center;gap:7px}
+.palette-key{width:13px;height:13px;border:1.5px solid var(--line);border-radius:4px;flex:0 0 auto}
+.palette-key.answered{border-color:var(--success);background:rgba(39,182,111,.14)}
+.palette-key.locked{border-style:dashed;border-color:#474C52;background:#33373B}
+.palette-progress{margin:0;color:var(--muted);font-size:.8rem}
+.paper-question{display:grid;gap:16px}
+.paper-question-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.paper-question-head h2{margin:0;font-size:1.15rem;letter-spacing:-.025em;line-height:1.35}
+.paper-question .options{margin:0}
+.paper-nav{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);grid-template-areas:"prev skip next" "status status status";align-items:center;gap:10px}
+.paper-nav .nav-prev{grid-area:prev;justify-self:start}
+.paper-nav .nav-skip{grid-area:skip}
+.paper-nav .nav-next{grid-area:next;justify-self:end}
+.paper-nav .nav-status{grid-area:status;margin:0;text-align:center}
+.answer-state.is-skipped{color:#F39A4A}
+.palette-button.is-skipped{border-style:dashed;border-color:#1598D1;color:#F39A4A}
+.palette-key.skipped{border-style:dashed;border-color:#1598D1}
+.answer-state{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:.78rem;font-weight:700}
+.answer-state.is-locked{color:#D5DEE2}
+.answer-state.is-saved{color:var(--success)}
+.option[disabled]{cursor:not-allowed;opacity:.85}
+.option[disabled]:hover{border-color:var(--line);background:var(--surface)}
+.option.selected[disabled]{opacity:1}
+.short-answer[readonly]{background:var(--wash);color:var(--muted)}
+.time-over-banner{display:grid;gap:4px}
+.time-over-banner strong{font-size:.95rem}
+@media (max-width:900px){
+  .paper-layout{grid-template-columns:1fr}
+  .paper-palette{position:static;order:-1}
+  .palette-grid{grid-template-columns:repeat(auto-fill,minmax(42px,1fr))}
+}
+@media (max-width:850px){
+  .students-toolbar{align-items:flex-start;flex-direction:column}
+  .students-toolbar .controls{width:100%;justify-content:stretch}
+  .students-toolbar .text-input{width:auto;flex:1 1 220px}
+}
+@media (max-width:680px){
+  .page-title-row{align-items:flex-start;flex-direction:column}
+  .page-title-row .button{width:100%}
+  .test-list-row .table-actions{justify-content:flex-start}
+  .students-card{padding:17px 8px}
+  .students-toolbar .controls{flex-direction:column}
+  .students-toolbar .text-input,.students-toolbar .select,.students-toolbar .button{width:100%}
+  .pool-picker{grid-template-columns:1fr}
+  .modal-actions .button{width:100%}
+  .paper-head{gap:12px}
+  .paper-clock{width:100%;justify-content:space-between}
+  /* Phones:Previous and Next side by side at equal width, Skip on its own row. */
+  .paper-nav{grid-template-columns:1fr 1fr;grid-template-areas:"prev next" "skip skip" "status status"}
+  .paper-nav .nav-prev,.paper-nav .nav-next,.paper-nav .nav-skip{justify-self:stretch;width:100%}
+}
+
+/* --------------------------------------------------- secondary buttons ----
+   base.css ends with a theme block written for the old full-dark UI, whose
+   `.button-secondary{background:transparent;color:#F7FAFC}
+` made every secondary
+   button sitting on a white card invisible - present, clickable, and taking up
+   space, but unreadable. Cards are the common case in this app, so the light
+   treatment is the default here and the genuinely dark places opt back in. */
+.button-secondary{background:#2A2D31;border-color:#474C52;color:#F7FAFC}
+.button-secondary:hover:not(:disabled){background:#1598D1;border-color:#1598D1;color:#F7FAFC}
+.button-secondary:disabled{background:#33373B;border-color:#474C52;color:#AAB6BC}
+/* The quiz list sits directly on the dark shell, so it keeps the light-on-dark
+   treatment. */
+.test-list-row .button-secondary{background:transparent;border-color:rgba(255,255,255,.62);color:#F7FAFC}
+.test-list-row .button-secondary:hover:not(:disabled){background:#2A2D31;border-color:#474C52;color:#F7FAFC}
+/* ------------------------------------------------- dashboard sections ---- */
+.dashboard-head-copy{min-width:0}
+.dashboard-tabs button:hover{color:#F7FAFC}
+.dashboard-tabs button[aria-selected="true"]{background:#1598D1;color:#F7FAFC;box-shadow:0 5px 14px rgba(0,0,0,0.48)}
+.tab-count{min-width:22px;padding:2px 7px;border-radius:100px;background:rgba(14,15,17,0.1);color:#F7FAFC;font-size:.72rem;font-variant-numeric:tabular-nums}
+.dashboard-tabs button[aria-selected="true"] .tab-count{background:rgba(255,255,255,.22);color:#F7FAFC}
+.overview-facts div{display:grid;align-content:center;gap:4px;min-height:60px;padding:10px 13px;border:1px solid var(--line);border-radius:11px;background:var(--wash)}
+.qr-panel p{margin:0;color:var(--muted);font-size:.83rem;line-height:1.45}
+.students-card{padding:22px 20px}
+.students-card .live-table{font-size:.88rem}
+.students-card .table-actions{justify-content:flex-end;flex-wrap:nowrap}
+.students-card .pill{margin-top:6px}
+@media (max-width:1100px){
+  .overview-grid{grid-template-columns:1fr}
+}
+@media (max-width:680px){
+  .dashboard-head{padding:18px 18px 0}
+  .dashboard-tabs{width:100%}
+  .dashboard-tabs button{flex:1 1 auto;justify-content:center;padding:9px 12px}
+  .students-card .table-actions{flex-wrap:wrap;justify-content:flex-start}
+}
+
+/* ------------------------------------------------------ menus and badges --- */
+.menu-items.menu-right{right:0}
+.menu-items.menu-left{left:0}
+.menu-items button{min-height:auto;padding:9px 10px;border:0;border-radius:7px;background:transparent;color:#F7FAFC;text-align:left;font:inherit;font-size:.78rem;font-weight:700;white-space:nowrap;width:100%}
+.action-menu .button-small{white-space:nowrap}
+.tab-badge{padding:3px 9px;border-radius:100px;background:rgba(21,152,209,.12);color:#F39A4A;font-size:.68rem;font-weight:700;white-space:nowrap}
+.dashboard-tabs button[aria-selected="true"] .tab-badge{background:#1598D1;color:#F7FAFC}
+.live-table th.column-actions{text-align:right}
+.students-card .live-table td:last-child{text-align:right}
+.table-subtext.is-waiting{color:#F39A4A;font-weight:700}
+/* ------------------------------------------------- fitting one viewport ----
+   The dashboard is a control panel, not a document:an admin should be able to
+   see the whole state of a test without scrolling. These rules trade generous
+   spacing for that, and the tables keep their own inner scroll. */
+.main-wide{width:min(100% - clamp(28px,5vw,72px),1460px);padding-top:14px;padding-bottom:22px}
+.dashboard-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:0 2px;margin-bottom:14px}
+.dashboard-head h1{margin:1px 0 0;font-size:clamp(1.3rem,2.3vw,1.8rem);letter-spacing:-.05em}
+.dashboard-head-copy>p:not(.eyebrow){margin:6px 0 0;max-width:72ch;color:#AAB6BC;line-height:1.5;font-size:.88rem}
+.dashboard-head-copy .pill{margin-top:7px}
+.dashboard-tabs{display:flex;gap:4px;padding:4px;border:1px solid #474C52;border-radius:13px;background:#33373B}
+.dashboard-tabs button{display:flex;align-items:center;gap:8px;min-height:36px;padding:7px 16px;border:0;border-radius:9px;background:transparent;color:#AAB6BC;font:inherit;font-size:.82rem;font-weight:700;letter-spacing:-.01em;cursor:pointer;white-space:nowrap}
+.overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px);gap:16px;align-items:stretch}
+.overview-panel{display:grid;grid-template-rows:auto auto 1fr;gap:15px;padding:20px 24px;align-content:start}
+.overview-panel h2{margin:0;font-size:1rem;letter-spacing:-.02em}
+.overview-panel .help{margin:6px 0 0;line-height:1.45}
+.overview-actions{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.overview-facts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-content:center;gap:10px;padding:16px 0 0;border-top:1px solid var(--line)}
+.overview-facts span{color:var(--muted);font-size:.67rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.overview-facts strong{font-size:.95rem;letter-spacing:-.02em;line-height:1.25;overflow-wrap:anywhere}
+.qr-panel{display:grid;justify-items:center;gap:9px;padding:18px;text-align:center;align-content:center}
+.qr-panel h2{margin:0;font-size:.95rem}
+.qr-panel .qr{width:min(100%,190px);margin:0;cursor:zoom-in;padding:9px;border-radius:12px}
+.qr-panel .test-code-display{margin:0;font-size:.92rem}
+
+/* Short viewports get the scroll back rather than an unreadable squeeze. */
+@media (min-height:760px){
+  .overview-panel{padding:22px 26px}
+  .qr-panel .qr{width:min(100%,215px)}
+}
+
+/* ------------------------------------------------------ end-time editing --- */
+.time-now{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:14px;padding:13px 16px;border:1px solid var(--line);border-radius:12px;background:var(--wash)}
+.time-now span{display:block;color:var(--muted);font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.time-now strong{display:block;margin-top:3px;font-size:1rem;letter-spacing:-.02em}
+
+.mode-switch{display:flex;gap:4px;padding:4px;border:1px solid #474C52;border-radius:11px;background:#33373B}
+.mode-switch button{flex:1 1 0;min-height:36px;border:0;border-radius:8px;background:transparent;color:#AAB6BC;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer}
+.mode-switch button[aria-selected="true"]{background:#1598D1;color:#F7FAFC}
+
+.quick-picks{display:flex;gap:8px;flex-wrap:wrap}
+.quick-picks button{min-height:38px;padding:8px 15px;border:1px solid #474C52;border-radius:9px;background:#2A2D31;color:#F7FAFC;font:inherit;font-size:.82rem;font-weight:700;cursor:pointer}
+.quick-picks button:hover{border-color:#1598D1}
+.quick-picks button.is-chosen{border-color:#1598D1;background:#1598D1;color:#F7FAFC}
+
+.time-preview{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;padding:14px 16px;border:1px solid #474C52;border-radius:12px;background:#33373B}
+.time-preview span{display:block;color:var(--muted);font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.time-preview strong{display:block;margin-top:3px;font-size:1rem;letter-spacing:-.02em}
+
+@media (max-width:1240px){ .overview-facts{grid-template-columns:repeat(4,minmax(0,1fr))} }
+@media (max-width:1100px){ .overview-facts{grid-template-columns:repeat(3,minmax(0,1fr))} }
+@media (max-width:560px){ .overview-facts{grid-template-columns:repeat(2,minmax(0,1fr))} }
+
+/* ------------------------------------------------------------- people rows --
+   A registration is a person, so the row leads with one:an initials badge
+   anchors the left edge and the identifiers stack beneath the name, instead of
+   three small pills drifting in wide columns. */
+.person{display:flex;align-items:center;gap:10px;min-width:0}
+.person-avatar{flex:0 0 auto;display:grid;place-items:center;width:31px;height:31px;border-radius:50%;background:rgba(21,152,209,.12);color:#F7FAFC;font-size:.7rem;font-weight:700;letter-spacing:.02em}
+.person-avatar.is-guest{background:rgba(21,152,209,.12);color:#F39A4A}
+.person-detail{display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;min-width:0}
+.person-detail strong{font-size:.92rem;letter-spacing:-.015em;line-height:1.3}
+.person-detail .table-subtext{display:inline;margin:0;overflow-wrap:anywhere}
+.person-detail .pill{margin:0}
+
+.live-table tbody tr{transition:background .12s ease}
+.students-card .live-table tbody tr:hover{background:#33373B}
+.students-card .live-table td{padding:9px 12px;vertical-align:middle;border-color:#474C52}
+.students-card .live-table td .pill{margin-top:0}
+.students-card .live-table td .table-subtext{margin-top:0}
+.decision-made{color:var(--muted);font-size:.82rem;font-weight:700}
+
+/* Keep the decision cluster beside the data rather than marooned at the edge. */
+.students-card .live-table th:last-child,.students-card .live-table td:last-child{width:1%;white-space:nowrap;padding-right:4px}
+.students-card .live-table th:nth-child(2),.students-card .live-table td:nth-child(2){width:15%}
+.students-card .live-table th:nth-child(3),.students-card .live-table td:nth-child(3){width:14%}
+
+/* Cells read left to right:a pill and its detail share one line. */
+.cell-inline{display:flex;align-items:center;flex-wrap:wrap;gap:4px 9px;min-width:0}
+.cell-inline .table-subtext{display:inline;margin:0}
+.cell-inline .pill{margin:0}
+.students-card .live-table th{padding:6px 12px 9px;font-size:.73rem}
+.students-card .live-table .table-actions{align-items:center}
+
+/* --------------------------------------------------------- modal backdrop --
+   A frosted backdrop:the scrim alone was opaque enough to hide the page, so
+   it is lightened here to let the blur actually read. */
+
+/* Without backdrop-filter, keep the heavier scrim so the dialog still stands out. */
+@supports not (backdrop-filter:blur(1px)){
+  .qr-preview-overlay{background:rgba(14,15,17,0.82)}
+}
+
+@keyframes modal-fade-in{from{opacity:0}to{opacity:1}}
+@keyframes modal-sheet-in{from{opacity:0;transform:translateY(10px) scale(.985)}to{opacity:1;transform:none}}
+.qr-preview-overlay{background:rgba(14,15,17,0.52);backdrop-filter:blur(9px) saturate(118%);animation:modal-fade-in .16s ease-out}
+.student-analysis-sheet{animation:modal-sheet-in .2s cubic-bezier(.2,.8,.2,1)}
+
+@media (prefers-reduced-motion:reduce){
+  .qr-preview-overlay,.student-analysis-sheet{animation:none}
+}
+
+/* Single-page papers:the questions stack, each keeping its own card. */
+.paper-list{display:grid;gap:16px}
+.paper-list .paper-question{scroll-margin-top:18px}
+
+/* An answer held on this device, not yet acknowledged by the server. */
+.answer-state.is-unsent{color:#F39A4A}
+.palette-button.is-unsent{border-style:dotted;border-color:#1598D1;background:rgba(21,152,209,.12);color:#F39A4A}
+.connection-notice{display:grid;gap:4px}
+.connection-notice strong{font-size:.95rem}
+
+/* ------------------------------------------------------ integrity on paper */
+/* Opaque on purpose:while the student is away the questions must not show through. */
+.away-gate{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:16px;background:var(--wash)}
+.away-gate-card{width:min(100%,440px);text-align:center}
+.away-gate-card h2{margin:4px 0 10px;letter-spacing:-.03em}
+.away-gate-card p{line-height:1.5}
+.away-gate-card .button{margin-top:18px}
+.integrity-note{margin:0 0 12px;color:var(--warning)}
+.integrity-report{margin:4px 0 18px}
+.integrity-report h2{margin:0 0 4px;font-size:1.05rem}
+.integrity-timeline summary{cursor:pointer;font-weight:700;font-size:.86rem}
+.integrity-timeline ol{margin:10px 0 0;padding-left:18px;max-height:260px;overflow:auto;font-size:.82rem;line-height:1.55}
+.integrity-timeline time{color:var(--muted);margin-right:8px;font-variant-numeric:tabular-nums}
+
+/* Drawn on <body> (see ActionMenu), so no table scroll box or panel clip can cut it off. */
+.menu-items.menu-floating{position:fixed;z-index:1100;max-height:calc(100vh - 16px);overflow-y:auto}
+.students-toolbar .controls{flex-wrap:wrap}
+@media (max-width:760px){.students-toolbar{flex-direction:column;align-items:stretch}.students-toolbar .controls{justify-content:stretch}.students-toolbar .text-input{width:100%;flex:1 1 100%}.students-toolbar .controls .select,.students-toolbar .controls .button{flex:1 1 auto}}
+
+/* A newer build is on the server (see useAppUpdate). */
+.update-banner{position:fixed;z-index:1200;left:50%;bottom:20px;transform:translateX(-50%);display:flex;align-items:center;gap:12px;width:max-content;max-width:calc(100vw - 32px);padding:10px 12px 10px 16px;border-radius:12px;background:#2A2D31;color:#F7FAFC;box-shadow:0 12px 34px rgba(0,0,0,0.55);font-size:.86rem;font-weight:700}
+@media (max-width:560px){.update-banner{flex-direction:column;align-items:stretch;text-align:center}}
+
+/* The dark theme paints quiet buttons white; on the white question card Skip needs its own ink. */
+.paper-nav .nav-skip{padding:10px 16px;border:1.5px dashed #1598D1;border-radius:10px;background:rgba(21,152,209,.12);color:#F39A4A}
+.paper-nav .nav-skip:hover{background:rgba(21,152,209,.12)}
+
+/* ------------------------------------------- student pages that never scroll
+   The QR landing, registration, waiting and result cards are one fixed
+   screen. The shell used `min-height:100vh`, and on a phone 100vh is the
+   height with the address bar HIDDEN - taller than what is visible while it
+   shows - so the page scrolled by the height of the bar. Pin the shell to the
+   visible height instead (dvh follows the bar as it appears and hides), and
+   let only the card scroll inside itself if its content is long. */
+.shell:has(.join-card),.shell:has(.success-card){height:100vh;height:100dvh;min-height:0;overflow:hidden}
+.main:has(.join-card),.main:has(.success-card){height:calc(100dvh - 56px);margin:0 auto}
+@media (max-width:760px){.main:has(.join-card),.main:has(.success-card){height:calc(100dvh - 52px)}}
+/* The signed-in home screen kept the default page margins under its full-height hero. */
+@media (min-width:761px){.main:has(.quiz-hero){margin:0 auto}.main:has(.quiz-hero),.main:has(.quiz-hero) .quiz-hero{min-height:calc(100dvh - 56px)}}
+
+/* Time limit choice (create / edit test). */
+.segmented{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;border:1px solid #474C52;border-radius:12px;background:#33373B}
+.segmented button{min-height:38px;padding:8px 14px;border:0;border-radius:9px;background:transparent;color:#D5DEE2;font:inherit;font-size:.85rem;font-weight:750;cursor:pointer}
+.segmented button.is-on{background:#1598D1;color:#F7FAFC}
+.paper-clock.is-untimed strong{font-size:1rem}
+
+
+/* ---------------------------------------------------- test form controls
+   Clickable cards, steppers and switches (components/FormControls.jsx),
+   shared by Create a test, Edit test setup and Edit running test. */
+.form-group-title{margin-top:10px;padding-top:18px;border-top:1px solid #474C52}
+.form-grid>.form-group-title:first-of-type{margin-top:0}
+.form-group-title h2{margin:0;color:#F7FAFC;font-size:1.02rem;letter-spacing:-.02em}
+.form-group-title p{margin:3px 0 0;color:#AAB6BC;font-size:.8rem}
+
+.choice-field .field-label{margin-bottom:8px}
+.choice-cards{display:grid;grid-template-columns:repeat(var(--choice-columns,2),minmax(0,1fr));gap:10px}
+.choice-card{position:relative;display:flex;align-items:flex-start;gap:12px;width:100%;min-height:74px;padding:14px 40px 14px 14px;border:1.5px solid #474C52;border-radius:14px;background:#2A2D31;color:#F7FAFC;font:inherit;text-align:left;cursor:pointer;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
+.choice-card:hover{border-color:#474C52;transform:translateY(-1px)}
+.choice-card:focus-visible{outline:3px solid rgba(21,152,209,0.55);outline-offset:2px}
+.choice-card.is-on{border-color:#1598D1;background:rgba(21,152,209,.12);box-shadow:0 0 0 1px #1598D1}
+.choice-icon{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px;border-radius:10px;background:#33373B;color:#F7FAFC;font-size:1.05rem;font-weight:700}
+.choice-card.is-on .choice-icon{background:#1598D1;color:#1598D1}
+.choice-text strong{display:block;font-size:.9rem;line-height:1.3}
+.choice-text small{display:block;margin-top:3px;color:#AAB6BC;font-size:.77rem;line-height:1.4}
+.choice-tick{position:absolute;top:12px;right:12px;display:grid;place-items:center;width:20px;height:20px;border:1.5px solid #474C52;border-radius:50%;color:#F7FAFC;font-size:.7rem;font-weight:700}
+.choice-card.is-on .choice-tick{border-color:#1598D1;background:#1598D1}
+
+.stepper-field .field-label{margin-bottom:8px}
+.stepper{display:inline-flex;align-items:stretch;height:46px;border:1.5px solid #474C52;border-radius:12px;background:#2A2D31;overflow:hidden}
+.stepper:focus-within{border-color:#1598D1;box-shadow:0 0 0 3px rgba(21,152,209,0.25)}
+.stepper button{width:44px;border:0;background:#33373B;color:#F7FAFC;font:inherit;font-size:1.25rem;font-weight:700;cursor:pointer}
+.stepper button:hover:not(:disabled){background:#1598D1;color:#F7FAFC}
+.stepper button:disabled{color:#AAB6BC;cursor:not-allowed}
+.stepper input{width:64px;border:0;border-inline:1px solid #474C52;text-align:center;font:inherit;font-size:1rem;font-weight:700;color:#F7FAFC;-moz-appearance:textfield;appearance:textfield}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.stepper input:focus{outline:none}
+.stepper-unit{display:flex;align-items:center;padding:0 12px 0 2px;color:#AAB6BC;font-size:.8rem;font-weight:700;border-right:1px solid #474C52}
+.stepper.is-disabled{opacity:.5}
+.stepper-presets{margin-top:9px}
+.stepper-presets button{min-height:32px;padding:5px 12px;font-size:.76rem}
+.quick-picks button.is-on{border-color:#1598D1;background:#1598D1;color:#F7FAFC}
+.quick-picks button:disabled{opacity:.5;cursor:not-allowed}
+
+.pool-picker{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;padding:14px}
+.pool-type{display:grid;gap:8px;padding:12px;border:1px solid #474C52;border-radius:12px;background:#2A2D31}
+.pool-type-name{font-size:.8rem;font-weight:700;color:#F7FAFC}
+.pool-type .stepper-field .field-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+.pool-type .stepper{height:40px;width:100%}
+.pool-type .stepper button{width:40px}
+.pool-type .stepper input{flex:1;width:auto;min-width:0}
+.pool-type small{color:#AAB6BC;font-size:.74rem}
+
+.switch-row{align-items:center;transition:border-color .15s ease,background .15s ease}
+.switch-row input{position:absolute;opacity:0;width:1px;height:1px}
+.switch-row .switch{position:relative;flex:0 0 42px;width:42px;height:24px;border-radius:99px;background:#3A3E43;transition:background .15s ease}
+.switch-row .switch::after{content:"";position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#2A2D31;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .15s ease}
+.switch-row.is-on{border-color:#1598D1;background:rgba(21,152,209,.12)}
+.switch-row.is-on .switch{background:#1598D1}
+.switch-row.is-on .switch::after{transform:translateX(18px);background:#1598D1}
+.switch-row input:focus-visible+.switch{outline:3px solid rgba(21,152,209,0.55);outline-offset:2px}
+.setup-form .choice-field,.setup-form .switch-row{margin-top:4px}
+
+@media (max-width:760px){
+  .choice-cards{grid-template-columns:1fr}
+  .pool-picker{grid-template-columns:1fr}
+  .stepper{width:100%}
+  .stepper input{flex:1}
+}
+.pool-picker .stepper input{height:auto;padding:0;border-radius:0;border-top:0;border-bottom:0}
+/* A 1fr grid column grows to its widest child (a date input, a stepper) and pushed
+   the form past the card on phones; let every column and field shrink instead. */
+.form-grid>*{min-width:0}
+.stepper input,.text-input{min-width:0}
+@media (max-width:680px){.form-grid{grid-template-columns:minmax(0,1fr)}}
+.pool-type,.pool-type .stepper-field{min-width:0}
+.pool-type .stepper{box-sizing:border-box}
+@media (max-width:760px){.pool-picker{grid-template-columns:minmax(0,1fr)}}
+
+/* Email sign-in (one-time code) */
+.sign-in-card{margin-top:24px;padding:22px;max-width:420px;background:#2A2D31;color:#F7FAFC}
+.email-sign-in{display:grid;gap:8px}
+.email-sign-in .button{margin-top:6px}
+.email-sign-in .help{margin:4px 0 0}
+.email-sign-in.is-compact{margin-top:16px}
+.otp-input{font-size:1.4rem;font-weight:700;letter-spacing:.4em;text-align:center}
+.email-sign-in-links{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:4px}
+.link-button{border:0;background:none;padding:4px 0;color:#F7FAFC;font:inherit;font-size:.82rem;font-weight:750;text-decoration:underline;cursor:pointer}
+.link-button:disabled{color:#AAB6BC;text-decoration:none;cursor:default}
+
+/* Users page */
+.users-toolbar{display:flex;justify-content:space-between;align-items:end;gap:14px;flex-wrap:wrap;margin:0 0 14px;padding:0 8px}
+.users-toolbar h2{margin:0;font-size:1.1rem;color:#F7FAFC}
+.users-toolbar .text-input{width:min(100%,300px)}
+.users-blocked{margin-top:18px}
+.users-block-form{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr) auto;gap:8px;margin:0 8px 14px}
+@media (max-width:680px){.users-block-form{grid-template-columns:minmax(0,1fr)}.users-toolbar .text-input{width:100%}}
+
+/* Faculty Microsoft sign-in */
+.microsoft-option{display:grid;gap:8px;margin-top:10px}
+.microsoft-divider{display:flex;align-items:center;gap:10px;color:#AAB6BC;font-size:.75rem;font-weight:700}
+.microsoft-divider::before,.microsoft-divider::after{content:"";flex:1;height:1px;background:#3A3E43}
+.microsoft-button{display:inline-flex;align-items:center;justify-content:center;gap:10px;text-decoration:none}
+.microsoft-mark{width:18px;height:18px;flex:0 0 18px}
+.microsoft-label-short{display:none}
+
+/* Test registration: the two college sign-in choices share one row instead
+   of making the card a tall stack. Account creation and reset keep the usual
+   full-width flow. */
+.auth-login-actions{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin-top:4px}
+.auth-login-actions.has-microsoft{grid-template-columns:repeat(2,minmax(0,1fr))}
+.auth-login-actions .microsoft-option{display:contents}
+.auth-login-actions .button,.auth-login-actions .microsoft-button{width:100%;height:44px;min-height:44px;margin:0!important}
+
+/* Login / sign-up / reset */
+.auth-title{margin:0 0 12px;font-size:1.25rem;letter-spacing:-.03em;color:#F7FAFC}
+.auth-form.is-compact{margin-top:16px}
+/* The hero centres its text; the login card reads as a form, left-aligned,
+   with its two links pushed to either edge. */
+.sign-in-card{width:min(100%,420px);text-align:left}
+.sign-in-card .auth-title,.sign-in-card .field-label{text-align:left}
+.sign-in-card .email-sign-in{justify-items:stretch}
+.email-sign-in-links{width:100%}
+.microsoft-button{color:#F7FAFC}
+
+/* Joining a test has to fit before the paper opens. Guest access is a mode,
+   not a second form below the first one. */
+.main:has(.test-sign-in-card) .test-sign-in-card{width:min(100%,720px);padding:22px 26px}
+.test-sign-in-card>p:not(.eyebrow):not(.help){margin:5px 0 0;font-size:.9rem;line-height:1.42}
+.test-sign-in-card .sign-in-note{margin:12px 0 0;padding:10px 13px;font-size:.84rem}
+.test-sign-in-card .auth-form.is-compact{margin-top:10px}
+.test-sign-in-card .auth-title{margin-bottom:8px;font-size:1.08rem}
+.test-sign-in-card .email-sign-in{gap:6px}
+.test-sign-in-card .email-sign-in>.field-label{margin:2px 0 1px}
+.test-sign-in-card .text-input{height:42px}
+.test-sign-in-card .email-sign-in-links{margin-top:0}
+.sign-in-methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-top:10px;padding:4px;border-radius:12px;background:#33373B}
+.sign-in-methods button{min-height:34px;border:0;border-radius:9px;background:transparent;color:#AAB6BC;font:inherit;font-size:.8rem;font-weight:700;cursor:pointer}
+.sign-in-methods button.is-on{background:#2A2D31;color:#F7FAFC;box-shadow:0 1px 3px rgba(0,0,0,.28)}
+.guest-sign-in{margin-top:10px}
+.guest-sign-in .help{margin:0 0 8px;font-size:.76rem}
+.test-sign-in-card .guest-sign-in form{gap:6px;margin-top:0}
+.guest-sign-in .button{height:42px;min-height:42px}
+
+@media (max-width:520px){
+  .microsoft-label-full{display:none}
+  .microsoft-label-short{display:inline}
+}
+
+@media (max-width:760px){
+  .main:has(.test-sign-in-card){padding:6px 0}
+  .main:has(.test-sign-in-card) .test-sign-in-card{padding:14px 16px;border-radius:14px}
+  .test-sign-in-card .eyebrow{margin:0 0 3px}
+  .test-sign-in-card h1{margin-bottom:4px;font-size:1.45rem}
+  .test-sign-in-card>p:not(.eyebrow):not(.help){display:-webkit-box;margin:0;font-size:.8rem;line-height:1.35;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+  .test-sign-in-card .sign-in-note{margin-top:8px;padding:8px 10px;font-size:.76rem}
+  .sign-in-methods{margin-top:8px}
+  .test-sign-in-card .auth-form.is-compact,.guest-sign-in{margin-top:8px}
+  .test-sign-in-card .auth-title{margin-bottom:5px;font-size:1rem}
+  .test-sign-in-card .text-input{height:40px}
+  .auth-login-actions .button,.auth-login-actions .microsoft-button,.guest-sign-in .button{height:40px;min-height:40px;font-size:.8rem;padding-left:8px;padding-right:8px}
+  .test-sign-in-card .email-sign-in-links{font-size:.76rem}
+}
+
+/* Signed-out home:brand on the left, login card on the right */
+.login-hero{grid-template-columns:minmax(0,1fr) minmax(340px,430px);align-items:center;gap:clamp(32px,7vw,110px);min-height:calc(100vh - 140px);text-align:left}
+.login-copy{max-width:520px}
+.login-copy h1{font-size:clamp(4.2rem,9vw,7.6rem)}
+.login-copy>p:not(.eyebrow){margin-top:22px!important;font-size:1.08rem!important;color:#AAB6BC}
+.login-points{list-style:none;margin:30px 0 0;padding:0;display:grid;gap:14px}
+.login-points li{display:flex;align-items:center;gap:14px;color:#AAB6BC;font-size:.94rem;line-height:1.45}
+.login-points span{flex:0 0 32px;display:grid;place-items:center;width:32px;height:32px;border-radius:50%;background:#1598D1;color:#F7FAFC;font-weight:700;font-size:.85rem}
+.login-panel{position:relative;z-index:1;display:grid;gap:14px;width:100%}
+.login-panel .notice{margin:0}
+.login-panel .sign-in-card{width:100%;max-width:none;margin:0;padding:30px 28px;border-radius:20px;box-shadow:0 24px 60px rgba(0,0,0,0.55)}
+.login-panel .auth-title{font-size:1.5rem;margin-bottom:16px}
+.login-panel .text-input{height:48px}
+.login-panel .email-sign-in .button-primary{height:48px;font-size:.95rem}
+/* The hero turns secondary buttons white-on-dark; inside the white card the
+   Microsoft button needs dark text to be readable. */
+.sign-in-card .microsoft-button,.join-card .microsoft-button{background:#2A2D31;color:#F7FAFC;border:1px solid #474C52;height:48px;font-weight:700}
+.sign-in-card .microsoft-button:hover,.join-card .microsoft-button:hover{background:#33373B;color:#F7FAFC;border-color:#474C52}
+.test-sign-in-card .auth-login-actions>.button,.test-sign-in-card .auth-login-actions .microsoft-button{box-sizing:border-box;width:100%;height:44px;min-height:44px;margin:0!important;padding:0 12px;line-height:1}
+@media (max-width:760px){
+  .test-sign-in-card .auth-login-actions>.button,.test-sign-in-card .auth-login-actions .microsoft-button{height:40px;min-height:40px;padding:0 8px;font-size:.8rem}
+}
+@media (max-width:860px){
+  .login-hero{grid-template-columns:minmax(0,1fr);min-height:auto;padding:36px 0 70px;gap:30px}
+  .login-copy h1{font-size:clamp(3.6rem,18vw,5rem)}
+  .login-points{display:none}
+  .login-panel .sign-in-card{padding:24px 20px}
+}
+
+/* Users page filters */
+.users-filters{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;margin:0 8px 16px}
+.segmented-count{margin-left:6px;padding:1px 7px;border-radius:99px;background:rgba(14,15,17,0.1);font-size:.72rem}
+.segmented button.is-on .segmented-count{background:rgba(255,255,255,.22)}
+.users-sort{display:inline-flex;align-items:center;gap:8px;margin-left:auto;color:#D5DEE2;font-size:.82rem;font-weight:750}
+.users-sort .select{height:40px;color:#F7FAFC}
+@media (max-width:680px){.users-sort{margin-left:0}}
+
+/* =================== Taking a test:one screen, no page scroll =================== */
+.exam-layout{width:min(100%,1180px)}
+.main:has(.exam-fit){padding-bottom:12px}
+.exam-fit{display:flex;flex-direction:column;gap:12px;height:calc(100dvh - 56px - 30px);min-height:460px}
+.exam-scroll{display:grid;gap:14px}
+
+/* Top bar:title + progress, timer, submit */
+.exam-bar{display:flex;align-items:center;gap:18px;padding:14px 18px;border-radius:18px}
+.exam-title{flex:1;min-width:0}
+.exam-title .eyebrow{margin:0 0 2px;color:#F39A4A;font-size:.68rem}
+.exam-title h1{margin:0;color:#F7FAFC;font-size:clamp(1.05rem,2.2vw,1.35rem);letter-spacing:-.03em;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.exam-progress{display:flex;align-items:center;gap:10px;margin-top:8px}
+.exam-progress-track{flex:1;max-width:320px;height:7px;border-radius:99px;background:#33373B;overflow:hidden}
+.exam-progress-track span{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#1598D1,#1598D1);transition:width .3s ease}
+.exam-progress-label{color:#AAB6BC;font-size:.74rem;font-weight:700;white-space:nowrap}
+.exam-bar .paper-clock{padding:9px 16px;border-radius:12px;box-shadow:none;background:#33373B;border-color:#474C52}
+.exam-bar .paper-clock strong{font-size:1.35rem;color:#F7FAFC}
+.exam-bar .paper-clock.is-low{background:rgba(239,91,95,.14);border-color:rgba(239,91,95,.45)}
+.exam-bar .paper-clock.is-low strong{color:var(--danger)}
+.exam-submit{min-height:46px;padding:0 24px;font-size:.95rem}
+
+.exam-notices{display:grid;gap:8px}
+.exam-notices:empty{display:none}
+.exam-notices .notice,.exam-notices .integrity-note{margin:0;padding:9px 14px;font-size:.84rem}
+.exam-notices .integrity-note{border-radius:10px;background:rgba(21,152,209,.12)}
+
+/* Question + navigator fill the rest of the screen */
+.exam-fit .paper-layout{flex:1;min-height:0;grid-template-columns:minmax(0,1fr) 264px;align-items:stretch;gap:12px}
+.paper-main{min-width:0;min-height:0;display:flex;flex-direction:column}
+.paper-question.is-single{flex:1;min-height:0;display:flex;flex-direction:column;gap:0;padding:0;overflow:hidden;border-radius:18px}
+.paper-question-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid #474C52}
+.paper-list .paper-question-head{padding:0 0 12px}
+.question-badge{display:inline-flex;align-items:baseline;padding:5px 11px;border-radius:9px;background:#1598D1;color:#F7FAFC;font-weight:700;font-size:.9rem;font-variant-numeric:tabular-nums}
+.question-badge small{margin-left:1px;color:#AAB6BC;font-size:.72rem;font-weight:700}
+.question-type{padding:4px 10px;border-radius:99px;background:#33373B;color:#D5DEE2;font-size:.72rem;font-weight:700}
+.paper-question-head .answer-state{margin-left:auto}
+.paper-question-body{flex:1;min-height:0;overflow:auto;padding:22px 22px 18px}
+.paper-list .paper-question-body{padding:0}
+.paper-question-body h2{margin:0;color:#F7FAFC;font-size:clamp(1.05rem,2vw,1.3rem);line-height:1.45;letter-spacing:-.015em;font-weight:750;white-space:pre-wrap}
+.question-hint{margin:8px 0 18px;color:#AAB6BC;font-size:.8rem;font-weight:700}
+
+/* Options:letter badges */
+.paper-question .options{display:grid;gap:10px}
+.paper-question .option{min-height:54px;padding:11px 14px;border:1.5px solid #474C52;border-radius:13px;transition:border-color .15s,background .15s,transform .1s}
+.paper-question .option:hover:not([disabled]){border-color:#1598D1;background:rgba(21,152,209,.12)}
+.paper-question .option:active:not([disabled]){transform:scale(.995)}
+.paper-question .choice-symbol{flex:0 0 30px;width:30px;height:30px;border:1.5px solid #474C52;border-radius:9px;background:#33373B;color:#D5DEE2;font-size:.82rem;font-weight:700}
+.paper-question .options.msq .choice-symbol{border-radius:6px}
+.paper-question .option.selected{border-color:#1598D1;background:rgba(21,152,209,.12);box-shadow:0 0 0 1px #1598D1}
+.paper-question .option.selected .choice-symbol{border-color:#1598D1;background:#1598D1;color:#F7FAFC}
+.option-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.paper-question .short-answer{min-height:160px;height:100%;max-height:360px}
+
+/* Bottom bar:Previous / Reset / Next */
+.paper-question.is-single .paper-nav{display:grid;grid-template-columns:1fr auto 1fr;grid-template-areas:"prev reset next" "status status status";align-items:center;gap:6px 10px;padding:12px 22px;border-top:1px solid #474C52;background:#33373B}
+.paper-nav .nav-prev{grid-area:prev;justify-self:start;min-width:130px}
+.paper-nav .nav-next{grid-area:next;justify-self:end;min-width:130px}
+.nav-reset{grid-area:reset;border:1.5px solid rgba(239,91,95,.45);background:#2A2D31;color:#EF5B5F;font-weight:700}
+.nav-reset:hover:not(:disabled){background:rgba(239,91,95,.14);border-color:rgba(239,91,95,.45)}
+.nav-reset:disabled{border-color:#474C52;color:#AAB6BC;background:#2A2D31;cursor:not-allowed}
+.paper-nav .nav-status{grid-area:status;margin:0;text-align:center;color:#AAB6BC;font-size:.72rem}
+.paper-list-actions{display:flex;justify-content:flex-end;margin-top:12px}
+
+/* Navigator */
+.exam-fit .paper-palette{position:static;align-self:stretch;min-height:0;overflow:auto;border-radius:18px;align-content:start}
+.palette-head{display:flex;align-items:center;justify-content:space-between}
+.palette-head h2{margin:0;font-size:.95rem}
+.palette-count{padding:3px 9px;border-radius:99px;background:rgba(39,182,111,.14);color:#27B66F;font-size:.75rem;font-weight:700}
+.palette-grid{grid-template-columns:repeat(auto-fill,minmax(42px,1fr));gap:7px}
+.palette-button{min-height:42px;border-radius:10px}
+.palette-button.is-current{outline:none;border-color:#1598D1;background:#1598D1;color:#F7FAFC;box-shadow:0 4px 12px rgba(0,0,0,0.55)}
+.palette-button.is-current.is-answered{background:#27B66F;border-color:rgba(39,182,111,.4);color:#F7FAFC}
+.palette-legend{display:flex;flex-wrap:wrap;gap:6px 14px}
+
+/* Tablets:navigator above, as a strip */
+@media (max-width:900px){
+  .exam-fit .paper-layout{display:flex;flex-direction:column}
+  .exam-fit .paper-palette{order:-1;flex:0 0 auto;padding:10px 12px;gap:0;overflow:visible}
+  .exam-fit .palette-head,.exam-fit .palette-legend,.exam-fit .palette-progress{display:none}
+  .exam-fit .palette-grid{display:flex;gap:6px;overflow-x:auto;padding:2px;scrollbar-width:thin}
+  .exam-fit .palette-button{flex:0 0 40px;min-height:40px}
+  .paper-main{flex:1}
+}
+
+/* Phones */
+@media (max-width:760px){
+  .exam-fit{height:calc(100dvh - 52px - 16px);min-height:0;gap:8px}
+  .main:has(.exam-fit){padding-top:8px;padding-bottom:8px}
+  .exam-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title title" "clock submit";gap:8px 10px;padding:10px 12px;border-radius:14px}
+  .exam-title{grid-area:title}
+  .exam-title .eyebrow{display:none}
+  .exam-title h1{font-size:1rem}
+  .exam-progress{margin-top:6px}
+  .exam-progress-track{max-width:none}
+  .exam-bar .paper-clock{grid-area:clock;width:auto;padding:6px 12px}
+  .exam-bar .paper-clock strong{font-size:1.1rem}
+  .exam-bar .paper-clock span{font-size:.6rem}
+  .exam-submit{grid-area:submit;min-height:40px;padding:0 18px}
+  .exam-fit .paper-palette{padding:7px 8px;border-radius:14px}
+  .exam-fit .palette-button{flex-basis:36px;min-height:36px;font-size:.82rem}
+  .paper-question.is-single{border-radius:14px}
+  .paper-question-head{padding:10px 14px;gap:8px}
+  .paper-question-body{padding:14px 14px 12px}
+  .question-hint{margin:6px 0 12px}
+  .paper-question .option{min-height:48px;padding:9px 11px;gap:10px}
+  .paper-question .choice-symbol{flex-basis:27px;width:27px;height:27px}
+  .paper-question.is-single .paper-nav{grid-template-columns:1fr auto 1fr;grid-template-areas:"prev reset next";padding:9px 10px;gap:8px}
+  .paper-nav .nav-prev,.paper-nav .nav-next{min-width:0;width:100%;justify-self:stretch;padding:0 10px}
+  .paper-nav .nav-status{display:none}
+  .exam-notices .notice{padding:7px 10px;font-size:.78rem}
+}
+@media (max-width:380px){
+  .nav-label{display:none}
+  .paper-question-head .question-type{display:none}
+}
+
+/* Lock screen */
+.lock-card h1{font-variant-numeric:tabular-nums}
+.lock-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
+.lock-stats div{padding:14px;border-radius:12px;background:rgba(239,91,95,.14);text-align:center}
+.lock-stats strong{display:block;font-size:1.6rem;color:#EF5B5F}
+.lock-stats span{color:#AAB6BC;font-size:.78rem;font-weight:700}
+/* Paused by the teacher is a hold, not a penalty: blue, not the lock's red. */
+.pause-card .lock-stats div{background:rgba(21,152,209,.14)}
+.pause-card .lock-stats strong{color:#3DB3E6}
+
+/* Tapping an option must never move the paper:no double-tap zoom, and a
+   header row that cannot wrap when its save label changes. */
+.exam-layout button,.paper-question .option{touch-action:manipulation}
+.paper-question-head{flex-wrap:nowrap;min-width:0}
+.paper-question-head .answer-state{white-space:nowrap;flex:0 0 auto}
+.paper-question-head .question-type{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.paper-question-body{overscroll-behavior:contain}
+
+/* Exit counter chip in the top bar */
+.exam-progress{flex-wrap:wrap;row-gap:6px}
+.exit-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:99px;background:#33373B;color:#D5DEE2;font-size:.72rem;font-weight:700;white-space:nowrap;cursor:help}
+.exit-chip.is-warn{background:rgba(239,91,95,.14);color:#EF5B5F}
+
+/* Screenshot deterrents:no selection or long-press menu on the paper,
+   a watermark naming the student, a shield on screenshot keys, no printing. */
+.exam-protected{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.exam-protected textarea,.exam-protected input{-webkit-user-select:text;user-select:text}
+.paper-layout{position:relative}
+.screenshot-shield{position:absolute;inset:0;z-index:6;display:grid;place-content:center;gap:6px;padding:20px;border-radius:18px;background:#1598D1;color:#F7FAFC;text-align:center}
+.screenshot-shield strong{font-size:1.2rem}
+.screenshot-shield span{color:#AAB6BC;font-size:.88rem}
+.paper-layout.is-shielded .paper-main,.paper-layout.is-shielded .paper-palette{visibility:hidden}
+@media print{
+  body *{visibility:hidden!important}
+  body::after{content:"Printing the test is not allowed.";visibility:visible;position:fixed;inset:40% 0 auto;text-align:center;font:700 20px sans-serif;color:#F7FAFC}
+}
+@media (max-width:760px){
+  .exit-chip{font-size:.66rem;padding:2px 8px}
+}
+
+.exam-lock-label{color:#1598D1;font-size:.78rem;font-weight:700;letter-spacing:.01em}
+
+/* Phones:the login page fits one screen - tighter spacing, a smaller heading,
+   no empty band at the bottom, and even tighter on short screens. */
+@media (max-width:860px){
+  .main:has(.login-hero){padding-top:0;padding-bottom:0}
+  .login-hero{min-height:calc(100dvh - 64px);padding:18px 0 22px;gap:18px;align-content:center}
+  .login-hero::after{width:300px;height:110px;right:-150px;bottom:-70px}
+  .login-hero::before{width:260px;height:90px;left:-120px;top:-80px}
+  .login-copy .eyebrow{margin-bottom:10px!important}
+  .login-copy h1{font-size:clamp(3rem,15vw,4.2rem)}
+  .login-copy>p:not(.eyebrow){margin-top:10px!important;font-size:.95rem!important}
+  .login-panel .sign-in-card{padding:20px 18px;border-radius:18px}
+  .login-panel .auth-title{font-size:1.25rem;margin-bottom:10px}
+  .login-panel .email-sign-in{gap:6px}
+  .login-panel .text-input,.login-panel .email-sign-in .button-primary,.login-panel .microsoft-button{height:44px;min-height:44px}
+  .login-panel .microsoft-option{margin-top:6px;gap:6px}
+}
+@media (max-width:760px){
+  .login-hero{min-height:calc(100dvh - 52px)}
+}
+@media (max-width:860px) and (max-height:700px){
+  .login-hero{padding:10px 0 12px;gap:12px}
+  .login-copy .eyebrow{display:none}
+  .login-copy h1{font-size:2.6rem}
+  .login-copy>p:not(.eyebrow){margin-top:6px!important;font-size:.88rem!important}
+  .login-panel .sign-in-card{padding:16px 16px}
+  .login-panel .text-input,.login-panel .email-sign-in .button-primary,.login-panel .microsoft-button{height:40px;min-height:40px}
+}
+
+.integrity-info{margin:0;padding:12px 14px;border-radius:12px;background:#33373B;line-height:1.5}
+.screenshot-shield{z-index:20}
+
+/* ===================== Test window:minimal, light, teal ===================== */
+.shell.is-exam{padding-top:0;background:#33373B}
+.shell.is-exam .main{width:min(100% - 24px,720px);max-width:720px;margin:0 auto;padding:14px 0}
+.exam-screen{--teal:#1598D1;--teal-soft:rgba(21,152,209,.12);--ink:#F7FAFC;--muted:#AAB6BC;--faint:#AAB6BC;--rule:#474C52;
+  display:flex;flex-direction:column;gap:12px;height:calc(100dvh - 28px);color:var(--ink)}
+.exam-screen.is-list{height:auto;min-height:calc(100dvh - 28px)}
+
+/* Top line:name + progress, exits, timer */
+.exam-top{display:flex;align-items:center;gap:12px}
+.exam-name{flex:1;min-width:0}
+.exam-name h1{margin:0;font-size:1rem;font-weight:700;letter-spacing:-.01em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.exam-name span{display:block;margin-top:2px;font-size:.78rem;color:var(--muted)}
+.exam-exits{font-size:.78rem;color:var(--muted);white-space:nowrap;cursor:help}
+.exam-exits.is-warn{color:#F39A4A}
+.exam-timer{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:#2A2D31;color:var(--teal);font-size:.95rem;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;box-shadow:0 1px 2px rgba(21,152,209,0.06)}
+.exam-timer.is-low{color:#F39A4A}
+.exam-timer.is-over{color:#EF5B5F}
+.exam-track{height:3px;border-radius:99px;background:#3A3E43;overflow:hidden}
+.exam-track span{display:block;height:100%;background:var(--teal);transition:width .3s ease}
+
+/* Numbered circles */
+.q-dots{display:flex;gap:8px;overflow-x:auto;padding:3px 2px;scrollbar-width:none}
+.q-dots::-webkit-scrollbar{display:none}
+.q-dot{flex:0 0 34px;height:34px;border:0;border-radius:50%;background:transparent;color:var(--muted);font:inherit;font-size:.85rem;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;touch-action:manipulation}
+.q-dot:hover{background:#3A3E43}
+.q-dot.is-done{background:var(--teal);color:#F7FAFC}
+.q-dot.is-final.is-done{background:#474C52}
+.q-dot.is-current{background:#2A2D31;color:var(--teal);box-shadow:inset 0 0 0 2px var(--teal)}
+.q-dot.is-current.is-done{background:var(--teal);color:#F7FAFC;box-shadow:0 0 0 3px var(--teal-soft)}
+
+/* Notices, kept quiet */
+.exam-notices{display:grid;gap:8px}
+.exam-notices:empty{display:none}
+.exam-screen .notice{margin:0;padding:10px 14px;border-radius:12px;background:rgba(21,152,209,.12);color:#F39A4A;font-size:.84rem;line-height:1.45}
+.exam-screen .notice.danger{background:rgba(239,91,95,.14);color:#EF5B5F}
+
+/* The question */
+.exam-body{position:relative;flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}
+.exam-screen.is-list .exam-body{overflow:visible}
+.q-list{display:grid;gap:12px}
+.q-list .q-card{scroll-margin-top:12px}
+.q-card{padding:20px;border-radius:16px;background:#2A2D31;box-shadow:0 1px 3px rgba(21,152,209,0.06)}
+.q-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
+.q-count{font-size:.9rem;font-weight:700;color:var(--ink)}
+.q-count span{color:var(--faint);font-weight:600}
+.q-state{font-size:.75rem;color:var(--faint)}
+.q-state.is-saved{color:var(--teal)}
+.q-prompt{margin:0;font-size:1.08rem;font-weight:500;line-height:1.55;letter-spacing:0;color:var(--ink);white-space:pre-wrap}
+.q-hint{margin:8px 0 16px;font-size:.78rem;color:var(--faint)}
+.q-options{display:grid;gap:10px}
+.q-option{display:flex;align-items:center;gap:12px;width:100%;min-height:50px;padding:10px 14px;border:1px solid var(--rule);border-radius:12px;background:#2A2D31;color:var(--ink);font:inherit;font-size:.95rem;line-height:1.4;text-align:left;cursor:pointer;transition:background .15s,border-color .15s,color .15s;touch-action:manipulation}
+.q-option:hover:not(:disabled){border-color:#1598D1}
+.q-letter{flex:0 0 28px;height:28px;display:grid;place-items:center;border-radius:50%;background:#33373B;color:#AAB6BC;font-size:.8rem;font-weight:700}
+.q-options.is-multi .q-letter{border-radius:7px}
+.q-option.is-selected{border-color:var(--teal);background:var(--teal);color:#F7FAFC}
+.q-option.is-selected .q-letter{background:rgba(255,255,255,.22);color:#F7FAFC}
+.q-option:disabled{cursor:default}
+.q-option:disabled:not(.is-selected){opacity:.7}
+.q-option-text{flex:1;min-width:0;overflow-wrap:anywhere}
+.q-text{display:block;width:100%;min-height:160px;padding:12px 14px;border:1px solid var(--rule);border-radius:12px;background:#2A2D31;color:var(--ink);font:inherit;line-height:1.5;resize:vertical}
+.q-text:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-soft)}
+.q-text[readonly]{background:#33373B;color:var(--muted)}
+.q-clear{margin-top:14px;padding:0;border:0;background:none;color:var(--muted);font:inherit;font-size:.82rem;text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.q-clear:hover{color:var(--ink)}
+
+/* Bottom:round previous / next, submit between */
+.exam-foot{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.exam-screen.is-list .exam-foot{justify-content:center;position:sticky;bottom:10px}
+.exam-arrow{display:grid;place-items:center;width:48px;height:48px;flex:0 0 48px;border:0;border-radius:50%;background:var(--teal);color:#F7FAFC;cursor:pointer;touch-action:manipulation}
+.exam-arrow:disabled{background:#3A3E43;cursor:default}
+.exam-submit{flex:1;max-width:260px;height:48px;border:1.5px solid var(--teal);border-radius:999px;background:#2A2D31;color:var(--teal);font:inherit;font-size:.95rem;font-weight:700;cursor:pointer;touch-action:manipulation}
+.exam-submit:hover:not(:disabled){background:var(--teal);color:#F7FAFC}
+.exam-submit:disabled{opacity:.6;cursor:default}
+.q-dot:focus-visible,.q-option:focus-visible,.exam-arrow:focus-visible,.exam-submit:focus-visible,.q-clear:focus-visible{outline:2px solid var(--teal);outline-offset:2px}
+
+/* Screenshot shield, in the same palette */
+.exam-body .screenshot-shield{position:absolute;inset:0;z-index:20;display:grid;place-content:center;gap:6px;padding:20px;border-radius:16px;background:var(--ink);color:#F7FAFC;text-align:center}
+.exam-body .screenshot-shield span{color:#AAB6BC}
+.exam-body.is-shielded .q-card,.exam-body.is-shielded .q-list{visibility:hidden}
+/* Strict timing:the closed question is covered while the next one is fetched */
+.exam-body .strict-switching{position:absolute;inset:0;z-index:15;display:grid;place-content:center;padding:20px;border-radius:16px;background:#2A2D31;color:var(--muted,#AAB6BC);font-weight:600;text-align:center}
+
+@media (max-width:560px){
+  .shell.is-exam .main{width:calc(100% - 20px);padding:10px 0}
+  .exam-screen{height:calc(100dvh - 20px);gap:10px}
+  .exam-screen.is-list{min-height:calc(100dvh - 20px)}
+  .exam-name h1{font-size:.95rem}
+  .exam-timer{padding:6px 10px;font-size:.9rem}
+  .q-card{padding:16px}
+  .q-prompt{font-size:1rem}
+  .q-option{min-height:46px;padding:9px 12px;font-size:.92rem}
+  .q-dot{flex-basis:32px;height:32px}
+  .exam-arrow{width:46px;height:46px;flex-basis:46px}
+  .exam-submit{height:46px}
+}
+
+/* A test never scrolls the page:the window is exactly one screen tall. */
+.shell.is-exam{height:100dvh;min-height:0;overflow:hidden}
+html:has(.shell.is-exam),body:has(.shell.is-exam){overflow:hidden;height:100%}
+.shell.is-exam:has(.exam-screen.is-list){height:auto;overflow:visible}
+html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;height:auto}
+/* Clipped, not just hidden: a hidden box can still be scrolled by the browser
+   bringing the answer box into view, which pushed the test's title off the top
+   with no way to scroll it back. */
+@supports (overflow:clip){.shell.is-exam{overflow:clip}}
+
+/* Typing on a phone: the keyboard takes about half the screen, and the page is
+   resized to what is left (interactive-widget in index.html). Keep the timer
+   and the question; the title, the line under the timer, the question dots and
+   the Next / Submit bar come back as soon as the keyboard closes. */
+@media (max-height:560px){
+  .exam-screen:has(.q-text:focus){gap:8px}
+  .exam-screen:has(.q-text:focus) .exam-head-top,
+  .exam-screen:has(.q-text:focus) .exam-sub,
+  .exam-screen:has(.q-text:focus) .q-dots,
+  .exam-screen:has(.q-text:focus) .exam-foot{display:none}
+}
+
+/* ============ Notch / camera cut-out:keep everything in the safe area ============
+   The page is laid out under the notch (viewport-fit=cover), and a test runs
+   fullscreen, where phones hand the whole screen to the page. env() reports
+   how much of each edge the notch or rounded corners cover - 0 elsewhere. */
+.site-header{padding-top:env(safe-area-inset-top);padding-left:max(clamp(24px,7vw,84px),env(safe-area-inset-left));padding-right:max(clamp(24px,7vw,84px),env(safe-area-inset-right));height:calc(56px + env(safe-area-inset-top))}
+.shell{padding-top:calc(56px + env(safe-area-inset-top))}
+@media (max-width:760px){
+  .site-header{height:calc(52px + env(safe-area-inset-top));padding-left:max(20px,env(safe-area-inset-left));padding-right:max(20px,env(safe-area-inset-right))}
+  .shell{padding-top:calc(52px + env(safe-area-inset-top))}
+}
+.shell.is-exam{padding-top:0}
+.shell.is-exam .main{
+  padding-top:calc(14px + env(safe-area-inset-top));
+  padding-bottom:calc(14px + env(safe-area-inset-bottom));
+  padding-left:env(safe-area-inset-left);
+  padding-right:env(safe-area-inset-right)
+}
+.exam-screen{height:calc(100dvh - 28px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+@media (max-width:560px){
+  .shell.is-exam .main{padding-top:calc(10px + env(safe-area-inset-top));padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+  .exam-screen{height:calc(100dvh - 20px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+}
+
+/* ============ Test window in the portal's own colours:purple + yellow ============ */
+.shell.is-exam{background:#1598D1}
+.exam-screen{--teal:#1598D1;--teal-soft:rgba(21,152,209,.12);--ink:#F7FAFC;--muted:#AAB6BC;--faint:#AAB6BC;--rule:#474C52;--accent:#1598D1;color:#F7FAFC}
+.exam-name h1{color:#F7FAFC}
+.exam-name span{color:#AAB6BC}
+.exam-exits{color:#AAB6BC}
+.exam-exits.is-warn{color:#FF9DA0}
+.exam-timer{background:#2A2D31;color:#F7FAFC;box-shadow:none}
+.exam-timer.is-low{background:rgba(239,91,95,.14);color:#F39A4A}
+.exam-timer.is-over{background:rgba(239,91,95,.14);color:#EF5B5F}
+.exam-track{background:rgba(255,255,255,.16)}
+.exam-track span{background:var(--accent)}
+
+.q-dot{color:#AAB6BC}
+.q-dot:hover{background:rgba(255,255,255,.1)}
+.q-dot.is-done{background:var(--accent);color:#F7FAFC}
+.q-dot.is-final.is-done{background:#474C52;color:#F7FAFC}
+.q-dot.is-current{background:transparent;color:#F7FAFC;box-shadow:inset 0 0 0 2px #474C52}
+.q-dot.is-current.is-done{background:var(--accent);color:#F7FAFC;box-shadow:0 0 0 3px rgba(21,152,209,0.35)}
+
+.q-card{box-shadow:none}
+.q-state.is-saved{color:#27B66F}
+.q-letter{background:#33373B;color:#D5DEE2}
+.q-option:hover:not(:disabled){border-color:#1598D1}
+.q-option.is-selected{border-color:var(--accent);background:var(--accent);color:#F7FAFC}
+.q-option.is-selected .q-letter{background:#1598D1;color:var(--accent)}
+.q-text:focus{border-color:#1598D1;box-shadow:0 0 0 3px #474C52}
+.q-clear{color:var(--muted)}
+
+.exam-arrow{background:var(--accent);color:#F7FAFC}
+.exam-arrow:disabled{background:rgba(255,255,255,.14);color:rgba(255,255,255,.45)}
+.exam-submit{border-color:#474C52;background:transparent;color:#F7FAFC}
+.exam-submit:hover:not(:disabled){background:#2A2D31;color:#F7FAFC}
+.q-dot:focus-visible,.q-option:focus-visible,.exam-arrow:focus-visible,.exam-submit:focus-visible,.q-clear:focus-visible{outline-color:var(--accent)}
+.exam-body .screenshot-shield{background:#1598D1}
+
+/* Top:the heading across the full width, then timer, exits, time away */
+.exam-top{display:grid;gap:10px}
+.exam-heading{margin:0;color:#F7FAFC;font-size:clamp(1.05rem,2.4vw,1.3rem);font-weight:700;line-height:1.3;letter-spacing:-.01em;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+.exam-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.exam-stat{display:inline-flex;align-items:baseline;gap:5px;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,.1);color:#AAB6BC;font-size:.82rem;white-space:nowrap;cursor:help}
+.exam-stat strong{color:#F7FAFC;font-weight:700;font-variant-numeric:tabular-nums}
+.exam-stat.is-marked{background:rgba(21,152,209,0.16);color:#7CCBEF}
+.exam-stat.is-marked strong{color:#1598D1}
+.exam-answered{margin-left:auto;color:#AAB6BC;font-size:.82rem;white-space:nowrap}
+@media (max-width:560px){
+  .exam-top{gap:8px}
+  .exam-meta{gap:6px}
+  .exam-stat{padding:6px 10px;font-size:.78rem}
+  .exam-answered{font-size:.78rem}
+}
+@media (max-width:370px){.exam-answered{display:none}}
+
+/* Home page on phones:exactly one screen. The header (plus any notch) and
+   the page must add up to the screen height - no stray margin either. */
+@media (max-width:860px){
+  .main:has(.login-hero){margin-top:0;margin-bottom:0}
+  .login-hero{min-height:calc(100dvh - 56px - env(safe-area-inset-top))}
+}
+@media (max-width:760px){
+  .login-hero{min-height:calc(100dvh - 52px - env(safe-area-inset-top))}
+}
+
+/* Activity log in the analysis popup */
+.activity-log{margin-top:14px}
+.activity-log summary{cursor:pointer;font-weight:700;color:#F7FAFC;margin-bottom:10px}
+.activity-filter{display:inline-flex;gap:4px;padding:3px;margin-bottom:10px;border-radius:10px;background:#33373B}
+.activity-filter button{border:0;background:transparent;padding:6px 12px;border-radius:8px;font:inherit;font-size:.8rem;font-weight:700;color:#D5DEE2;cursor:pointer}
+.activity-filter button.is-on{background:#1598D1;color:#F7FAFC}
+.activity-log ol{list-style:none;margin:0;padding:0;max-height:420px;overflow:auto;border:1px solid #474C52;border-radius:12px}
+.activity-log li{display:grid;grid-template-columns:78px 64px 1fr;gap:10px;align-items:baseline;padding:8px 12px;border-bottom:1px solid #474C52;font-size:.84rem;color:#F7FAFC}
+.activity-log li:last-child{border-bottom:0}
+.activity-log time{color:#AAB6BC;font-variant-numeric:tabular-nums}
+.activity-kind{font-size:.7rem;font-weight:700;color:#AAB6BC;text-transform:uppercase;letter-spacing:.04em}
+.activity-text small{display:block;margin-top:2px;color:#AAB6BC;font-size:.78rem}
+.activity-log li.is-exit,.activity-log li.is-flag,.activity-log li.is-lock{background:rgba(239,91,95,.14)}
+.activity-log li.is-exit .activity-kind,.activity-log li.is-flag .activity-kind,.activity-log li.is-lock .activity-kind{color:#EF5B5F}
+.activity-log li.is-submit,.activity-log li.is-start{background:rgba(39,182,111,.14)}
+.activity-log li.is-submit .activity-kind,.activity-log li.is-start .activity-kind{color:#27B66F}
+@media (max-width:560px){.activity-log li{grid-template-columns:66px 1fr}.activity-kind{display:none}}
+
+/* "Open this test in an Incognito window" */
+.private-steps{margin:14px 0;padding-left:20px;display:grid;gap:8px;color:#F7FAFC;line-height:1.5}
+.private-steps kbd{display:inline-block;padding:1px 6px;border:1px solid #474C52;border-bottom-width:2px;border-radius:5px;background:#33373B;font:inherit;font-size:.8rem;font-weight:700}
+.private-card .link-box{margin:6px 0 12px}
+
+/* Dashboard tabs:one fixed size, whatever the numbers do */
+.dashboard-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:min(100%,520px);gap:4px}
+.dashboard-tabs button{justify-content:center;gap:7px;padding:7px 10px;overflow:hidden}
+.tab-label{overflow:hidden;text-overflow:ellipsis}
+.tab-count{position:relative;display:inline-grid;place-items:center;min-width:26px;height:22px;padding:0 7px;font-weight:700;line-height:1}
+.tab-badge{position:absolute;top:-7px;right:-9px;display:grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border-radius:99px;background:#1598D1;color:#F7FAFC;font-size:.62rem;font-weight:700;line-height:1;box-shadow:0 0 0 2px #474C52}
+.dashboard-tabs button[aria-selected="true"] .tab-badge{box-shadow:0 0 0 2px #1598D1}
+@media (max-width:680px){.dashboard-tabs{width:100%}.dashboard-tabs button{padding:7px 8px;font-size:.78rem}}
+.tab-count.has-badge{padding-right:12px}
+.tab-badge{right:-6px}
+.tab-count.has-badge{padding-right:17px}
+.tab-badge{right:-4px;top:-8px}
+
+/* Dashboard:QR column lines up with the tabs above it, and the test's
+   phase is a dot beside the title instead of a pill. */
+.dashboard-tabs{width:min(100%,380px)}
+.overview-grid{grid-template-columns:minmax(0,1fr) 380px}
+.overview-panel{grid-template-rows:auto 1fr}
+.dashboard-head-copy h1{display:flex;align-items:center;gap:10px}
+.status-dot{flex:0 0 12px;width:12px;height:12px;border-radius:50%;background:#474C52}
+.status-dot.is-live{background:#27B66F;box-shadow:0 0 0 4px rgba(39,182,111,0.25)}
+.status-dot.is-done{background:#1598D1;box-shadow:0 0 0 4px rgba(21,152,209,0.2)}
+.status-dot.is-idle{background:#474C52;box-shadow:0 0 0 4px rgba(169,166,201,.18)}
+.qr-panel{gap:12px;padding:20px}
+.qr-panel .qr{width:min(100%,230px)}
+@media (max-width:900px){
+  .overview-grid{grid-template-columns:minmax(0,1fr)}
+  .dashboard-tabs{width:100%}
+}
+.overview-panel{grid-template-rows:auto auto;align-content:start;gap:16px}
+.overview-facts{align-content:start;padding-top:14px}
+
+.exam-stat.is-over{background:rgba(239,91,95,0.2);color:#FF9DA0}
+.exam-stat.is-over strong{color:#FF9DA0}
+
+/* The lock screen's explanation is text to read, not a footnote. */
+.lock-card .help{color:#D5DEE2;font-size:.9rem;line-height:1.6}
+.lock-card>p:not(.eyebrow):not(.help){color:#F7FAFC;font-size:1rem}
+
+/* ===================== Admin on a phone =====================
+   Every table becomes a list of cards:each row one card, each cell its own
+   line with the column name beside it. Nothing scrolls sideways. */
+@media (max-width:760px){
+  .dashboard-head{display:grid;gap:12px;padding:0}
+  .dashboard-head-copy h1{font-size:1.4rem;line-height:1.25}
+  .overview-actions{display:grid;gap:8px}
+  .overview-actions .button,.overview-actions .action-menu,.overview-actions .action-menu>button{width:100%}
+  .overview-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .overview-facts div{padding:10px 12px}
+  .overview-panel{padding:16px}
+  .qr-panel{padding:16px}
+  .students-card{padding:14px 12px}
+  .students-toolbar{padding:0 0 12px;gap:10px}
+  .students-toolbar h2{font-size:1.05rem}
+  .controls{display:grid;gap:8px;width:100%}
+  .controls .text-input,.controls .select,.controls .button{width:100%}
+
+  .table-scroll{overflow:visible}
+  .live-table,.live-table tbody,.live-table tr,.live-table td{display:block;width:100%}
+  .live-table thead{display:none}
+  .live-table tr{margin-bottom:10px;padding:12px;border:1px solid #474C52;border-radius:14px;background:#2A2D31}
+  .live-table tr:hover{background:#2A2D31}
+  .live-table td{display:grid;grid-template-columns:96px minmax(0,1fr);gap:10px;align-items:start;padding:6px 0;border:0;white-space:normal}
+  .live-table td::before{content:attr(data-label);color:#AAB6BC;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding-top:3px}
+  .live-table td[data-label="Student"],.live-table td[data-label="Person"],.live-table td[data-label="Test"]{grid-template-columns:minmax(0,1fr);padding-bottom:10px;border-bottom:1px solid #474C52;margin-bottom:4px}
+  .live-table td[data-label="Student"]::before,.live-table td[data-label="Person"]::before,.live-table td[data-label="Test"]::before{display:none}
+  .live-table td[data-label="Actions"],.live-table td[data-label="Decision"],.live-table td[data-label=""]{grid-template-columns:minmax(0,1fr);padding-top:10px;border-top:1px solid #474C52;margin-top:4px}
+  .live-table td[data-label="Actions"]::before,.live-table td[data-label="Decision"]::before,.live-table td[data-label=""]::before{display:none}
+  .students-card .live-table td:last-child{width:auto;white-space:normal;padding-right:0;text-align:left}
+  .table-actions{flex-wrap:wrap;justify-content:flex-start}
+  .table-actions .button{flex:1 1 auto;min-width:104px}
+  .person{align-items:flex-start}
+  .users-toolbar{flex-direction:column;align-items:stretch;padding:0}
+  .users-toolbar .text-input{width:100%}
+  .users-filters{margin:0 0 12px}
+  .users-block-form{margin:0 0 12px}
+  .segmented{width:100%;justify-content:space-between}
+  /* Dialogs use the whole screen, so nothing is cut off. */
+  .student-analysis-sheet{width:100%;max-width:none;max-height:92vh;border-radius:16px 16px 0 0;padding:18px 16px 24px}
+  .analysis-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+
+@media (max-width:760px){
+  /* Values stay on one line beside their label, and buttons keep their size. */
+  .live-table td .cell-inline{flex-direction:row;align-items:center;gap:6px 10px}
+  .live-table td .pill,.live-table td .table-subtext{white-space:nowrap}
+  .live-table td[data-label] .table-subtext{margin-top:0}
+  .table-actions .button{flex:0 1 auto;min-width:96px}
+  .table-actions .action-menu{flex:0 0 auto;width:auto}
+  .action-menu>button{width:auto}
+}
+
+/* A row's summary line is a plain block on a wide screen, a tap target on a phone. */
+.row-toggle{display:block;width:100%;padding:0;border:0;background:none;font:inherit;color:inherit;text-align:left}
+.row-chevron{display:none}
+
+@media (max-width:760px){
+  .row-toggle{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;min-height:44px}
+  .row-chevron{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:#33373B;color:#D5DEE2;transition:transform .18s ease}
+  .live-table tr.is-open .row-chevron{transform:rotate(180deg);background:#1598D1;color:#F7FAFC}
+  /* Closed:name and SAP ID only. Open: everything, as before. */
+  .live-table:not(.results-table) tr:not(.is-open) td:not([data-label="Student"]):not([data-label="Person"]):not([data-label="Test"]){display:none}
+  .live-table tr:not(.is-open) td[data-label="Student"]{border-bottom:0;padding-bottom:0;margin-bottom:0}
+  .live-table tr{padding:10px 12px}
+  .person-detail .pill{margin-top:4px}
+}
+
+/* ---------------------------------------------- student dashboard extras ---- */
+.my-summary{margin:0 0 16px;padding:6px 18px}
+.my-summary .analysis-summary{margin:12px 0;padding:0;border:0}
+.my-summary .analysis-summary strong{text-transform:none}
+.my-sap-id{margin:10px 0 0;color:#AAB6BC;font-size:.86rem}
+.my-sap-id strong{color:#1598D1;letter-spacing:.06em}
+.my-sap-id span{color:#AAB6BC;font-size:.78rem}
+.my-sap-missing{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0 0}
+/* Users page:the whole row opens that person. */
+.users-row-open{cursor:pointer}
+.users-row-open:hover td{background:#33373B}
+.user-results-note{margin:4px 0 14px}
+.analysis-summary-action{display:flex;align-items:center;gap:10px}
+.user-sap-form{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.user-sap-form .text-input{width:130px;height:36px}
+/* Signed out mid-test:sign back in over the paper, answers kept. */
+.signed-out-card{width:min(100%,440px);max-height:calc(100vh - 44px);overflow:auto;padding:22px;background:#2A2D31;color:#F7FAFC;text-align:left}
+.signed-out-card h2{margin:6px 0 10px;color:#F7FAFC}
+.signed-out-card .notice{margin:0 0 8px}
+
+/* ------------------------------------------------ start / end scheduling ---- */
+.schedule-choice{display:grid;gap:10px}
+.schedule-expand{padding:14px 16px;border:1px solid #474C52;border-left:4px solid #1598D1;border-radius:12px;background:rgba(21,152,209,.12);animation:schedule-open .18s ease-out}
+@keyframes schedule-open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.datetime-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.datetime-row .text-input{flex:1 1 220px;width:auto}
+.schedule-summary{margin:0}
+.schedule-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;margin:0 0 16px;padding:14px 16px;border-radius:12px;background:#33373B;color:#F7FAFC}
+.schedule-banner strong{display:block;font-size:1.05rem;font-variant-numeric:tabular-nums}
+.schedule-banner span{display:block;margin-top:3px;color:#AAB6BC;font-size:.82rem}
+.schedule-banner.is-waiting{background:rgba(21,152,209,.12)}
+.schedule-banner.is-live{background:rgba(39,182,111,.14)}
+.schedule-banner.is-ending{background:rgba(239,91,95,.14)}
+.schedule-banner.is-ending strong{color:#EF5B5F}
+.schedule-banner.is-done{background:rgba(21,152,209,.12)}
+.start-countdown{margin:6px 0 10px;font-size:clamp(2.4rem,9vw,3.4rem);font-weight:700;letter-spacing:-.04em;font-variant-numeric:tabular-nums;color:#F7FAFC}
+.waiting-pulse{display:flex;align-items:center;gap:10px}
+.waiting-pulse span{flex:0 0 10px;width:10px;height:10px;border-radius:50%;background:#27B66F;animation:waiting-pulse 1.4s ease-in-out infinite}
+@keyframes waiting-pulse{0%,100%{box-shadow:0 0 0 0 rgba(39,182,111,0.45)}50%{box-shadow:0 0 0 8px rgba(39,182,111,0)}}
+.exam-timer.is-critical{background:#EF5B5F;color:#F7FAFC;animation:timer-blink 1s steps(2,start) infinite}
+@keyframes timer-blink{50%{opacity:.75}}
+@media (prefers-reduced-motion:reduce){.schedule-expand,.waiting-pulse span,.exam-timer.is-critical{animation:none}}
+
+/* --------------------------------------------------------- strict timing ---- */
+.strict-type-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+@media (max-width:760px){.strict-type-grid{grid-template-columns:minmax(0,1fr)}}
+.question-time{margin:10px 0 4px}
+.question-time-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.question-time-row .select{min-width:220px}
+.question-time-custom{display:inline-flex;align-items:center;gap:6px;color:#AAB6BC;font-size:.84rem}
+.question-time-custom .text-input{width:110px}
+.question-clock{display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:92px;padding:4px 12px;border-radius:12px;background:#1598D1;color:#F7FAFC;line-height:1.1}
+.question-clock span{font-size:.62rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.75}
+.question-clock strong{font-size:1.15rem;font-variant-numeric:tabular-nums}
+.question-clock.is-low{background:#F39A4A}
+.question-clock.is-critical{background:#EF5B5F;animation:timer-blink 1s steps(2,start) infinite}
+.question-clock.is-free{background:rgba(21,152,209,.12);color:#F7FAFC;font-size:.8rem;font-weight:700;padding:8px 12px}
+.strict-dots span.q-dot{cursor:default}
+.strict-dots .q-dot.is-timed-out{background:rgba(239,91,95,.14);border-color:rgba(239,91,95,.45);color:#EF5B5F}
+.strict-foot{justify-content:center}
+.strict-foot .exam-submit{min-width:min(100%,320px)}
+@media (prefers-reduced-motion:reduce){.question-clock.is-critical{animation:none}}
+
+/* ------------------------------------------------------- compact forms ----
+   Choices are segmented controls, presets sit beside their stepper, and
+   switches are a plain list:the form reads top to bottom without boxes
+   inside boxes. */
+.choice-segments{display:inline-flex;flex-wrap:wrap}
+.choice-help{margin:6px 0 0}
+.schedule-fields{display:grid;gap:16px}
+.schedule-row{display:grid;gap:8px;justify-items:start}
+.schedule-row>*{max-width:100%}
+.datetime-field{width:100%}
+.datetime-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.datetime-row .text-input{flex:0 1 240px;width:auto;height:40px}
+.datetime-row .quick-picks button,.stepper-presets button{min-height:34px;padding:6px 12px;font-size:.78rem}
+.help.is-warning{margin-top:4px;color:#EF5B5F}
+.schedule-summary{margin:0;color:#D5DEE2;font-size:.84rem;line-height:1.45}
+.schedule-summary.is-problem{color:#EF5B5F;font-weight:700}
+.stepper-field{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.stepper-field>.field-label,.stepper-field>.help{flex:0 0 100%;margin:0}
+.stepper-field .stepper-presets{margin-top:0}
+.stepper{height:40px}
+.stepper button{width:38px}
+.switch-row{padding:11px 2px;border:0;border-bottom:1px solid #474C52;border-radius:0;background:transparent}
+.switch-row.is-on{background:transparent}
+.switch-row small{margin-top:2px}
+.form-group-title{margin-top:2px;padding-top:14px}
+.strict-fields{display:grid;gap:10px}
+.strict-type-grid{gap:12px 18px}
+.creator-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.creator-head-row h1{margin:0}
+.creator-head-row .json-import-actions{gap:14px}
+.creator-template{color:#AAB6BC;font-weight:700}
+.creator-head-row .json-import-actions .button{min-height:38px;border-color:rgba(255,255,255,.6);background:transparent;color:#F7FAFC}
+.creator-head-row .json-import-actions .button:hover{background:#2A2D31;color:#F7FAFC}
+.join-card>p.start-countdown{color:#F7FAFC}
+@media (max-width:680px){
+  .choice-segments{display:flex;width:100%}
+  .choice-segments button{flex:1 1 auto}
+  .datetime-row .text-input{flex:1 1 100%}
+  .creator-head-row .json-import-actions{width:auto}
+  .creator-head-row .json-import-actions .button{width:auto}
+}
+/* Questions per student:three plain columns, no box around boxes. */
+.pool-picker{padding:0;border:0;background:none;gap:12px 18px}
+.pool-type{padding:0;border:0;background:none;gap:6px}
+.switch-row.is-on{border-color:#474C52}
+@media (max-width:760px){
+  .pool-picker{gap:10px}
+  .pool-type{grid-template-columns:minmax(0,1fr) 150px;align-items:center;column-gap:12px}
+  .pool-type small{grid-column:1;grid-row:2;margin-top:-4px}
+  .pool-type .stepper-field{grid-column:2;grid-row:1/span 2}
+}
+.join-card>p.start-countdown:not(.eyebrow):not(.help){color:#F7FAFC}
+@media (max-width:680px){
+  .choice-segments{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)}
+  .choice-segments button{min-height:40px;padding:6px 8px;font-size:.78rem;line-height:1.2}
+}
+/* During a test the bottom of the screen is the Next / Submit bar:messages
+   go to the top instead, and never take a tap meant for that bar. */
+.shell.is-exam~.toast{top:max(12px,env(safe-area-inset-top));bottom:auto;pointer-events:none}
+.strict-dots .q-dot{display:inline-grid;place-items:center}
+.question-clock.is-free span{opacity:.8}
+
+.draw-summary{margin-top:6px}
+.strict-estimate{margin:0;color:#F7FAFC;font-size:.88rem}
+
+/* In-page confirmation during a test (never the browser's own dialog). */
+.confirm-gate .away-gate-card{text-align:left}
+.confirm-gate h2{margin:0 0 8px}
+.confirm-gate-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:10px;margin-top:18px}
+.confirm-gate-actions .button{min-width:120px}
+.strict-foot{gap:10px}
+.exam-submit.is-secondary{background:transparent;border:1.5px solid rgba(255,255,255,.7);color:#F7FAFC}
+.private-declare{margin-top:14px;padding-top:12px;border-top:1px solid #474C52}
+/* Strict footer:Submit and Next share the width on every screen; Next is the filled one. */
+.strict-foot .exam-submit{flex:1 1 0;min-width:0;max-width:300px;padding:0 12px;white-space:nowrap}
+.strict-foot .exam-submit:not(.is-secondary){background:#2A2D31;color:#F7FAFC}
+.strict-foot .exam-submit:not(.is-secondary):hover:not(:disabled){background:#1598D1;border-color:#1598D1}
+
+.restart-timing{display:grid;gap:8px;margin:14px 0 4px}
+.restart-choice{display:flex;align-items:center;gap:8px;font-size:.9rem;cursor:pointer}
+.restart-choice input{accent-color:#1598D1}
+
+/* Editing a test */
+.editing-note{margin:0 0 14px}
+.creator-back{border-color:rgba(255,255,255,.6);background:transparent;color:#F7FAFC}
+.on-papers{margin-left:10px;vertical-align:middle;font-size:.7rem}
+.apply-choices{display:grid;gap:10px;margin:14px 0 8px}
+.apply-choice{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1.5px solid #474C52;border-radius:12px;cursor:pointer}
+.apply-choice.is-on{border-color:#1598D1;background:rgba(21,152,209,.12)}
+.apply-choice input{margin-top:3px;accent-color:#1598D1}
+.apply-choice strong{display:block;color:#F7FAFC}
+.apply-choice ul{margin:6px 0 0;padding-left:18px;color:#D5DEE2;font-size:.84rem;line-height:1.5}
+
+/* ------------------------------------------------ exam header (phone first) ----
+   Title and exit counters on one line; below, the clocks, each labelled -
+   the whole test's time left, and under strict timing this question's. */
+.exam-title-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.exam-title-row .exam-heading{flex:1;min-width:0;-webkit-line-clamp:1}
+.exam-title-row .exam-meta{flex:0 0 auto;flex-wrap:nowrap}
+.exam-clocks{display:flex;gap:8px}
+.exam-clock{flex:1 1 0;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:1px;padding:7px 14px;border-radius:14px;background:#2A2D31;color:#F7FAFC;line-height:1.1}
+.exam-clock-label{font-size:.62rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;opacity:.7}
+.exam-clock strong{font-size:1.3rem;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.exam-clock.is-question{background:#1598D1;color:#F7FAFC}
+.exam-clock.is-free strong{font-size:1rem}
+.exam-clock.is-low:not(.is-question){color:#F39A4A}
+.exam-clock.is-question.is-low{background:#F39A4A}
+.exam-clock.is-critical,.exam-clock.is-over{background:#EF5B5F;color:#F7FAFC}
+.exam-clock.is-critical{animation:timer-blink 1s steps(2,start) infinite}
+.exam-progress-label{margin:4px 0 0;color:#AAB6BC;font-size:.78rem;text-align:right}
+.outage-note{display:block;margin:0 0 6px;padding:6px 10px;border-radius:8px;background:rgba(21,152,209,.12);color:#F39A4A;font-size:.8rem}
+@media (max-width:420px){
+  .exam-clock{padding:6px 12px}
+  .exam-clock strong{font-size:1.2rem}
+  .exam-title-row .exam-stat{padding:5px 8px;font-size:.72rem}
+}
+@media (prefers-reduced-motion:reduce){.exam-clock.is-critical{animation:none}}
+
+/* In-page confirmation:the paper stays in view, blurred, behind the card. */
+.confirm-gate{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:16px;background:rgba(14,15,17,0.38);backdrop-filter:blur(6px);animation:confirm-in .15s ease-out}
+.confirm-gate-card{width:min(100%,400px);padding:22px;background:#2A2D31;color:#F7FAFC;box-shadow:0 18px 50px rgba(0,0,0,0.55)}
+.confirm-gate-card p{margin:0;color:#D5DEE2;line-height:1.5}
+@keyframes confirm-in{from{opacity:0}to{opacity:1}}
+/* Connection trouble:one slim line under the progress bar, never a block. */
+.connection-strip{display:flex;align-items:center;gap:6px;min-width:0;padding:5px 10px;border-radius:999px;background:rgba(21,152,209,.12);color:#F39A4A;font-size:.76rem;line-height:1.2;white-space:nowrap;overflow:hidden}
+.connection-strip.is-down{background:rgba(239,91,95,.14);color:#EF5B5F}
+.connection-strip.is-synced{background:rgba(32,181,120,.11);color:#72D5AA}
+.connection-strip strong{flex:0 0 auto}
+.connection-detail{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.connection-dot{flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:#1598D1}
+.connection-strip.is-synced .connection-dot{background:#20B578}
+.connection-strip.is-down .connection-dot{background:#EF5B5F;animation:waiting-pulse 1.4s ease-in-out infinite}
+@media (prefers-reduced-motion:reduce){.confirm-gate,.connection-strip.is-down .connection-dot{animation:none}}
+
+/* ------------------------------------------------ exam header:focus on the question ----
+   One timer that matters right now, with a bar that drains; everything else
+   on one quiet line. The exits badge appears only once the student has left. */
+.exam-head{display:grid;gap:8px}
+.exam-head-top{display:flex;align-items:center;gap:10px;min-width:0}
+.exam-head-top .exam-heading{flex:1;min-width:0;margin:0;-webkit-line-clamp:1}
+.exam-integrity{position:relative;flex:0 0 auto}
+.exam-integrity-badge{display:inline-flex;align-items:center;gap:4px;min-height:30px;padding:4px 10px;border:0;border-radius:999px;background:rgba(255,255,255,.12);color:#AAB6BC;font:inherit;font-size:.78rem;font-weight:700;font-variant-numeric:tabular-nums;cursor:pointer}
+.exam-integrity-badge.is-last{
+  background:#F7FAFC;
+  color:#1E2124;
+  animation:last-warning-breathe 2.4s ease-in-out infinite;
+}
+.exam-integrity-badge.is-over{background:#EF5B5F;color:#F7FAFC}
+@keyframes last-warning-breathe{
+  0%,100%{background:#F7FAFC;color:#1E2124;box-shadow:0 0 0 0 rgba(247,250,252,.2)}
+  42%{background:#F39A4A;color:#1E2124;box-shadow:0 0 0 5px rgba(243,154,74,.18)}
+  72%{background:#EF5B5F;color:#F7FAFC;box-shadow:0 0 0 8px rgba(239,91,95,.08)}
+}
+.exam-integrity-pop{position:absolute;right:0;top:calc(100% + 8px);z-index:30;display:grid;gap:10px;width:min(84vw,292px);padding:14px;border:1px solid rgba(255,255,255,.1);border-radius:14px;background:#2A2D31;color:#D5DEE2;font-size:.78rem;line-height:1.4;box-shadow:0 16px 38px rgba(0,0,0,.48)}
+.exam-integrity-pop::before{content:"";position:absolute;right:11px;top:-5px;width:10px;height:10px;border-left:1px solid rgba(255,255,255,.1);border-top:1px solid rgba(255,255,255,.1);background:#2A2D31;transform:rotate(45deg)}
+.exam-integrity-pop-head{display:flex;align-items:center;gap:9px}
+.exam-integrity-pop-icon{display:grid;place-items:center;flex:0 0 30px;width:30px;height:30px;border-radius:9px;background:rgba(243,154,74,.14);color:#F39A4A;font-size:.88rem}
+.exam-integrity-pop-head div{display:grid;gap:1px}
+.exam-integrity-pop-head strong{color:#F7FAFC;font-size:.82rem}
+.exam-integrity-pop-head span:last-child{color:#AAB6BC;font-size:.7rem}
+.exam-integrity-pop.is-last .exam-integrity-pop-icon{background:rgba(243,154,74,.2);color:#F39A4A}
+.exam-integrity-pop.is-over .exam-integrity-pop-icon{background:rgba(239,91,95,.16);color:#EF5B5F}
+.exam-integrity-section-label{color:#89979E;font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.exam-integrity-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.exam-integrity-stats>div{display:grid;gap:2px;padding:9px 10px;border-radius:10px;background:#33373B}
+.exam-integrity-stats span{color:#AAB6BC;font-size:.66rem;text-transform:uppercase;letter-spacing:.06em}
+.exam-integrity-stats strong{color:#F7FAFC;font-size:.92rem;font-variant-numeric:tabular-nums}
+.exam-integrity-pop p{margin:0;color:#D5DEE2}
+.exam-integrity-pop small{padding-top:8px;border-top:1px solid rgba(255,255,255,.08);color:#89979E;font-size:.68rem}
+.exam-integrity-overall{display:grid;gap:2px;padding-top:9px;border-top:1px solid rgba(255,255,255,.1)}
+.exam-integrity-overall span{color:#89979E;font-size:.64rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.exam-integrity-overall strong{color:#F7FAFC;font-size:.8rem;font-variant-numeric:tabular-nums}
+/* Opened, the details take the header's full width, just under the title row
+   (the triangle is that row's last item, so the pointer still sits under it). */
+.exam-head-top{position:relative}
+.exam-integrity{position:static}
+.exam-integrity-pop{left:0;right:0;width:auto}
+.exam-timer-card{display:grid;gap:8px;padding:10px 14px 12px;border-radius:14px;background:#2A2D31;color:#F7FAFC}
+.exam-timer-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+.exam-timer-label{font-size:.7rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#AAB6BC}
+.exam-timer-value{font-size:1.6rem;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.exam-timer-bar{height:6px;overflow:hidden;border-radius:99px;background:#33373B}
+.exam-timer-bar span{display:block;height:100%;border-radius:inherit;background:#1598D1;transition:width .25s linear}
+.exam-timer-card.is-low .exam-timer-value{color:#F39A4A}
+.exam-timer-card.is-low .exam-timer-bar span{background:#F39A4A}
+.exam-timer-card.is-critical{background:rgba(239,91,95,.14);box-shadow:0 0 0 2px rgba(239,91,95,.45) inset}
+.exam-timer-card.is-critical .exam-timer-value,.exam-timer-card.is-critical .exam-timer-label{color:#EF5B5F}
+.exam-timer-card.is-critical .exam-timer-bar span{background:#EF5B5F}
+.exam-timer-card.is-critical .exam-timer-value{animation:timer-blink 1s steps(2,start) infinite}
+.exam-sub{margin:0;display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;color:#AAB6BC;font-size:.8rem;font-variant-numeric:tabular-nums}
+.exam-sub .is-urgent{color:#FF9DA0;font-weight:700}
+.exam-sub-dot{margin-right:6px;opacity:.6}
+@media (min-width:720px){.exam-timer-value{font-size:1.8rem}}
+@media (prefers-reduced-motion:reduce){
+  .exam-timer-card.is-critical .exam-timer-value{animation:none}
+  .exam-timer-bar span{transition:none}
+  .exam-integrity-badge.is-last{animation:none;background:#EF5B5F;color:#F7FAFC}
+}
+.exam-screen .exam-head .exam-sub{color:#AAB6BC}
+.exam-screen .exam-head .exam-sub .is-urgent{color:#FF9DA0}
+/* The exits badge is only the triangle:a round icon button. */
+.exam-integrity-badge{justify-content:center;width:32px;min-height:32px;padding:0;font-size:.95rem}
+
+/* ------------------------------------------------ exam header:minimal ----
+   The whole title, wrapped - never cut off. The timer is a line of text and
+   a thin draining bar on the page itself, not a card. */
+.exam-head-top{align-items:flex-start}
+.exam-head-top .exam-heading{display:block;-webkit-line-clamp:unset;overflow:visible;white-space:normal;overflow-wrap:anywhere}
+.exam-timer-card{gap:6px;padding:0;border-radius:0;background:none;box-shadow:none;color:#F7FAFC}
+.exam-timer-row{justify-content:flex-start;align-items:baseline;gap:8px}
+.exam-timer-label{font-size:.66rem;color:#AAB6BC}
+.exam-timer-value{font-size:1.05rem;font-weight:700;color:#F7FAFC}
+.exam-timer-bar{height:3px;background:rgba(255,255,255,.14)}
+.exam-timer-card.is-low .exam-timer-value{color:#F39A4A}
+.exam-timer-card.is-critical{background:none;box-shadow:none}
+.exam-timer-card.is-critical .exam-timer-value,.exam-timer-card.is-critical .exam-timer-label{color:#FF9DA0}
+@media (min-width:720px){.exam-timer-value{font-size:1.15rem}}
+
+/* ---------------------------------------------------------------- Attendance */
+.att-create{margin-bottom:18px}
+.att-top{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:16px;margin-bottom:16px}
+.att-qr{display:grid;justify-items:center;align-content:center;gap:6px;text-align:center}
+.att-qr-image{width:min(100%,340px);height:auto;cursor:zoom-in;border-radius:12px}
+.att-qr-closed{min-height:220px;padding:28px}
+.att-qr-closed strong{font-size:1.15rem}
+.att-qr-overlay{background:rgba(14,15,17,0.9)}
+.att-qr-big{display:grid;justify-items:center;gap:14px;width:min(100%,760px);padding:28px;border-radius:22px;background:#2A2D31;text-align:center;cursor:zoom-out}
+.att-qr-big h1{margin:0;font-size:clamp(1.4rem,4vw,2.4rem);letter-spacing:-.04em}
+.att-qr-big img{width:min(100%,72vh);height:auto}
+.att-qr-big p{margin:0;color:var(--muted);font-size:1.05rem}
+.att-panel{display:grid;gap:14px;align-content:start}
+.att-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.att-stats div{display:grid;gap:2px;padding:12px;border-radius:12px;background:var(--wash);text-align:center}
+.att-stats strong{font-size:1.8rem;letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.att-stats span{color:var(--muted);font-size:.78rem;font-weight:700}
+.att-actions{display:flex;flex-wrap:wrap;gap:8px}
+.att-rounds{margin:0;padding-left:18px;color:var(--muted);font-size:.82rem;line-height:1.6}
+.att-tag{display:inline-block;margin-left:6px;padding:2px 7px;border-radius:99px;background:rgba(21,152,209,.12);color:#1598D1;font-size:.7rem;font-weight:700}
+.att-tag.is-late{background:rgba(21,152,209,.12);color:var(--warning)}
+.att-warning{color:#EF5B5F;font-size:.78rem;font-weight:600}
+.live-table tr.is-muted td{opacity:.55}
+.att-student h1{margin:4px 0 10px}
+.att-mark-form{display:grid;gap:4px}
+.att-mark-form>p:first-child{margin:4px 0 10px}
+.att-mark-button{margin-top:14px;min-height:54px;font-size:1.05rem}
+.att-result{display:grid;justify-items:center;gap:6px;margin-top:12px;padding:22px;border-radius:14px;text-align:center;line-height:1.45}
+.att-result-icon{font-size:2rem}
+.att-result strong{font-size:1.15rem}
+.att-result.is-present{background:rgba(39,182,111,.14);color:var(--success)}
+.att-result.is-pending{background:rgba(21,152,209,.12);color:#F39A4A}
+.att-result.is-rejected{background:rgba(239,91,95,.14);color:#EF5B5F}
+@media (max-width:760px){.att-top{grid-template-columns:1fr}}
+
+/* "Warn only" tests:the paper-hidden screen says plainly that the student is over the limit. */
+.away-gate .eyebrow.away-warning{color:var(--danger)}
+.table-pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 16px 4px;color:var(--muted);font-size:.86rem}
+.table-pagination span{min-width:150px;text-align:center}
+@media(max-width:560px){.table-pagination{justify-content:space-between;padding:12px 4px 2px;gap:6px}.table-pagination span{min-width:0;font-size:.78rem}}
