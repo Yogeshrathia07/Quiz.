@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDownUp, BadgeCheck, Check, ChevronLeft, ChevronRight, GraduationCap, KeyRound, Search } from 'lucide-react';
+import { Activity, ArrowDownUp, Ban, BadgeCheck, Check, ChevronLeft, ChevronRight, GraduationCap, KeyRound, Search, Users } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
 import { shortDateTime } from '../../lib/format.js';
 import { InfoPill } from '../../components/StatusPill.jsx';
@@ -95,6 +95,28 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
   const accounts = useMemo(() => [...applyFilters(searched, USER_FILTERS, filters)].sort(SORTS[sort][1]), [searched, filters, sort]);
   const filtered = query.trim() || filters.length > 0;
 
+  // The numbers at a glance, from the list already loaded.
+  const stats = useMemo(() => {
+    const list = data?.accounts || [];
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    return {
+      total: list.length,
+      students: list.filter((account) => account.role === 'student').length,
+      faculty: list.filter((account) => account.role !== 'student').length,
+      active: list.filter((account) => (Date.parse(account.lastSignInAt || 0) || 0) >= weekAgo).length,
+      blocked: (data?.blocked || []).length
+    };
+  }, [data]);
+  const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  // Each count opens what it counts: the list filtered to them, or the blocked list.
+  const tiles = [
+    { id: 'total', label: 'Accounts', value: stats.total, icon: Users, tone: 'info', open: () => { setFilters([]); setQuery(''); scrollTo('users-accounts'); } },
+    { id: 'students', label: 'Students', value: stats.students, icon: GraduationCap, tone: 'info', open: () => { setFilters(['student']); scrollTo('users-accounts'); } },
+    { id: 'faculty', label: 'Faculty', value: stats.faculty, icon: BadgeCheck, tone: 'ok', open: () => { setFilters(['faculty']); scrollTo('users-accounts'); } },
+    { id: 'active', label: 'Active this week', value: stats.active, icon: Activity, tone: 'ok', open: () => { setSort('recent'); scrollTo('users-accounts'); } },
+    { id: 'blocked', label: 'Blocked', value: stats.blocked, icon: Ban, tone: stats.blocked ? 'bad' : 'muted', open: () => scrollTo('users-blocked') }
+  ];
+
   // One page at a time. Any new search, filter or sort starts again from page 1.
   useEffect(() => { setPage(0); }, [query, filters, sort]);
   const pageCount = Math.max(1, Math.ceil(accounts.length / PAGE_SIZE));
@@ -121,6 +143,16 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
           <p>Open a person to see their tests and SAP ID, or to delete or block them.</p>
         </div>
       </header>
+
+      <div className="stat-tiles" aria-label="Users at a glance">
+        {tiles.map((tile) => (
+          <button key={tile.id} type="button" className={`stat-tile is-${tile.tone}`} onClick={tile.open}>
+            <tile.icon className="stat-tile-icon" size={18} aria-hidden="true"/>
+            <strong>{tile.value}</strong>
+            <span>{tile.label}</span>
+          </button>
+        ))}
+      </div>
 
       <section className="card students-card">
         {/* One row, like the dashboard's lists: search, the tick-box filter, and the order. */}
@@ -201,7 +233,7 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
       </section>
 
       <section className="card students-card users-blocked">
-        <div className="users-toolbar">
+        <div className="users-toolbar" id="users-blocked">
           <div>
             <h2>Blocked</h2>
             <p className="table-subtext">Blocked people cannot log in, so they cannot take any test.</p>

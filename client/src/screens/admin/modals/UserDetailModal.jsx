@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, downloadFile, post } from '../../../lib/api.js';
 import { durationLabel, shortDateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
-import { Ban, ChevronRight, CircleCheck, Download, Trash2 } from 'lucide-react';
+import { Ban, ChevronRight, CircleCheck, Download, Pencil, Trash2 } from 'lucide-react';
 import { StudentAnalysisModal } from './StudentAnalysisModal.jsx';
 import { InfoPill, StatusPill } from '../../../components/StatusPill.jsx';
 
