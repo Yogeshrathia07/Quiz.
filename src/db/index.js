@@ -30,7 +30,16 @@ export async function initializeDatabase() {
     { key: { 'attempt.id': 1 }, sparse: true },
     { key: { collegeEmail: 1 } },
     { key: { testCode: 1, sapId: 1 } },
-    { key: { testCode: 1, 'attempt.status': 1 } }
+    { key: { testCode: 1, 'attempt.status': 1 } },
+    // Dashboard pages first narrow to one test and then commonly filter by
+    // registration/attempt state. These keep the 25–100 row browser pages
+    // from walking an entire large class before aggregation applies its page.
+    { key: { testCode: 1, status: 1, requestedAt: 1 } },
+    { key: { testCode: 1, 'attempt.status': 1, requestedAt: 1 } },
+    { key: { testCode: 1, requestedAt: 1 } },
+    // The scheduler's sweep for requests nobody approved in time: only the
+    // pending ones are indexed, so it stays small however many students there are.
+    { key: { requestedAt: 1 }, partialFilterExpression: { status: 'pending' }, name: 'pending_requests_by_age' }
   ]);
   // Tests from before each student had a document of their own are moved over
   // once, here, before a single request is served (see move-registrations.js).

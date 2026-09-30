@@ -1,4 +1,5 @@
 import { registrations, studentProfiles, tests } from '../db/index.js';
+import { config } from '../config.js';
 import { PublicTestError } from '../lib/errors.js';
 import { hash, randomId } from '../lib/crypto.js';
 import { iso, now } from '../lib/time.js';
@@ -16,6 +17,18 @@ import { finalizeAttempt, responsesAvailable, resultSummary } from './attempt-se
 import { startIfDue } from './test-lifecycle.js';
 
 const isDuplicateKey = (error) => error?.code === 11000;
+
+/**
+ * A registration as its student sees it. A pending one says when it expires
+ * if nobody approves it (the scheduler's expireStaleRequests takes it then).
+ */
+function studentRegistration(registration, name = registration.fullName) {
+  const minutes = Number(config.pendingRequestMinutes);
+  const pendingUntil = registration.status === 'pending' && Number.isFinite(minutes) && minutes > 0 && registration.requestedAt
+    ? new Date(new Date(registration.requestedAt).getTime() + minutes * 60_000)
+    : null;
+  return { name, status: registration.status, requestedAt: iso(registration.requestedAt), expiresAt: iso(pendingUntil) };
+}
 
 /** 'student', 'faculty' or 'guest' - who is sitting this test, as the dashboard shows it. */
 export function accountTypeOf(user) {
@@ -150,7 +163,7 @@ export async function getTest(req, code) {
       isOwner: Boolean(test.ownerEmail) && test.ownerEmail === adminEmail(req)
     },
     registration: registration
-      ? { name: registration.fullName, status: registration.status, requestedAt: iso(registration.requestedAt) }
+      ? studentRegistration(registration)
       : null,
     attemptId: registration?.attempt?.id || null
   };
@@ -224,7 +237,7 @@ export async function registerForTest(req, res, code, raw) {
   setSeatCookie(res, test.code, registration.id, token);
   return {
     test: publicTest(test),
-    registration: { name: fullName, status: 'pending', requestedAt: iso(registration.requestedAt) },
+    registration: studentRegistration({ ...registration, status: 'pending' }, fullName),
     attemptId: null
   };
 }
@@ -253,7 +266,7 @@ async function moveSeatHere(res, test, registration) {
   setSeatCookie(res, test.code, registration.id, token);
   return {
     test: publicTest(test),
-    registration: { name: registration.fullName, status: registration.status, requestedAt: iso(registration.requestedAt) },
+    registration: studentRegistration(registration),
     attemptId: registration.attempt?.id || null,
     moved: true
   };

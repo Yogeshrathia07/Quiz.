@@ -1,4 +1,5 @@
-import { tests } from '../db/index.js';
+import { registrations, tests } from '../db/index.js';
+import { config } from '../config.js';
 import { runAsLeader } from '../coordination/index.js';
 import { END_GRACE_MS, isTimeOver } from '../domain/attempt-rules.js';
 import { beginTest } from './test-lifecycle.js';
@@ -8,12 +9,29 @@ import { compensateForOutage, recordHeartbeat } from './outage.js';
 const TICK_MS = 5_000;
 
 /**
+ * Registration requests nobody has approved within config.pendingRequestMinutes
+ * (an hour by default) are taken away, so no test keeps a list of old pending
+ * requests. The student simply asks again. A request only ever waits here -
+ * no paper is begun until it is approved - so nothing else goes with it.
+ */
+export async function expireStaleRequests(atMs = Date.now()) {
+  const minutes = Number(config.pendingRequestMinutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  const { deletedCount } = await registrations().deleteMany({
+    status: 'pending', attempt: null, requestedAt: { $lte: new Date(atMs - minutes * 60_000) }
+  });
+  return deletedCount;
+}
+
+/**
  * One pass of the clock: start every scheduled test whose time has come, and
  * end every test whose end time (plus the grace for answers still arriving)
- * has passed - which submits every paper on it. Everything it needs is in the
- * database, so a restart simply picks up where the last pass left off.
+ * has passed - which submits every paper on it - and let go of requests
+ * nobody approved in time. Everything it needs is in the database, so a
+ * restart simply picks up where the last pass left off.
  */
 export async function runScheduleOnce(atMs = Date.now()) {
+  const expired = await expireStaleRequests(atMs);
   const at = new Date(atMs);
   const due = await tests().find(
     { startMode: 'scheduled', isStarted: { $ne: true }, isClosed: { $ne: true }, opensAt: { $lte: at } },
@@ -34,7 +52,7 @@ export async function runScheduleOnce(atMs = Date.now()) {
     const test = await tests().findOne({ code });
     if (test && !test.isClosed && isTimeOver(test, atMs - END_GRACE_MS)) await finishTest(test, { automatic: true });
   }
-  return { started: due.length, ended: ending.length };
+  return { started: due.length, ended: ending.length, expired };
 }
 
 /**

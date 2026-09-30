@@ -923,6 +923,92 @@ try {
   assert.equal(pauseDoc.isClosed, true);
   assert.equal(pauseDoc.registrations.find((entry) => entry.id === heldSeat.registration.id).attempt.submittedBy, 'time');
 
+  /* ------------------------------- UNANSWERED REQUESTS EXPIRE ON THEIR OWN ---- */
+  const expiryTest = await createTest(adminReq, objectivePayload(`Expiry ${identifier}`));
+  const expiryCode = expiryTest.test.code;
+  createdCodes.push(expiryCode);
+  const waitMinutes = config.pendingRequestMinutes;
+  assert.ok(waitMinutes > 0, 'requests expire by default');
+  const asked = await registerForTest(studentReq, cookieResponse(), expiryCode, { sapId });
+  assert.equal(asked.registration.status, 'pending');
+  assert.equal(Date.parse(asked.registration.expiresAt) - Date.parse(asked.registration.requestedAt), waitMinutes * 60_000,
+    'the student is told when an unanswered request is withdrawn');
+  await registerForTest(otherReq, cookieResponse(), expiryCode, { sapId: otherSapId });
+  const expiryRow = async (email) => (await testDocByCode(expiryCode)).registrations.find((entry) => entry.collegeEmail === email);
+  await decideRegistration(adminReq, expiryCode, (await expiryRow(otherEmail)).id, 'approve');
+  // Both asked long ago; only the one nobody answered goes.
+  const longAgo = new Date(Date.now() - (waitMinutes + 1) * 60_000);
+  await registrations().updateMany({ testCode: expiryCode }, { $set: { requestedAt: longAgo } });
+  const swept = await runScheduleOnce();
+  assert.ok(swept.expired >= 1, 'the scheduler removes the stale request');
+  assert.equal(await expiryRow(studentEmail), undefined, 'an unanswered request is gone after the wait');
+  assert.equal((await expiryRow(otherEmail)).status, 'approved', 'an approved student is kept however long ago they asked');
+  // They simply ask again, and a fresh request is left alone.
+  assert.equal((await registerForTest(studentReq, cookieResponse(), expiryCode, { sapId })).registration.status, 'pending');
+  await runScheduleOnce();
+  assert.equal((await expiryRow(studentEmail)).status, 'pending', 'a request inside the wait stays');
+
+  /* ------------------- AN IPHONE KEYBOARD'S OWN APP IS NOT LEAVING THE TEST ---- */
+  // Warn only, 3 exits and 10 seconds away allowed: a note must never add a warning; a real absence does.
+  const keyboardTest = await createTest(adminReq, { ...objectivePayload(`Keyboard ${identifier}`), violationAction: 'warn' });
+  const keyboardCode = keyboardTest.test.code;
+  createdCodes.push(keyboardCode);
+  const typist = { portalUser: { email: `regression-typist-${identifier}@stu.upes.ac.in`, displayName: 'Typist Student', role: 'student' } };
+  const typistSeat = await seatStudent(keyboardCode, typist, String(100_000_000 + ((Date.now() + 5_000_011) % 890_000_000)));
+  await startTest(adminReq, keyboardCode);
+  const typistPaper = await startAttempt(typistSeat.studentRequest, keyboardCode);
+  const typistRecord = async () => (await registrations().findOne({ testCode: keyboardCode, id: typistSeat.registration.id })).attempt;
+  const presence = (event) => recordFullscreenEvent(typistSeat.studentRequest, typistPaper.id, event);
+  // Left while typing: shown as away at once, but nothing counted yet.
+  const awayNow = await presence({ type: 'exit', detail: 'tab_switch', typing: true });
+  assert.equal(awayNow.attempt.isAway, true, 'the teacher still sees them away');
+  assert.equal((await typistRecord()).integrity?.leaveCount || 0, 0, 'but it is not counted yet');
+  // Back in 4 seconds: a note, not a departure.
+  await presence({ type: 'return', durationMs: 4_000, detail: 'tab_switch' });
+  let typed = await typistRecord();
+  assert.equal(typed.integrity.flags.keyboard_app, 1);
+  assert.equal(typed.integrity?.leaveCount || 0, 0, 'a keyboard blip is not leaving');
+  assert.equal(typed.fullscreenExitCount || 0, 0);
+  assert.equal(typed.awaySince, null);
+  assert.equal(typed.events.at(-1).detail, 'keyboard_app');
+  // Two more (one of them a pop-up over the page rather than another app).
+  await presence({ type: 'exit', detail: 'focus_lost', typing: true });
+  await presence({ type: 'return', durationMs: 2_000, detail: 'focus_lost' });
+  await presence({ type: 'exit', detail: 'tab_switch', typing: true });
+  await presence({ type: 'return', durationMs: 3_000, detail: 'tab_switch' });
+  typed = await typistRecord();
+  assert.equal(typed.integrity.flags.keyboard_app, 3);
+  assert.equal(typed.integrity?.leaveCount || 0, 0);
+  // A fourth: past the three notes a paper gets, it counts like any other.
+  await presence({ type: 'exit', detail: 'tab_switch', typing: true });
+  await presence({ type: 'return', durationMs: 2_000, detail: 'tab_switch' });
+  typed = await typistRecord();
+  assert.equal(typed.integrity.flags.keyboard_app, 3, 'no more than three notes');
+  assert.equal(typed.integrity.leaveCount, 1, 'the fourth counts');
+  assert.equal(typed.integrity.leaves.tab_switch, 1);
+  // Away while typing for 30 seconds (the server's own clock, whatever the page says): counted once, from when
+  // it began - and the silence is not counted a second time as going offline.
+  await presence({ type: 'exit', detail: 'tab_switch', typing: true });
+  await registrations().updateOne({ testCode: keyboardCode, id: typistSeat.registration.id }, { $set: {
+    'attempt.awaySince': new Date(Date.now() - 30_000), 'attempt.lastSeenAt': new Date(Date.now() - 90_000)
+  } });
+  await presence({ type: 'return', durationMs: 1_000, detail: 'tab_switch' });
+  typed = await typistRecord();
+  assert.equal(typed.integrity.leaveCount, 2, 'the long one counts once');
+  assert.equal(typed.integrity.leaves.offline || 0, 0, 'and not again as offline');
+  assert.ok(typed.integrity.awayMs >= 30_000, `its whole time away is kept (${typed.integrity.awayMs} ms)`);
+  assert.equal(typed.violationCount, 1, 'past the 10 seconds allowed: warned');
+  const exitEvent = typed.events.findLast((event) => event.type === 'fullscreen_exit');
+  assert.ok(Date.now() - new Date(exitEvent.createdAt).getTime() >= 29_000, 'the departure is dated when it began');
+  // Leaving without typing is counted at once, as before; so is leaving fullscreen while typing.
+  await presence({ type: 'exit', detail: 'tab_switch' });
+  assert.equal((await typistRecord()).integrity.leaveCount, 3);
+  await presence({ type: 'return', durationMs: 1_000, detail: 'tab_switch' });
+  await presence({ type: 'exit', detail: 'fullscreen', typing: true });
+  assert.equal((await typistRecord()).integrity.leaveCount, 4, 'only switching app or a pop-up can be the keyboard');
+  await presence({ type: 'return', durationMs: 1_000, detail: 'fullscreen' });
+  await closeTest(adminReq, keyboardCode);
+
   /* ------------------------------------------ LEAST-OVERLAP QUESTION DRAW ---- */
   const drawBank = Array.from({ length: 6 }, (_unused, index) => ({
     prompt: `Draw question ${index + 1}?`, type: 'mcq', options: ['A', 'B'], correctOptions: ['0']
@@ -1076,8 +1162,19 @@ try {
   // A precise fix that far away is simply outside.
   await assert.rejects(() => startAttempt(locationSeat.studentRequest, locationTest.test.code, { ...farNorth, accuracyMeters: 15 }),
     (error) => error.status === 403 && /outside the permitted test area/.test(error.message));
+  // About 500 m north with a good ±100 m fix: even its near edge is past the area and its buffer.
+  await assert.rejects(() => startAttempt(locationSeat.studentRequest, locationTest.test.code, { latitude: 30.3210, longitude: 78.0322, accuracyMeters: 100 }),
+    (error) => error.status === 403 && /outside the permitted test area/.test(error.message));
   await setLocationOverride(adminReq, locationTest.test.code, locationSeat.registration.id, { enabled: true });
   assert.equal((await startAttempt(locationSeat.studentRequest, locationTest.test.code)).status, 'in_progress');
+  // In the building, the phone puts them about 300 m out, ±100 m: the margin reaches into the area.
+  // The paper would not count that reading against them, so it does not stop them starting either.
+  const edgeRequest = { portalUser: { email: `regression-edge-${identifier}@stu.upes.ac.in`, displayName: 'Edge Student', role: 'student' } };
+  const edgeSeat = await seatStudent(locationTest.test.code, edgeRequest, String(100_000_000 + ((Date.now() + 3_000_017) % 890_000_000)));
+  const edgePaper = await startAttempt(edgeSeat.studentRequest, locationTest.test.code, { latitude: 30.3192, longitude: 78.0322, accuracyMeters: 100 });
+  assert.equal(edgePaper.status, 'in_progress', 'a good reading just past the edge may begin');
+  assert.equal((await registrations().findOne({ testCode: locationTest.test.code, id: edgeSeat.registration.id })).attempt.locationChecks.inconclusive, 1,
+    'and it is recorded as a reading that could not tell');
 
   /* ------------------------------------------- guests, at the admin's choice */
   const guestTest = await createTest(adminReq, objectivePayload(`Guest ${identifier}`, { allowGuests: true }));
@@ -1134,7 +1231,7 @@ try {
     'free navigation across the paper, the shared end time for late starters, time up (grace, lock, extension)',
     'and automatic submission by the scheduler, scheduled starts, durations from the real start,',
     'strict per-question timing (forward only, server-side timeouts, auto-submit on the last question),',
-    'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, rejecting mid-test, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
+    'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
     'close, manual marking, analysis, Excel export, restart/reset, all result-release modes, and the quiz list (scores, duplicate, archive).'
   ].join(' '));
 } finally {

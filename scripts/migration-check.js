@@ -33,6 +33,11 @@ const scratchBackups = mkdtempSync(join(tmpdir(), 'migration-check-'));
 process.env.MIGRATION_BACKUP_DIR = scratchBackups;
 // Everything below - the app's own modules included - talks to the scratch database only.
 process.env.MONGODB_URI = baseUri.replace(/\/(\?|$)/, `/${scratchName}$1`);
+// This verifier compares BSON values exactly. The production read-through
+// cache intentionally uses JSON transport values (for example ObjectIds and
+// Dates become strings), which is independently covered by cache tests and
+// should not obscure whether the database migration preserved a field.
+process.env.REDIS_TEST_CACHE_MS = '0';
 
 const { canonical } = await import('../src/db/move-registrations.js');
 const db = await import('../src/db/index.js');
@@ -114,9 +119,13 @@ async function verifyShape(expectMovedTests) {
   const kept = await scratch.collection('registrationsMigrationBackup').find().toArray();
   assert.equal(kept.length, expectMovedTests, 'the original list of every moved test is kept');
   for (const copy of kept) same(copy.registrations, originalTests.find((test) => test.code === copy.testCode).registrations, `${copy.testCode}: kept original`);
-  // Everything that is not a test or a student is exactly as it was.
+  // Everything outside the three collections this migration intentionally
+  // changes is exactly as it was.  `registrations` begins empty in a legacy
+  // backup, so comparing it here would incorrectly report every newly moved
+  // student as an unexpected change.
   const asSet = (docs) => docs.map(canonical).sort().join(String.fromCharCode(10));
-  for (const name of Object.keys(manifest.counts).filter((entry) => entry !== 'tests' && entry !== 'serverState')) {
+  const migrationCollections = new Set(['tests', 'registrations', 'registrationsMigrationBackup', 'serverState']);
+  for (const name of Object.keys(manifest.counts).filter((entry) => !migrationCollections.has(entry))) {
     same(asSet(await scratch.collection(name).find().toArray()), asSet(load(name).docs), `${name} untouched`);
   }
   // The tests themselves: everything but the list, exactly as it was.

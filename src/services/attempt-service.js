@@ -119,18 +119,28 @@ async function verifyStartLocation(test, registration, raw) {
   }
   const distance = distanceMeters(Number(test.locationLatitude), Number(test.locationLongitude), latitude, longitude);
   const accuracy = Number(raw?.accuracyMeters);
-  // A phone sharing only its approximate location (a setting on both iPhone
-  // and Android) places the student anywhere within a kilometre or more. That
-  // is not them being away - and "you are 1400 m away" sends them looking in
-  // the wrong place. Say what to change instead.
-  if (!registration.locationOverride && distance > Number(test.locationRadiusMeters)
-    && Number.isFinite(accuracy) && accuracy > LOCATION_ACCURACY_LIMIT_METERS
-    && distance - accuracy <= Number(test.locationRadiusMeters) + LOCATION_EDGE_BUFFER_METERS) {
-    throw new PublicTestError(403, `Your phone shared only an approximate location (within ${Math.round(accuracy)} m), which cannot show you are at the venue. Turn on Precise Location for your browser - on an iPhone: Settings → Privacy & Security → Location Services → Safari Websites (or Chrome) → Precise Location; on Android: Settings → Apps → Chrome → Permissions → Location → Use precise location.`, 'LOCATION_IMPRECISE');
-  }
-  if (!registration.locationOverride && distance > Number(test.locationRadiusMeters)) {
-    await updateRegistrationFields(test.code, registration.id, { locationDistanceMeters: distance });
-    throw new PublicTestError(403, `You are outside the permitted test area (${Math.round(distance)} m away; limit ${Math.round(test.locationRadiusMeters)} m). Ask the administrator for an exception if this is incorrect.`);
+  const radius = Number(test.locationRadiusMeters);
+  if (!registration.locationOverride && distance > radius) {
+    // Refused only when clearly away: even the near edge of the reading's own
+    // margin is past the area and the same buffer the paper's checks allow.
+    // It used to refuse any reading whose centre fell outside - and indoors a
+    // phone in the room is often put a few dozen metres off, so students at
+    // the venue needed an exception for a reading the paper itself would not
+    // have counted against them.
+    const nearEdge = distance - (Number.isFinite(accuracy) ? accuracy : 0);
+    if (nearEdge > radius + LOCATION_EDGE_BUFFER_METERS) {
+      await updateRegistrationFields(test.code, registration.id, { locationDistanceMeters: distance });
+      throw new PublicTestError(403, `You are outside the permitted test area (${Math.round(distance)} m away; limit ${Math.round(radius)} m). Ask the administrator for an exception if this is incorrect.`);
+    }
+    // Too vague to tell - a phone sharing only its approximate location (a
+    // setting on both iPhone and Android) places the student anywhere within
+    // a kilometre or more. "You are 1400 m away" would send them looking in
+    // the wrong place: say what to change instead.
+    if (!Number.isFinite(accuracy) || accuracy > LOCATION_ACCURACY_LIMIT_METERS) {
+      throw new PublicTestError(403, `Your phone shared only an approximate location (within ${Math.round(accuracy) || 'several hundred'} m), which cannot show you are at the venue. Turn on Precise Location for your browser - on an iPhone: Settings → Privacy & Security → Location Services → Safari Websites (or Chrome) → Precise Location; on Android: Settings → Apps → Chrome → Permissions → Location → Use precise location. Indoors, also turn on Wi-Fi (no need to connect to a network): phones use it to find where they are. Then try again.`, 'LOCATION_IMPRECISE');
+    }
+    // A good reading just past the edge, its margin reaching into the area:
+    // the checks during the paper decide, as they would for this reading.
   }
   await updateRegistrationFields(test.code, registration.id, { locationVerifiedAt: now(), locationDistanceMeters: distance });
   return classifyLocationCheck(test, raw);
@@ -406,6 +416,8 @@ export async function recordLocationCheck(req, attemptId, raw = {}) {
   await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress' }, update);
   const stored = (await attemptContext(attempt.id))?.attempt || attempt;
   return {
+    code: test.code,
+    attemptId: attempt.id,
     locationChecks: stored.locationChecks || { inRange: 0, outOfRange: 0, inconclusive: 0, last: null },
     venue: venueClosed(test, registration, stored)
   };
@@ -701,25 +713,82 @@ async function enforceLimits(test, registration, attempt, key) {
 /** One absence, however it is reported: when it began. */
 const absenceKey = (since) => (since ? new Date(since).toISOString() : null);
 
+/*
+ * Leaving while typing an answer. On an iPhone a keyboard's own button - voice
+ * typing on Gboard or SwiftKey, its settings - opens that keyboard's app, and
+ * the test page is put away exactly as if the student had switched apps. The
+ * page cannot tell the two apart, so the server decides on the way back, by
+ * its own clock: back within KEYBOARD_GRACE_MS is a note for the teacher, not
+ * a departure - at most KEYBOARD_NOTES_MAX times in a paper. Longer, or more
+ * often, it counts like any other departure, from when it began.
+ */
+const KEYBOARD_GRACE_MS = 15_000;
+const KEYBOARD_NOTES_MAX = 3;
+const KEYBOARD_REASONS = ['tab_switch', 'focus_lost'];
+const awayWhileTyping = (attempt) => Boolean(attempt?.awaySince && attempt.awayTyping);
+
 /** The poll's view of a student who left and has not come back. */
-const enforceAwayLimit = (test, registration, attempt) => (attempt.awaySince
-  ? enforceLimits(test, registration, attempt, absenceKey(attempt.awaySince))
-  : attempt);
+const enforceAwayLimit = (test, registration, attempt) => {
+  if (!attempt.awaySince) return attempt;
+  // Maybe only their keyboard's app, still inside its grace: not judged yet.
+  if (awayWhileTyping(attempt) && Date.now() - dateMs(attempt.awaySince) <= KEYBOARD_GRACE_MS) return attempt;
+  return enforceLimits(test, registration, attempt, absenceKey(attempt.awaySince));
+};
 
 /**
  * Records one departure. A student is either present or away, so a second
  * "exit" while already away - Android fires both a visibility change and a
  * fullscreen exit for one press of Home - is the same departure, not another.
+ * One that began while typing is only marked (the student shows as away) and
+ * judged on the return - see KEYBOARD_GRACE_MS.
  */
 async function recordLeave(test, registration, attempt, raw) {
   const reason = leaveReason(raw.detail);
   const createdAt = now();
-  const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', awaySince: null }, {
-    $set: { awaySince: createdAt, ...pauseQuestionClock(test, attempt, createdAt) },
-    $inc: { fullscreenExitCount: 1, 'integrity.leaveCount': 1, [`integrity.leaves.${reason}`]: 1 },
-    $push: logEvent({ type: 'fullscreen_exit', createdAt, durationMs: null, detail: reason })
+  const typing = raw.typing === true && KEYBOARD_REASONS.includes(reason);
+  const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', awaySince: null }, typing
+    ? { $set: { awaySince: createdAt, awayTyping: reason, ...pauseQuestionClock(test, attempt, createdAt) } }
+    : {
+      $set: { awaySince: createdAt, awayTyping: null, ...pauseQuestionClock(test, attempt, createdAt) },
+      $inc: { fullscreenExitCount: 1, 'integrity.leaveCount': 1, [`integrity.leaves.${reason}`]: 1 },
+      $push: logEvent({ type: 'fullscreen_exit', createdAt, durationMs: null, detail: reason })
+    });
+  return applied && !typing ? absenceKey(createdAt) : null;
+}
+
+/**
+ * The return from a departure that began while typing: a note if it was only
+ * a moment, otherwise the departure and the return, counted as any other.
+ */
+async function recordTypingReturn(test, registration, attempt, raw, reported) {
+  const reason = leaveReason(attempt.awayTyping);
+  const createdAt = now();
+  const sinceMs = dateMs(attempt.awaySince);
+  const measured = raw.queued ? 0 : Math.max(0, createdAt.getTime() - sinceMs);
+  const durationMs = Math.min(DAY_MS, Math.max(reported, measured));
+  const notes = Number(attempt.integrity?.flags?.keyboard_app) || 0;
+  const filter = { id: attempt.id, status: 'in_progress', awaySince: attempt.awaySince };
+  if (durationMs <= KEYBOARD_GRACE_MS && notes < KEYBOARD_NOTES_MAX) {
+    await updateAttemptWhere(test.code, registration.id, filter, {
+      $set: { awaySince: null, awayTyping: null },
+      $inc: { 'integrity.flags.keyboard_app': 1 },
+      $push: logEvent({ type: 'integrity_flag', createdAt, durationMs, detail: 'keyboard_app', note: `back in ${seconds(durationMs)} s` })
+    });
+    return null;
+  }
+  const applied = await updateAttemptWhere(test.code, registration.id, filter, {
+    $set: { awaySince: null, awayTyping: null },
+    $inc: {
+      fullscreenExitCount: 1, 'integrity.leaveCount': 1, [`integrity.leaves.${reason}`]: 1,
+      fullscreenTotalAbsenceMs: durationMs, 'integrity.awayMs': durationMs
+    },
+    $max: { 'integrity.longestAwayMs': durationMs },
+    $push: { events: { $each: [
+      { type: 'fullscreen_exit', createdAt: attempt.awaySince, durationMs: null, detail: reason },
+      { type: 'fullscreen_return', createdAt, durationMs, detail: reason }
+    ], $slice: -MAX_EVENTS } }
   });
-  return applied ? absenceKey(createdAt) : null;
+  return applied ? absenceKey(attempt.awaySince) : null;
 }
 
 /**
@@ -732,6 +801,7 @@ async function recordLeave(test, registration, attempt, raw) {
 async function recordReturn(test, registration, attempt, raw) {
   const reported = asInteger(raw.durationMs, 0, DAY_MS);
   if (reported === null) throw new PublicTestError(400, 'Invalid fullscreen absence duration.');
+  if (awayWhileTyping(attempt)) return recordTypingReturn(test, registration, attempt, raw, reported);
   const createdAt = now();
   const since = attempt.awaySince ? dateMs(attempt.awaySince) : null;
   const measured = since && !raw.queued ? Math.max(0, createdAt.getTime() - since) : 0;

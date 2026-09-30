@@ -88,6 +88,9 @@ export const config = {
   // When the server was down mid-test, running tests get the lost time back -
   // for outages up to this long. A longer one is recorded but not given back.
   outageExtendMaxMinutes: Number(process.env.OUTAGE_EXTEND_MAX_MINUTES || 30),
+  // A registration request nobody approves within this many minutes is taken
+  // away, so no test keeps a list of old pending requests. 0 keeps them.
+  pendingRequestMinutes: Number(process.env.PENDING_REQUEST_MINUTES ?? 60),
   brevo: {
     apiKey: String(process.env.BREVO_API_KEY || '').trim(),
     senderEmail: String(process.env.MAIL_FROM_EMAIL || '').trim(),

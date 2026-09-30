@@ -12,7 +12,7 @@ import {
 } from '../domain/integrity.js';
 import { endTimeMs, normalizeSapId } from '../domain/test-builder.js';
 import {
-  deleteRegistrationsOf, findRegistrationById, invalidateTestCache, publicCode, registrationsOf, requireOwnedRegistration, requireOwnedTest, serializeTestWrite,
+  deleteRegistrationsOf, invalidateTestCache, publicCode, registrationsOf, requireOwnedRegistration, requireOwnedTest, serializeTestWrite,
   testDocByCode, updateAttemptWhere, updateRegistration, updateRegistrationFields, updateRegistrationsWhere, updateTest
 } from '../data/test-repository.js';
 import { buildAttempt, finalizeAttempt, venueClosed } from './attempt-service.js';
@@ -127,97 +127,157 @@ export async function archiveTest(req, code, raw = {}) {
   return { code: test.code, archivedAt: iso(archivedAt) };
 }
 
-export async function adminDashboard(req, code, pageOptions = null) {
-  const test = await requireOwnedTest(req, code, { withStudents: false });
-  // The live table needs counts and compact summaries, not every prompt,
-  // option, event and draft embedded in 5,000 papers. Reading this projection
-  // keeps dashboard polling proportional to summary data; the analysis modal
-  // fetches one complete student only when the administrator opens it.
-  test.registrations = await registrationsCollection().find({ testCode: test.code }, { projection: {
-    _id: 0,
-    id: 1, fullName: 1, collegeEmail: 1, sapId: 1, accountType: 1, status: 1,
-    requestedAt: 1, decidedAt: 1, exitedAt: 1, deviceSwitches: 1,
-    locationVerifiedAt: 1, locationDistanceMeters: 1, locationOverride: 1,
-    'attempt.id': 1, 'attempt.status': 1, 'attempt.windowCheck': 1,
-    'attempt.startedAt': 1, 'attempt.submittedAt': 1, 'attempt.submittedBy': 1,
-    'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1,
-    'attempt.questions.questionId': 1, 'attempt.locationChecks': 1,
-    'attempt.fullscreenExitCount': 1, 'attempt.fullscreenTotalAbsenceMs': 1,
-    'attempt.isLocked': 1, 'attempt.lockedAt': 1, 'attempt.lockReason': 1,
-    'attempt.pausedAt': 1, 'attempt.extraMs': 1, 'attempt.lastSeenAt': 1,
-    'attempt.awaySince': 1, 'attempt.integrity': 1
-  } }).sort({ _id: 1 }).toArray();
-  const rank = (status) => (status === 'pending' ? 0 : status === 'approved' ? 1 : 2);
-  const registrations = [...(test.registrations || [])]
-    .sort((a, b) => rank(a.status) - rank(b.status) || dateMs(a.requestedAt) - dateMs(b.requestedAt));
-  const manualQuestionIds = new Set((test.questions || []).filter((question) => question.manualGrading).map((question) => question.id));
+// The live table never needs prompt text, drafts, event history or answer log.
+// Keeping this projection tight matters twice: a page query moves just 25-200
+// compact registrations over the wire, and the count aggregations do not retain
+// each paper's large fields while they work.
+const DASHBOARD_REGISTRATION_PROJECTION = {
+  _id: 0,
+  id: 1, fullName: 1, collegeEmail: 1, sapId: 1, accountType: 1, status: 1,
+  requestedAt: 1, decidedAt: 1, exitedAt: 1, deviceSwitches: 1,
+  locationVerifiedAt: 1, locationDistanceMeters: 1, locationOverride: 1,
+  'attempt.id': 1, 'attempt.status': 1, 'attempt.windowCheck': 1,
+  'attempt.startedAt': 1, 'attempt.submittedAt': 1, 'attempt.submittedBy': 1,
+  'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1,
+  'attempt.questions.questionId': 1, 'attempt.locationChecks': 1,
+  'attempt.fullscreenExitCount': 1, 'attempt.fullscreenTotalAbsenceMs': 1,
+  'attempt.isLocked': 1, 'attempt.lockedAt': 1, 'attempt.lockReason': 1,
+  'attempt.pausedAt': 1, 'attempt.extraMs': 1, 'attempt.lastSeenAt': 1,
+  'attempt.awaySince': 1, 'attempt.integrity': 1
+};
 
-  const dashboard = {
+// An aggregation needs `_id` only until it has applied the stable final sort.
+const DASHBOARD_AGGREGATION_PROJECTION = { ...DASHBOARD_REGISTRATION_PROJECTION, _id: 1 };
+const dashboardStatusRank = {
+  $switch: {
+    branches: [
+      { case: { $eq: ['$status', 'pending'] }, then: 0 },
+      { case: { $eq: ['$status', 'approved'] }, then: 1 }
+    ],
+    default: 2
+  }
+};
+
+const rankRegistration = (status) => (status === 'pending' ? 0 : status === 'approved' ? 1 : 2);
+const dashboardManualQuestionIds = (test) => (test.questions || []).filter((question) => question.manualGrading).map((question) => question.id);
+
+function dashboardRegistration(test, registration, manualQuestionIds) {
+  const attempt = registration.attempt;
+  const answers = attempt?.answers || [];
+  const manualIds = manualQuestionIds instanceof Set ? manualQuestionIds : new Set(manualQuestionIds);
+  const manualAnswers = answers.filter((answer) => manualIds.has(answer.questionId));
+  return {
+    id: registration.id,
+    name: registration.fullName,
+    email: registration.collegeEmail,
+    sapId: registration.sapId,
+    accountType: registrationAccountType(registration),
+    status: registration.status,
+    requestedAt: iso(registration.requestedAt),
+    decidedAt: iso(registration.decidedAt),
+    exitedAt: iso(registration.exitedAt),
+    deviceSwitches: registration.deviceSwitches || 0,
+    attemptId: attempt?.id || null,
+    attemptStatus: attempt?.status || null,
+    windowCheck: attempt?.windowCheck || null,
+    startedAt: iso(attempt?.startedAt),
+    submittedAt: iso(attempt?.submittedAt),
+    // 'student', 'time' or 'admin': how the paper was handed in.
+    submittedBy: attempt?.submittedBy || null,
+    timeTakenSeconds: timeTakenSeconds(attempt),
+    deadlineAt: attempt ? iso(test.endsAt ?? test.closesAt) : null,
+    answeredCount: answers.filter((answer) => answer.answeredAt).length,
+    totalQuestions: attempt?.questions?.length || 0,
+    score: attempt?.status === 'submitted'
+      ? answers.reduce((total, answer) => total + (Number(answer.isCorrect) || 0), 0)
+      : null,
+    manualTotal: manualAnswers.length,
+    manualGraded: manualAnswers.filter((answer) => answer.isCorrect !== null).length,
+    locationVerifiedAt: iso(registration.locationVerifiedAt),
+    locationDistanceMeters: registration.locationDistanceMeters,
+    locationOverride: Boolean(registration.locationOverride),
+    locationChecks: attempt?.locationChecks || { inRange: 0, outOfRange: 0, inconclusive: 0, last: null },
+    venueClosed: attempt?.status === 'in_progress' ? venueClosed(test, registration, attempt) : null,
+    fullscreenExitCount: attempt?.fullscreenExitCount || 0,
+    fullscreenTotalAbsenceMs: attempt?.fullscreenTotalAbsenceMs || 0,
+    isLocked: Boolean(attempt?.isLocked),
+    lockedAt: iso(attempt?.lockedAt),
+    isPaused: Boolean(attempt?.pausedAt),
+    pausedAt: iso(attempt?.pausedAt),
+    // Time given back for pauses, and this student's own end because of it.
+    extraMs: Number(attempt?.extraMs) || 0,
+    ownDeadlineAt: attempt && !isUntimed(test) && Number.isFinite(attemptDeadlineMs(test, attempt)) ? new Date(attemptDeadlineMs(test, attempt)).toISOString() : null,
+    lockReason: attempt?.lockReason || null,
+    // Every departure over the whole attempt, reviving and restarting
+    // included - what the student actually did, not what the limits allowed.
+    integrity: attempt ? integritySummary(attempt) : null,
+    overLimit: overLimit(test, attempt)
+  };
+}
+
+function dashboardTest(test) {
+  return {
+    ...publicTest(test),
+    locationLatitude: test.locationLatitude ?? null,
+    locationLongitude: test.locationLongitude ?? null,
+    // Whether going past the limits locks an attempt: this test's choice and the server's LOCK_ON_EXIT.
+    locksOnExit: locksOnViolation(test, config.lockOnExit),
+    // The server's own switch, so the dashboard can say why a lock-mode test does not lock.
+    serverLocks: config.lockOnExit
+  };
+}
+
+function dashboardShell(test, registrations, manualQuestionIds) {
+  return {
     // The dashboard's countdowns run on the server's clock.
     serverTime: new Date().toISOString(),
-    test: {
-      ...publicTest(test),
-      locationLatitude: test.locationLatitude ?? null,
-      locationLongitude: test.locationLongitude ?? null,
-      // Whether going past the limits locks an attempt: this test's choice and the server's LOCK_ON_EXIT.
-      locksOnExit: locksOnViolation(test, config.lockOnExit),
-      // The server's own switch, so the dashboard can say why a lock-mode test does not lock.
-      serverLocks: config.lockOnExit
-    },
-    registrations: registrations.map((registration) => {
-      const attempt = registration.attempt;
-      const answers = attempt?.answers || [];
-      const manualAnswers = answers.filter((answer) => manualQuestionIds.has(answer.questionId));
-      return {
-        id: registration.id,
-        name: registration.fullName,
-        email: registration.collegeEmail,
-        sapId: registration.sapId,
-        accountType: registrationAccountType(registration),
-        status: registration.status,
-        requestedAt: iso(registration.requestedAt),
-        decidedAt: iso(registration.decidedAt),
-        exitedAt: iso(registration.exitedAt),
-        deviceSwitches: registration.deviceSwitches || 0,
-        attemptId: attempt?.id || null,
-        attemptStatus: attempt?.status || null,
-        windowCheck: attempt?.windowCheck || null,
-        startedAt: iso(attempt?.startedAt),
-        submittedAt: iso(attempt?.submittedAt),
-        // 'student', 'time' or 'admin': how the paper was handed in.
-        submittedBy: attempt?.submittedBy || null,
-        timeTakenSeconds: timeTakenSeconds(attempt),
-        deadlineAt: attempt ? iso(test.endsAt ?? test.closesAt) : null,
-        answeredCount: answers.filter((answer) => answer.answeredAt).length,
-        totalQuestions: attempt?.questions?.length || 0,
-        score: attempt?.status === 'submitted'
-          ? answers.reduce((total, answer) => total + (Number(answer.isCorrect) || 0), 0)
-          : null,
-        manualTotal: manualAnswers.length,
-        manualGraded: manualAnswers.filter((answer) => answer.isCorrect !== null).length,
-        locationVerifiedAt: iso(registration.locationVerifiedAt),
-        locationDistanceMeters: registration.locationDistanceMeters,
-        locationOverride: Boolean(registration.locationOverride),
-        locationChecks: attempt?.locationChecks || { inRange: 0, outOfRange: 0, inconclusive: 0, last: null },
-        venueClosed: attempt?.status === 'in_progress' ? venueClosed(test, registration, attempt) : null,
-        fullscreenExitCount: attempt?.fullscreenExitCount || 0,
-        fullscreenTotalAbsenceMs: attempt?.fullscreenTotalAbsenceMs || 0,
-        isLocked: Boolean(attempt?.isLocked),
-        lockedAt: iso(attempt?.lockedAt),
-        isPaused: Boolean(attempt?.pausedAt),
-        pausedAt: iso(attempt?.pausedAt),
-        // Time given back for pauses, and this student's own end because of it.
-        extraMs: Number(attempt?.extraMs) || 0,
-        ownDeadlineAt: attempt && !isUntimed(test) && Number.isFinite(attemptDeadlineMs(test, attempt)) ? new Date(attemptDeadlineMs(test, attempt)).toISOString() : null,
-        lockReason: attempt?.lockReason || null,
-        // Every departure over the whole attempt, reviving and restarting
-        // included - what the student actually did, not what the limits allowed.
-        integrity: attempt ? integritySummary(attempt) : null,
-        overLimit: overLimit(test, attempt)
-      };
-    })
+    test: dashboardTest(test),
+    registrations: registrations.map((registration) => dashboardRegistration(test, registration, manualQuestionIds))
   };
-  return pageOptions?.pageSize ? paginateDashboard(dashboard, pageOptions) : dashboard;
+}
+
+// Browser mutations do not need a freshly rebuilt table of thousands of
+// students.  The next lightweight page query reconciles counts and any rows
+// outside the current page.  Direct service callers (exports, audits and the
+// existing regression suite) retain the complete dashboard response.
+const compactAction = (test, extra = {}) => ({
+  ok: true,
+  code: test.code,
+  serverTime: new Date().toISOString(),
+  test: dashboardTest(test),
+  ...extra
+});
+
+async function actionResult(req, code, test, compact, extra = {}) {
+  if (compact) return compactAction(test, extra);
+  return { ...(await adminDashboard(req, code)), ...extra };
+}
+
+async function registrationActionResult(req, code, test, registrationId, compact, extra = {}) {
+  if (!compact) return actionResult(req, code, test, false, extra);
+  const [registration] = await registrationsOf(test.code, { id: String(registrationId) });
+  return compactAction(test, {
+    ...extra,
+    registration: registration
+      ? dashboardRegistration(test, registration, dashboardManualQuestionIds(test))
+      : { id: String(registrationId) }
+  });
+}
+
+export async function adminDashboard(req, code, pageOptions = null) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
+  const manualQuestionIds = dashboardManualQuestionIds(test);
+
+  // Exports and a few offline reports intentionally request the whole class.
+  // Keep that established behaviour, but make normal browser table reads use
+  // `skip`/`limit` in MongoDB instead of fetching every registration first.
+  if (pageOptions?.pageSize) return pagedAdminDashboard(test, pageOptions, manualQuestionIds);
+
+  const registrations = await registrationsCollection().find(
+    { testCode: test.code }, { projection: DASHBOARD_REGISTRATION_PROJECTION }
+  ).toArray();
+  registrations.sort((a, b) => rankRegistration(a.status) - rankRegistration(b.status) || dateMs(a.requestedAt) - dateMs(b.requestedAt));
+  return dashboardShell(test, registrations, manualQuestionIds);
 }
 
 const FILTER_GROUPS = {
@@ -228,6 +288,290 @@ const FILTER_GROUPS = {
   'marking:awaiting': 'marking', 'marking:done': 'marking',
   'finish:student': 'finish', 'finish:time': 'finish', 'finish:admin': 'finish', 'finish:teacher': 'finish', 'finish:unknown': 'finish'
 };
+
+/**
+ * The orders the Students and Results lists can be read in: a field and a
+ * direction, each either way round. The usual one, 'order-asc', is waiting
+ * for a decision first, then as they registered. Sorted in the database, so
+ * the order holds across every page, not just the one shown.
+ */
+export const RESULT_SORTS = ['order-asc', 'order-desc', 'submitted-desc', 'submitted-asc', 'score-desc', 'score-asc', 'name-asc', 'name-desc'];
+export const STUDENT_SORTS = ['order-asc', 'order-desc', 'name-asc', 'name-desc', 'sap-asc', 'sap-desc', 'answered-desc', 'answered-asc'];
+/** Links saved before an order could be reversed. */
+const LEGACY_SORTS = { order: 'order-asc', latest: 'submitted-desc', 'score-high': 'score-desc', 'score-low': 'score-asc', name: 'name-asc' };
+export const resultSort = (raw) => (RESULT_SORTS.includes(raw) ? raw : LEGACY_SORTS[raw] || 'order-asc');
+const sortFor = (section, raw) => (section === 'responses' ? resultSort(raw)
+  : section === 'students' && STUDENT_SORTS.includes(raw) ? raw : 'order-asc');
+const answeredExpression = {
+  $size: { $filter: { input: { $ifNull: ['$attempt.answers', []] }, as: 'answer', cond: { $ne: [{ $ifNull: ['$$answer.answeredAt', null] }, null] } } }
+};
+const scoreExpression = {
+  $reduce: {
+    input: { $ifNull: ['$attempt.answers', []] },
+    initialValue: 0,
+    in: { $add: ['$$value', { $convert: { input: '$$this.isCorrect', to: 'double', onError: 0, onNull: 0 } }] }
+  }
+};
+/*
+ * Either way round is the exact reverse of the other - ties included. A tie
+ * that kept one order both ways made the switch look broken: with nothing
+ * marked yet every score is 0, and "Lowest first" showed the very list
+ * "Highest first" did. Ties on a count go to whoever was first (to hand in,
+ * to register) in the field's own first direction, and mirror with it.
+ */
+function dashboardSortStages(page) {
+  const [field, way] = page.sort.split('-');
+  const direction = way === 'desc' ? -1 : 1;
+  if (field === 'sap') return [{ $set: { __sap: { $ifNull: ['$sapId', ''] } } }, { $sort: { __sap: direction, _id: direction } }];
+  if (field === 'answered') return [{ $set: { __answered: answeredExpression } }, { $sort: { __answered: direction, requestedAt: -direction, _id: -direction } }];
+  if (field === 'submitted') return [{ $sort: { 'attempt.submittedAt': direction, _id: direction } }];
+  if (field === 'name') return [{ $set: { __name: { $toLower: { $ifNull: ['$fullName', ''] } } } }, { $sort: { __name: direction, _id: direction } }];
+  // Equal scores: highest first puts whoever handed in first ahead; lowest first is its mirror.
+  if (field === 'score') return [{ $set: { __score: scoreExpression } }, { $sort: { __score: direction, 'attempt.submittedAt': -direction, _id: -direction } }];
+  return [{ $sort: { __dashboardStatusRank: 1, requestedAt: direction, _id: direction } }];
+}
+
+const registrationFilterIds = Object.keys(FILTER_GROUPS).filter((id) => !id.startsWith('marking:') && !id.startsWith('finish:'));
+const responseFilterIds = Object.keys(FILTER_GROUPS).filter((id) => id.startsWith('marking:') || id.startsWith('finish:'));
+
+function dashboardPageOptions(raw = {}) {
+  const section = raw.section === 'responses' ? 'responses' : raw.section === 'students' ? 'students' : 'test';
+  const pageSize = Math.min(200, Math.max(25, Number(raw.pageSize) || 100));
+  const requestedPage = Math.max(1, Number(raw.page) || 1);
+  const search = String(raw.search || '').trim().toLowerCase().slice(0, 120);
+  const selected = [...new Set(Array.isArray(raw.filters) ? raw.filters : String(raw.filters || '').split(',').filter(Boolean))]
+    .filter((id) => FILTER_GROUPS[id]);
+  const groups = Object.values(selected.reduce((result, id) => {
+    (result[FILTER_GROUPS[id]] ||= []).push(id);
+    return result;
+  }, {}));
+  const sort = sortFor(section, raw.sort);
+  return {
+    section, pageSize, requestedPage, search, selected, groups, sort,
+    relevantIds: section === 'responses' ? responseFilterIds : section === 'students' ? registrationFilterIds : []
+  };
+}
+
+const escapeRegex = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const joinMongoAnd = (parts) => {
+  const defined = parts.filter((part) => part && Object.keys(part).length);
+  return defined.length === 0 ? {} : defined.length === 1 ? defined[0] : { $and: defined };
+};
+const joinExpressionAnd = (parts) => parts.length === 0 ? true : parts.length === 1 ? parts[0] : { $and: parts };
+const joinExpressionOr = (parts) => parts.length === 0 ? false : parts.length === 1 ? parts[0] : { $or: parts };
+
+function dashboardBaseMatch(code, page) {
+  const match = { testCode: code };
+  if (page.section === 'responses') match['attempt.status'] = 'submitted';
+  if (!page.search) return match;
+  const query = new RegExp(escapeRegex(page.search), 'i');
+  return joinMongoAnd([match, { $or: [{ fullName: query }, { sapId: query }, { collegeEmail: query }] }]);
+}
+
+function manualAnswerExpressions(manualQuestionIds) {
+  if (!manualQuestionIds.length) return { total: { $literal: 0 }, graded: { $literal: 0 } };
+  const manualAnswers = {
+    $filter: {
+      input: { $ifNull: ['$attempt.answers', []] },
+      as: 'answer',
+      cond: { $in: ['$$answer.questionId', manualQuestionIds] }
+    }
+  };
+  return {
+    total: { $size: manualAnswers },
+    // The original row presenter considers an old/missing isCorrect value
+    // graded (only an explicit null means waiting), so this does the same.
+    graded: {
+      $size: {
+        $filter: { input: manualAnswers, as: 'answer', cond: { $ne: ['$$answer.isCorrect', null] } }
+      }
+    }
+  };
+}
+
+function dashboardMongoFilter(id, manualQuestionIds) {
+  const noAttempt = { $or: [{ 'attempt.status': null }, { 'attempt.status': '' }] };
+  const notPaused = { 'attempt.pausedAt': null };
+  const notOverride = { locationOverride: { $ne: true } };
+  const guest = { $or: [{ accountType: 'guest' }, { collegeEmail: /@guest\.test$/i }] };
+  if (['pending', 'approved', 'rejected'].includes(id)) return { status: id };
+  if (id === 'paper:not_started') return noAttempt;
+  if (id === 'paper:submitted') return { 'attempt.status': 'submitted' };
+  if (id === 'paper:paused') return joinMongoAnd([{ 'attempt.status': 'in_progress' }, { 'attempt.pausedAt': { $exists: true, $ne: null } }]);
+  if (id === 'paper:locked') return joinMongoAnd([{ 'attempt.status': 'in_progress' }, notPaused, { 'attempt.isLocked': true }]);
+  if (id === 'paper:in_progress') return joinMongoAnd([{ 'attempt.status': 'in_progress' }, notPaused, { 'attempt.isLocked': { $ne: true } }]);
+  if (id === 'guest') return guest;
+  if (id === 'verified') return { $nor: [{ accountType: 'guest' }, { collegeEmail: /@guest\.test$/i }] };
+  if (id === 'venue:exception') return { locationOverride: true };
+  if (id === 'venue:in_range') return joinMongoAnd([notOverride, { locationVerifiedAt: { $exists: true, $ne: null } }]);
+  if (id === 'venue:out_of_range') return joinMongoAnd([notOverride, { locationVerifiedAt: null }, { locationDistanceMeters: { $exists: true, $ne: null } }]);
+  if (id === 'venue:not_checked') return joinMongoAnd([notOverride, { locationVerifiedAt: null }, { locationDistanceMeters: null }]);
+  if (id === 'marking:awaiting' || id === 'marking:done') {
+    const manual = manualAnswerExpressions(manualQuestionIds);
+    return { $expr: id === 'marking:awaiting' ? { $gt: [manual.total, manual.graded] } : { $lte: [manual.total, manual.graded] } };
+  }
+  if (id.startsWith('finish:')) {
+    const value = id.slice(7);
+    return value === 'unknown'
+      ? { 'attempt.submittedBy': { $nin: ['student', 'time', 'admin', 'teacher'] } }
+      : { 'attempt.submittedBy': value };
+  }
+  return {};
+}
+
+function dashboardSelectedMongoMatch(page, manualQuestionIds) {
+  return joinMongoAnd(page.groups.map((ids) => ({ $or: ids.map((id) => dashboardMongoFilter(id, manualQuestionIds)) })));
+}
+
+const field = (path) => `$${path}`;
+const isPresent = (path) => ({ $ne: [{ $ifNull: [field(path), null] }, null] });
+const isMissing = (path) => ({ $eq: [{ $ifNull: [field(path), null] }, null] });
+const isTrue = (path) => ({ $eq: [{ $ifNull: [field(path), false] }, true] });
+const isNotTrue = (path) => ({ $not: [{ $ifNull: [field(path), false] }] });
+const equals = (path, value) => ({ $eq: [field(path), value] });
+
+function dashboardFilterExpression(id) {
+  const guest = joinExpressionOr([
+    equals('accountType', 'guest'),
+    { $regexMatch: { input: { $ifNull: [field('collegeEmail'), ''] }, regex: '@guest\\.test$', options: 'i' } }
+  ]);
+  if (['pending', 'approved', 'rejected'].includes(id)) return equals('status', id);
+  if (id === 'paper:not_started') return joinExpressionOr([isMissing('attempt.status'), equals('attempt.status', '')]);
+  if (id === 'paper:submitted') return equals('attempt.status', 'submitted');
+  if (id === 'paper:paused') return joinExpressionAnd([equals('attempt.status', 'in_progress'), isPresent('attempt.pausedAt')]);
+  if (id === 'paper:locked') return joinExpressionAnd([equals('attempt.status', 'in_progress'), isNotTrue('attempt.pausedAt'), isTrue('attempt.isLocked')]);
+  if (id === 'paper:in_progress') return joinExpressionAnd([equals('attempt.status', 'in_progress'), isNotTrue('attempt.pausedAt'), isNotTrue('attempt.isLocked')]);
+  if (id === 'guest') return guest;
+  if (id === 'verified') return { $not: [guest] };
+  if (id === 'venue:exception') return isTrue('locationOverride');
+  if (id === 'venue:in_range') return joinExpressionAnd([isNotTrue('locationOverride'), isPresent('locationVerifiedAt')]);
+  if (id === 'venue:out_of_range') return joinExpressionAnd([isNotTrue('locationOverride'), isMissing('locationVerifiedAt'), isPresent('locationDistanceMeters')]);
+  if (id === 'venue:not_checked') return joinExpressionAnd([isNotTrue('locationOverride'), isMissing('locationVerifiedAt'), isMissing('locationDistanceMeters')]);
+  if (id === 'marking:awaiting') return { $gt: [field('__manualTotal'), field('__manualGraded')] };
+  if (id === 'marking:done') return { $lte: [field('__manualTotal'), field('__manualGraded')] };
+  if (id.startsWith('finish:')) {
+    const value = id.slice(7);
+    return value === 'unknown'
+      ? { $not: [{ $in: [field('attempt.submittedBy'), ['student', 'time', 'admin', 'teacher']] }] }
+      : equals('attempt.submittedBy', value);
+  }
+  return true;
+}
+
+function dashboardSelectedExpression(page) {
+  return joinExpressionAnd(page.groups.map((ids) => joinExpressionOr(ids.map(dashboardFilterExpression))));
+}
+
+function withManualMetrics(pipeline, manualQuestionIds) {
+  const manual = manualAnswerExpressions(manualQuestionIds);
+  pipeline.push({ $set: { __manualTotal: manual.total, __manualGraded: manual.graded } });
+  return pipeline;
+}
+
+function countGroup(fields) {
+  return Object.fromEntries(Object.entries(fields).map(([key, condition]) => [key, { $sum: { $cond: [condition, 1, 0] } }]));
+}
+
+function dashboardClassCountPipeline(code, manualQuestionIds) {
+  const awaiting = joinExpressionAnd([equals('attempt.status', 'submitted'), dashboardFilterExpression('marking:awaiting')]);
+  return withManualMetrics([
+    { $match: { testCode: code } },
+    { $project: DASHBOARD_AGGREGATION_PROJECTION }
+  ], manualQuestionIds).concat([{
+    $group: {
+      _id: null,
+      total: { $sum: 1 },
+      ...countGroup({
+        pending: equals('status', 'pending'),
+        started: isPresent('attempt.status'),
+        submitted: equals('attempt.status', 'submitted'),
+        awaitingMarking: awaiting,
+        owedTime: joinExpressionAnd([
+          equals('attempt.status', 'in_progress'),
+          joinExpressionOr([isPresent('attempt.pausedAt'), { $gt: [{ $ifNull: [field('attempt.extraMs'), 0] }, 0] }])
+        ]),
+        handedInByClose: joinExpressionAnd([equals('attempt.status', 'submitted'), equals('attempt.submittedBy', 'admin')])
+      })
+    }
+  }]);
+}
+
+function dashboardPageCountPipeline(baseMatch, page, manualQuestionIds) {
+  const needsManualMetrics = page.relevantIds.some((id) => id.startsWith('marking:')) || page.selected.some((id) => id.startsWith('marking:'));
+  const pipeline = [{ $match: baseMatch }, { $project: DASHBOARD_AGGREGATION_PROJECTION }];
+  if (needsManualMetrics) withManualMetrics(pipeline, manualQuestionIds);
+  const selected = dashboardSelectedExpression(page);
+  const filterCounts = Object.fromEntries(page.relevantIds.map((id, index) => [
+    `filter${index}`, { $sum: { $cond: [dashboardFilterExpression(id), 1, 0] } }
+  ]));
+  pipeline.push({
+    $group: {
+      _id: null,
+      total: { $sum: { $cond: [selected, 1, 0] } },
+      unfilteredTotal: { $sum: 1 },
+      ...filterCounts
+    }
+  });
+  return pipeline;
+}
+
+function dashboardPagePipeline(baseMatch, selectedMatch, page) {
+  return [
+    { $match: joinMongoAnd([baseMatch, selectedMatch]) },
+    { $project: DASHBOARD_AGGREGATION_PROJECTION },
+    { $set: { __dashboardStatusRank: dashboardStatusRank } },
+    ...dashboardSortStages(page),
+    { $skip: (page.requestedPage - 1) * page.pageSize },
+    { $limit: page.pageSize },
+    { $project: DASHBOARD_REGISTRATION_PROJECTION }
+  ];
+}
+
+function asDashboardCounts(result = {}) {
+  return {
+    total: Number(result.total) || 0,
+    pending: Number(result.pending) || 0,
+    started: Number(result.started) || 0,
+    submitted: Number(result.submitted) || 0,
+    awaitingMarking: Number(result.awaitingMarking) || 0,
+    owedTime: Number(result.owedTime) || 0,
+    handedInByClose: Number(result.handedInByClose) || 0
+  };
+}
+
+async function pagedAdminDashboard(test, rawPage, manualQuestionIds) {
+  const page = dashboardPageOptions(rawPage);
+  const emptyPage = page.section === 'test';
+  const baseMatch = dashboardBaseMatch(test.code, page);
+  const selectedMatch = dashboardSelectedMongoMatch(page, manualQuestionIds);
+  const collection = registrationsCollection();
+
+  const [pageCounts, wholeCounts, initialRows] = await Promise.all([
+    emptyPage ? Promise.resolve([]) : collection.aggregate(dashboardPageCountPipeline(baseMatch, page, manualQuestionIds)).toArray(),
+    collection.aggregate(dashboardClassCountPipeline(test.code, manualQuestionIds)).toArray(),
+    emptyPage ? Promise.resolve([]) : collection.aggregate(dashboardPagePipeline(baseMatch, selectedMatch, page)).toArray()
+  ]);
+
+  const pageCount = pageCounts[0] || {};
+  const total = Number(pageCount.total) || 0;
+  const unfilteredTotal = Number(pageCount.unfilteredTotal) || 0;
+  const pages = Math.max(1, Math.ceil(total / page.pageSize));
+  const resolvedPage = Math.min(pages, page.requestedPage);
+  // Normal requests run the count and page query together. Only an out-of-date
+  // deep link needs this second, bounded query to honour the old "last page"
+  // behaviour without keeping every row in memory just to clamp it.
+  const registrations = resolvedPage === page.requestedPage || emptyPage
+    ? initialRows
+    : await collection.aggregate(dashboardPagePipeline(baseMatch, selectedMatch, { ...page, requestedPage: resolvedPage })).toArray();
+  const filterCounts = Object.fromEntries(page.relevantIds.map((id, index) => [id, Number(pageCount[`filter${index}`]) || 0]));
+  const dashboard = dashboardShell(test, registrations, manualQuestionIds);
+  return {
+    ...dashboard,
+    counts: asDashboardCounts(wholeCounts[0]),
+    filterCounts,
+    pagination: { page: resolvedPage, pageSize: page.pageSize, total, unfilteredTotal, pages, section: page.section }
+  };
+}
 
 function dashboardFilter(row, id) {
   if (['pending', 'approved', 'rejected'].includes(id)) return row.status === id;
@@ -284,6 +628,21 @@ export function paginateDashboard(dashboard, raw = {}) {
   const filtered = groups.length
     ? searched.filter((row) => groups.every((ids) => ids.some((id) => dashboardFilter(row, id))))
     : searched;
+  const sort = sortFor(section, raw.sort);
+  if (sort !== 'order-asc') {
+    const [field, way] = sort.split('-');
+    const direction = way === 'desc' ? -1 : 1;
+    const submitted = (row) => Date.parse(row.submittedAt || 0) || 0;
+    const orders = {
+      order: (a, b) => rankRegistration(a.status) - rankRegistration(b.status) || (Date.parse(a.requestedAt || 0) - Date.parse(b.requestedAt || 0)) * direction,
+      sap: (a, b) => String(a.sapId || '').localeCompare(String(b.sapId || '')) * direction,
+      answered: (a, b) => ((Number(a.answeredCount) || 0) - (Number(b.answeredCount) || 0)) * direction || (Date.parse(b.requestedAt || 0) - Date.parse(a.requestedAt || 0)) * direction,
+      submitted: (a, b) => (submitted(a) - submitted(b)) * direction,
+      name: (a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()) * direction,
+      score: (a, b) => ((Number(a.score) || 0) - (Number(b.score) || 0)) * direction || (submitted(b) - submitted(a)) * direction
+    };
+    filtered.sort(orders[field]);
+  }
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const page = Math.min(pages, Math.max(1, Number(raw.page) || 1));
   const start = (page - 1) * pageSize;
@@ -420,14 +779,23 @@ function analysisOf(test, registration) {
 
 /* ------------------------------------------------------- registration review */
 
-export async function decideRegistration(req, code, registrationId, decision) {
-  const test = await requireOwnedTest(req, code);
+export async function decideRegistration(req, code, registrationId, decision, options = {}) {
+  const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   if (!['approve', 'reject'].includes(decision)) throw new PublicTestError(400, 'Invalid registration action.');
-  if (!findRegistrationById(test, registrationId)) throw new PublicTestError(404, 'Registration not found.');
+  const decidedAt = now();
   await updateRegistrationFields(test.code, registrationId, {
     status: decision === 'approve' ? 'approved' : 'rejected',
-    decidedAt: now()
+    decidedAt
   });
+  if (options.compact) {
+    return compactAction(test, {
+      registration: dashboardRegistration(test, {
+        ...registration,
+        status: decision === 'approve' ? 'approved' : 'rejected',
+        decidedAt
+      }, dashboardManualQuestionIds(test))
+    });
+  }
   return adminDashboard(req, code);
 }
 
@@ -436,19 +804,19 @@ export async function decideRegistration(req, code, registrationId, decision) {
  * students the dashboard's filter shows - it acts on exactly those (skipping
  * any already decided that way); without, on everyone still pending.
  */
-export async function bulkDecision(req, code, decision, raw = {}) {
-  const test = await requireOwnedTest(req, code);
+export async function bulkDecision(req, code, decision, raw = {}, options = {}) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
   if (!['approve', 'reject'].includes(decision)) throw new PublicTestError(400, 'Invalid registration action.');
   const status = decision === 'approve' ? 'approved' : 'rejected';
   const chosen = Array.isArray(raw.registrationIds) ? new Set(raw.registrationIds.map(String)) : null;
-  const affected = (test.registrations || []).filter((entry) => (chosen ? chosen.has(String(entry.id)) && entry.status !== status : entry.status === 'pending'));
-  if (affected.length) {
-    await updateRegistrationsWhere(test.code, { id: { $in: affected.map((entry) => entry.id) } }, { $set: { status, decidedAt: now() } });
-  }
-  return { ...(await adminDashboard(req, code)), affectedCount: affected.length };
+  const filter = chosen
+    ? { id: { $in: [...chosen] }, status: { $ne: status } }
+    : { status: 'pending' };
+  const changed = await updateRegistrationsWhere(test.code, filter, { $set: { status, decidedAt: now() } });
+  return actionResult(req, code, test, options.compact, { affectedCount: changed.modifiedCount });
 }
 
-export async function updateStudentSapId(req, code, registrationId, raw) {
+export async function updateStudentSapId(req, code, registrationId, raw, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   const accountType = registrationAccountType(registration);
   if (accountType === 'faculty') throw new PublicTestError(409, 'Faculty accounts do not have a SAP ID.');
@@ -473,14 +841,14 @@ export async function updateStudentSapId(req, code, registrationId, raw) {
     }
     await updateRegistrationFields(test.code, registration.id, { sapId });
   });
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
-export async function setLocationOverride(req, code, registrationId, raw) {
+export async function setLocationOverride(req, code, registrationId, raw, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   if (!test.locationRequired) throw new PublicTestError(409, 'This test does not require a location check.');
   await updateRegistrationFields(test.code, registration.id, { locationOverride: raw?.enabled !== false });
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
 /* ----------------------------------------------------------- manual marking */
@@ -533,7 +901,7 @@ export async function gradeManualAnswer(req, code, registrationId, raw) {
 
 /* -------------------------------------------------------- attempt lifecycle */
 
-export async function resumeAttempt(req, code, registrationId) {
+export async function resumeAttempt(req, code, registrationId, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   const attempt = registration.attempt;
   if (test.isClosed) throw new PublicTestError(409, 'Completed tests cannot be resumed. Reset the student attempt instead.');
@@ -542,7 +910,7 @@ export async function resumeAttempt(req, code, registrationId) {
   if (!attempt.isLocked) throw new PublicTestError(409, 'This attempt is not locked.');
 
   await reviveAttempt(test, registration);
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
 const teacherEvent = (type, createdAt, durationMs = null) => ({ events: { $each: [{ type, createdAt, durationMs, detail: null }], $slice: -MAX_EVENTS } });
@@ -554,13 +922,13 @@ const teacherEvent = (type, createdAt, durationMs = null) => ({ events: { $each:
  * clock stops too. Nothing they do while paused counts as leaving the test.
  * The automatic end of the test waits for the time a pause is still owed.
  */
-export async function pauseAttempt(req, code, registrationId) {
+export async function pauseAttempt(req, code, registrationId, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   const attempt = registration.attempt;
   if (test.isClosed) throw new PublicTestError(409, 'This test is closed.');
   if (!attempt) throw new PublicTestError(404, 'This student has not started yet.');
   if (attempt.status === 'submitted') throw new PublicTestError(409, 'This paper has already been handed in.');
-  if (attempt.pausedAt) return adminDashboard(req, code);
+  if (attempt.pausedAt) return registrationActionResult(req, code, test, registrationId, options.compact);
   const pausedAt = now();
   // Stop the open question's clock - unless the student's own absence already has.
   const stopsQuestion = Boolean(attempt.strict?.shownAt && !attempt.strict?.pausedSince);
@@ -568,11 +936,11 @@ export async function pauseAttempt(req, code, registrationId) {
     $set: { pausedAt, questionPausedByTeacher: stopsQuestion, ...(stopsQuestion ? { 'strict.pausedSince': pausedAt } : {}) },
     $push: teacherEvent('teacher_paused', pausedAt)
   });
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
 /** Lets a paused student carry on, with the time the pause took given back. */
-export async function continueAttempt(req, code, registrationId) {
+export async function continueAttempt(req, code, registrationId, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   const attempt = registration.attempt;
   if (!attempt?.pausedAt || attempt.status === 'submitted') throw new PublicTestError(409, 'This student is not paused.');
@@ -587,18 +955,18 @@ export async function continueAttempt(req, code, registrationId) {
     $set: set,
     $push: teacherEvent('teacher_continued', at, pausedMs)
   });
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
 /** Hands in one student's paper now, as it stands - recorded as handed in by the teacher. */
-export async function submitStudentPaper(req, code, registrationId) {
+export async function submitStudentPaper(req, code, registrationId, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   const attempt = registration.attempt;
   if (!attempt) throw new PublicTestError(404, 'This student has not started yet.');
   if (attempt.status === 'submitted') throw new PublicTestError(409, 'This paper has already been handed in.');
   await finalizeAttempt(test, registration, attempt, { by: 'teacher' });
   await updateAttemptWhere(test.code, registration.id, { id: attempt.id }, { $push: teacherEvent('teacher_submitted', now()) });
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
 async function reviveAttempt(test, registration) {
@@ -649,20 +1017,35 @@ function refuseIfClosed(test) {
   if (test.isClosed) throw new PublicTestError(409, 'This test is closed, so attempts cannot be restarted. Reset the test to run it again.');
 }
 
-export async function restartAttempt(req, code, registrationId) {
+export async function restartAttempt(req, code, registrationId, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   refuseIfClosed(test);
   if (!registration.attempt) throw new PublicTestError(404, 'This student has not started an attempt yet.');
   await rebuildAttempt(test, registration);
-  return adminDashboard(req, code);
+  return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
-export async function restartAllAttempts(req, code) {
+async function mapWithConcurrency(items, worker, limit = 24) {
+  const results = new Array(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const index = next;
+      next += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
+export async function restartAllAttempts(req, code, options = {}) {
   const test = await requireOwnedTest(req, code);
   refuseIfClosed(test);
   const withAttempts = (test.registrations || []).filter((entry) => entry.attempt);
-  await Promise.all(withAttempts.map((registration) => rebuildAttempt(test, registration)));
-  return { ...(await adminDashboard(req, code)), resetCount: withAttempts.length };
+  await mapWithConcurrency(withAttempts, (registration) => rebuildAttempt(test, registration));
+  return actionResult(req, code, test, options.compact, { resetCount: withAttempts.length });
 }
 
 /**
@@ -670,7 +1053,7 @@ export async function restartAllAttempts(req, code) {
  * filtered the Responses table down to. Students the action does not apply to
  * (not locked, not started) are skipped rather than failing the whole batch.
  */
-export async function bulkAttemptAction(req, code, action, raw = {}) {
+export async function bulkAttemptAction(req, code, action, raw = {}, options = {}) {
   const test = await requireOwnedTest(req, code);
   if (!['resume', 'restart'].includes(action)) throw new PublicTestError(400, 'Invalid attempt action.');
   if (!Array.isArray(raw.registrationIds)) throw new PublicTestError(400, 'Choose the students to apply this to.');
@@ -683,10 +1066,10 @@ export async function bulkAttemptAction(req, code, action, raw = {}) {
   const eligible = (test.registrations || []).filter((entry) => chosen.has(String(entry.id)) && entry.attempt && (
     action === 'restart' || (entry.attempt.isLocked && entry.attempt.status !== 'submitted')
   ));
-  const results = await Promise.all(eligible.map((registration) => (
+  const results = await mapWithConcurrency(eligible, (registration) => (
     action === 'resume' ? reviveAttempt(test, registration) : rebuildAttempt(test, registration).then(() => true)
-  )));
-  return { ...(await adminDashboard(req, code)), affectedCount: results.filter(Boolean).length };
+  ));
+  return actionResult(req, code, test, options.compact, { affectedCount: results.filter(Boolean).length });
 }
 
 /* ------------------------------------------------------------ test lifecycle */
@@ -697,7 +1080,7 @@ export async function bulkAttemptAction(req, code, action, raw = {}) {
  * end time reaches every student at once. `addMinutes` extends from
  * whichever is later - the current end time, or now - so the minutes are real.
  */
-export async function setTestEndTime(req, code, raw = {}) {
+export async function setTestEndTime(req, code, raw = {}, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
   if (test.isClosed) throw new PublicTestError(409, 'This test is complete. Reset it before running it again.');
 
@@ -726,13 +1109,14 @@ export async function setTestEndTime(req, code, raw = {}) {
       windowSeconds: startMs === null ? null : Math.round((endsAtMs - startMs) / 1000)
     }
   });
-  return adminDashboard(req, code);
+  const updated = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, updated, options.compact);
 }
 
-export async function startTest(req, code) {
+export async function startTest(req, code, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
   if (test.isClosed) throw new PublicTestError(409, 'This test is complete. Reset it before starting it again.');
-  if (test.isStarted) return adminDashboard(req, code);
+  if (test.isStarted) return actionResult(req, code, test, options.compact);
   // Starting a test whose window has already lapsed would "succeed" and leave a
   // test nobody can sit, because no fresh attempt may begin after the end time.
   // Say so here, where the admin can still do something about it.
@@ -740,7 +1124,8 @@ export async function startTest(req, code) {
     throw new PublicTestError(409, 'The end time has already passed, so nobody could begin. Use Extend time to give this test a window, then start it.');
   }
   await beginTest(test);
-  return adminDashboard(req, code);
+  const started = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, started, options.compact);
 }
 
 /**
@@ -759,7 +1144,7 @@ export async function finishTest(test, { automatic = false, atMs = Date.now() } 
   const due = automatic
     ? active.filter(({ attempt }) => !attempt.pausedAt && atMs >= attemptDeadlineMs(test, attempt, atMs) + END_GRACE_MS)
     : active;
-  await Promise.all(due.map((registration) => finalizeAttempt(test, registration, registration.attempt, { by })));
+  await mapWithConcurrency(due, (registration) => finalizeAttempt(test, registration, registration.attempt, { by }));
   if (due.length < active.length) return due.length;
   await serializeTestWrite(test.code, () => tests().updateOne(
     { code: test.code, isClosed: { $ne: true } },
@@ -769,14 +1154,15 @@ export async function finishTest(test, { automatic = false, atMs = Date.now() } 
   // A paper begun in the moment between the sweep above and the close is
   // submitted too. Nothing new can begin now that the test is closed.
   const late = await registrationsOf(test.code, { 'attempt.status': 'in_progress' });
-  await Promise.all(late.map((registration) => finalizeAttempt(test, registration, registration.attempt, { by })));
+  await mapWithConcurrency(late, (registration) => finalizeAttempt(test, registration, registration.attempt, { by }));
   return active.length + late.length;
 }
 
-export async function closeTest(req, code) {
-  const test = await requireOwnedTest(req, code);
+export async function closeTest(req, code, options = {}) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
   const completedAttemptCount = await finishTest(test);
-  return { ...(await adminDashboard(req, code)), completedAttemptCount };
+  const closed = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, closed, options.compact, { completedAttemptCount });
 }
 
 /** Adds `ms` to a date field that may be missing or null (as in outage.js). */
@@ -793,7 +1179,7 @@ const later = (field, ms) => ({ $cond: [{ $ifNull: [field, false] }, { $add: [fi
  * now - and are worked out again when it is handed in. A test that ended
  * because its time ran out has nothing to resume.
  */
-export async function reopenTest(req, code) {
+export async function reopenTest(req, code, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
   if (!test.isClosed) throw new PublicTestError(409, 'This test is not closed.');
   if (test.closedAutomatically) {
@@ -818,7 +1204,7 @@ export async function reopenTest(req, code) {
     }
   }]));
   if (reopened.modifiedCount) await invalidateTestCache(test.code);
-  if (!reopened.modifiedCount) return adminDashboard(req, code);
+  if (!reopened.modifiedCount) return actionResult(req, code, test, options.compact);
 
   const papers = await updateRegistrationsWhere(test.code, { 'attempt.status': 'submitted', 'attempt.submittedBy': 'admin' }, [{
     $set: {
@@ -839,12 +1225,14 @@ export async function reopenTest(req, code) {
       }
     }
   }]);
-  return { ...(await adminDashboard(req, code)), affectedCount: papers.modifiedCount };
+  const current = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, current, options.compact, { affectedCount: papers.modifiedCount });
 }
 
-export async function resetTest(req, code) {
-  await clearTestRun(await requireOwnedTest(req, code));
-  return adminDashboard(req, code);
+export async function resetTest(req, code, options = {}) {
+  await clearTestRun(await requireOwnedTest(req, code, { withStudents: false }));
+  const reset = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, reset, options.compact);
 }
 
 /**
@@ -879,8 +1267,8 @@ async function clearTestRun(test) {
  * would end the moment it began. Students with the page open are sent to
  * Begin for a fresh paper by their page.
  */
-export async function restartQuiz(req, code, raw = {}) {
-  const test = await requireOwnedTest(req, code);
+export async function restartQuiz(req, code, raw = {}, options = {}) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
   if (!test.isStarted && !test.isClosed) {
     throw new PublicTestError(409, 'This test has not started yet, so there is nothing to restart. Press Start instead.');
   }
@@ -901,13 +1289,15 @@ export async function restartQuiz(req, code, raw = {}) {
     cleared.endsAt = endsAt;
   }
   await beginTest(cleared);
-  return adminDashboard(req, code);
+  const restarted = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, restarted, options.compact);
 }
 
-export async function releaseResults(req, code) {
+export async function releaseResults(req, code, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
   if (!test.resultsReleasedAt) await updateTest(test.code, { $set: { resultsReleasedAt: now() } });
-  return adminDashboard(req, code);
+  const current = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, current, options.compact);
 }
 
 export async function deleteTest(req, code) {

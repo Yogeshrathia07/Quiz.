@@ -619,6 +619,7 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
         ['Longest time away', lasted((integrity.longestAwayMs || 0) / 1000)],
         ['Copy, cut, paste or drag attempts', (integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)],
         ['Text that appeared all at once', integrity.flags?.text_burst || 0],
+        ['Keyboard opened another app while typing (not counted as leaving)', integrity.flags?.keyboard_app || 0],
         ['Screenshot, print or developer-tools attempts', (integrity.flags?.screenshot || 0) + (integrity.flags?.print || 0) + (integrity.flags?.devtools || 0)],
         ['Attempt locked now', attempt.locked ? 'Yes' : 'No'],
         ['Lock reason', attempt.lockReason || '—']

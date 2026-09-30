@@ -46,7 +46,12 @@ export const FLAG_REASONS = Object.freeze({
   // Text that landed in an answer all at once - most likely pasted from a phone
   // keyboard's clipboard, which sends no paste event. Voice typing does it too,
   // so it is recorded, never blocked.
-  text_burst: 'Text appeared all at once'
+  text_burst: 'Text appeared all at once',
+  // Left the page while typing an answer and back within moments: on an
+  // iPhone, a keyboard's own button (voice typing on Gboard or SwiftKey, its
+  // settings) opens that keyboard's app. Noted, not counted - see
+  // KEYBOARD_GRACE_MS in attempt-service.js.
+  keyboard_app: 'Keyboard opened another app while typing'
 });
 
 /**

@@ -8,7 +8,6 @@ import { endModeOf, startModeOf } from '../domain/attempt-rules.js';
 import { publicTest } from '../domain/presenters.js';
 import { activeQuestions } from '../domain/question-bank.js';
 import { adminEmail, invalidateTestCache, publicCode, requireOwnedTest, requireTest, testDocByCode, updateTest } from '../data/test-repository.js';
-import { adminDashboard } from './admin-service.js';
 
 /** Where each active question sits in the stored bank array. */
 const activeQuestionPositions = (test) => (test.questions || [])
@@ -232,7 +231,11 @@ export async function updateTestSettings(req, code, raw = {}) {
       resultReleaseMode: input.resultReleaseMode
     }
   });
-  return adminDashboard(req, code);
+  // The settings dialog only needs the settings it just saved. Rebuilding the
+  // whole registration dashboard here made a one-field time extension wait
+  // behind every student's row and answer history.
+  const updated = await requireOwnedTest(req, code, { withStudents: false });
+  return { ok: true, code: updated.code, test: publicTest(updated) };
 }
 
 export async function testQrSvg(code, joinUrl) {

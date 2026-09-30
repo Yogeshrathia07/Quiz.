@@ -26,10 +26,14 @@ import {
 } from '../services/admin-service.js';
 import { exportWorkerStats, runExportJob } from '../export/worker-pool.js';
 import { performanceSnapshot } from '../services/traffic.js';
+import { requireOwnedTest, requireRegistration, requireTestForStudent } from '../data/test-repository.js';
+import { publishLiveEvent } from '../coordination/index.js';
+import { openAdminUpdates, openStudentUpdates } from '../realtime/live-updates.js';
 import {
   addManualMark, attendanceExportData, attendanceForAdmin, attendanceForStudent, attendanceQrSvg, attendanceSettings, beginAttendanceGuest,
   closeAttendance, createAttendance, deleteAttendance, listAttendance, markAttendance, reopenAttendance, searchPeople, setMarkStatus
 } from '../services/attendance-service.js';
+import { homeSummary } from '../services/home-service.js';
 
 /** Forwards any thrown PublicTestError to the central error handler. */
 const route = (handler) => async (req, res, next) => {
@@ -38,6 +42,47 @@ const route = (handler) => async (req, res, next) => {
 
 const baseUrl = (req) => config.publicBaseUrl || `${req.protocol}://${req.get('host')}`;
 const joinUrl = (req, code) => `${baseUrl(req)}/?test=${encodeURIComponent(code)}`;
+const testCode = (code) => String(code || '').toUpperCase();
+
+// Live frames are hints, never part of an authoritative write.  In particular
+// Redis publish must not add its network round-trip to an answer, an approval,
+// or Start.  Coalescing also stops a busy class from sending one dashboard
+// refresh per individual answer: the next frame is enough for the dashboard to
+// ask for the current authorised state.
+const pendingSignals = new Map();
+let signalFlushTimer = null;
+const SIGNAL_BATCH_MS = 25;
+const signalKey = (event) => [
+  event.code,
+  event.broadcast ? '*' : event.registrationId ? `registration:${event.registrationId}` : event.attemptId ? `attempt:${event.attemptId}` : 'admin'
+].join('|');
+const signal = (event) => {
+  if (!event?.code) return;
+  const next = { ...event, code: testCode(event.code) };
+  pendingSignals.set(signalKey(next), next);
+  if (signalFlushTimer) return;
+  // A frame is only a refresh hint. Holding it for one animation-sized slice
+  // collapses a simultaneous answer rush into one dashboard signal, while the
+  // added 25 ms is far below a perceptible admin or student update delay.
+  signalFlushTimer = setTimeout(() => {
+    signalFlushTimer = null;
+    const batch = [...pendingSignals.values()];
+    pendingSignals.clear();
+    for (const item of batch) {
+      // A missed frame is safe: the normal poll and EventSource reconnect
+      // fetch the source of truth.  An unhandled publish failure is not.
+      void publishLiveEvent(item).catch((error) => console.error('Live update:', error));
+    }
+  }, SIGNAL_BATCH_MS);
+  signalFlushTimer.unref?.();
+};
+const signalTest = (code, kind, extra = {}) => signal({ code, broadcast: true, kind, ...extra });
+const signalRegistration = (code, registrationId, kind, extra = {}) => signal({
+  code,
+  registrationId: String(registrationId),
+  kind,
+  ...extra
+});
 
 const XLSX_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const sendResponseSheet = async (res, data, { audit = false } = {}) => {
@@ -112,12 +157,26 @@ export function createApiRouter() {
     res.type('image/svg+xml').send(await testQrSvg(req.params.code, joinUrl(req, req.params.code)));
   }));
   router.post('/api/tests/:code/register', requireTestTaker, route(async (req, res) => {
-    res.status(201).json(await registerForTest(req, res, req.params.code, req.body || {}));
+    const response = await registerForTest(req, res, req.params.code, req.body || {});
+    signal({ code: req.params.code, kind: 'registration_created' });
+    res.status(201).json(response);
+  }));
+
+  router.get('/api/tests/:code/events', requireTestTaker, route(async (req, res) => {
+    const test = await requireTestForStudent(req, req.params.code);
+    const registration = requireRegistration(req, test);
+    // Never take an id supplied by the browser as authority: a stream may only
+    // receive updates for the registration identified by its signed cookie.
+    openStudentUpdates(req, res, test.code, registration.attempt?.id || null, registration.id);
   }));
 
   /* -------------------------------------------------------- taking the test */
   router.post('/api/tests/:code/start', requireTestTaker, route(async (req, res) => {
-    res.status(201).json({ attempt: await startAttempt(req, req.params.code, req.body || {}) });
+    const attempt = await startAttempt(req, req.params.code, req.body || {});
+    // The new paper is already in this response. Only the admin dashboard
+    // needs a hint, so do not wake the student into a duplicate paper fetch.
+    signal({ code: req.params.code, kind: 'attempt_started' });
+    res.status(201).json({ attempt });
   }));
   router.get('/api/tests/:code/attempt', requireTestTaker, route(async (req, res) => {
     const attempt = await getAttempt(req, req.params.code, typeof req.query.window === 'string' ? req.query.window : null);
@@ -129,24 +188,34 @@ export function createApiRouter() {
   router.post('/api/test-attempts/:attemptId/answer', requireTestTaker, route(async (req, res) => {
     const body = req.body || {};
     const attempt = await saveAnswer(req, req.params.attemptId, body);
+    signal({ code: attempt.code, kind: 'answer_saved' });
     res.json(body.compact === true ? compactAnswerResponse(attempt, body.questionId) : { attempt });
   }));
   // Strict timing: close the open question and open the next.
   router.post('/api/test-attempts/:attemptId/next', requireTestTaker, route(async (req, res) => {
-    res.json({ attempt: await nextQuestion(req, req.params.attemptId, req.body || {}) });
+    const attempt = await nextQuestion(req, req.params.attemptId, req.body || {});
+    signal({ code: attempt.code, kind: 'question_next' });
+    res.json({ attempt });
   }));
   router.post('/api/test-attempts/:attemptId/submit', requireTestTaker, route(async (req, res) => {
-    res.json({ attempt: await submitAttemptForStudent(req, req.params.attemptId) });
+    const attempt = await submitAttemptForStudent(req, req.params.attemptId);
+    signal({ code: attempt.code, kind: 'submitted' });
+    res.json({ attempt });
   }));
   router.post('/api/test-attempts/:attemptId/fullscreen', requireTestTaker, route(async (req, res) => {
-    res.json(await recordFullscreenEvent(req, req.params.attemptId, req.body || {}));
+    const result = await recordFullscreenEvent(req, req.params.attemptId, req.body || {});
+    signal({ code: result.attempt.code, kind: 'integrity' });
+    res.json(result);
   }));
   router.post('/api/test-attempts/:attemptId/events', requireTestTaker, route(async (req, res) => {
     const result = await recordFullscreenEvents(req, req.params.attemptId, req.body || {});
+    signal({ code: result.attempt.code, kind: 'integrity' });
     res.json(compactAttemptState(result.attempt, { processed: result.processed }));
   }));
   router.post('/api/test-attempts/:attemptId/location', requireTestTaker, route(async (req, res) => {
-    res.json(await recordLocationCheck(req, req.params.attemptId, req.body || {}));
+    const result = await recordLocationCheck(req, req.params.attemptId, req.body || {});
+    signal({ code: result.code, kind: 'location' });
+    res.json(result);
   }));
   router.get('/api/test-attempts/:attemptId/result', requireTestTaker, route(async (req, res) => {
     res.json({ result: await attemptResult(req, req.params.attemptId) });
@@ -154,14 +223,20 @@ export function createApiRouter() {
 
   /* --------------------------------------------------------- admin: reading */
   router.get('/api/admin/tests', requireAdmin, route(async (req, res) => res.json({ tests: await adminTests(req) })));
+  router.get('/api/admin/home', requireAdmin, route(async (req, res) => res.json(await homeSummary(req))));
   router.get('/api/admin/performance', requireAdmin, route(async (_req, res) => res.json(performanceSnapshot({ exports: exportWorkerStats() }))));
+  router.get('/api/admin/tests/:code/events', requireAdmin, route(async (req, res) => {
+    const test = await requireOwnedTest(req, req.params.code, { withStudents: false });
+    openAdminUpdates(req, res, test.code);
+  }));
   router.get('/api/admin/tests/:code', requireAdmin, route(async (req, res) => {
     const paged = req.query.pageSize ? {
       section: req.query.section,
       page: req.query.page,
       pageSize: req.query.pageSize,
       search: req.query.search,
-      filters: req.query.filters
+      filters: req.query.filters,
+      sort: req.query.sort
     } : null;
     res.json(await adminDashboard(req, req.params.code, paged));
   }));
@@ -178,25 +253,59 @@ export function createApiRouter() {
 
   /* ------------------------------------------------------ admin: test setup */
   router.patch('/api/admin/tests/:code/settings', requireAdmin, route(async (req, res) => {
-    res.json(await updateTestSettings(req, req.params.code, req.body || {}));
+    const response = await updateTestSettings(req, req.params.code, req.body || {});
+    signalTest(req.params.code, 'test_settings_changed', { test: response.test });
+    res.json(response);
   }));
   // The whole question paper, for the editor; saving it asks who it reaches once papers are out.
   router.get('/api/admin/tests/:code/paper', requireAdmin, route(async (req, res) => res.json(await testForEditing(req, req.params.code))));
   router.put('/api/admin/tests/:code/paper', requireAdmin, route(async (req, res) => res.json(await saveTestPaper(req, req.params.code, req.body || {}))));
   // Works while the test is live: this is how an admin gives time back.
   router.post('/api/admin/tests/:code/end-time', requireAdmin, route(async (req, res) => {
-    res.json(await setTestEndTime(req, req.params.code, req.body || {}));
+    const response = await setTestEndTime(req, req.params.code, req.body || {}, { compact: true });
+    signalTest(req.params.code, 'time_changed', { test: response.test });
+    res.json(response);
   }));
-  router.post('/api/admin/tests/:code/start', requireAdmin, route(async (req, res) => res.json(await startTest(req, req.params.code))));
-  router.post('/api/admin/tests/:code/close', requireAdmin, route(async (req, res) => res.json(await closeTest(req, req.params.code))));
-  router.post('/api/admin/tests/:code/reopen', requireAdmin, route(async (req, res) => res.json(await reopenTest(req, req.params.code))));
+  router.post('/api/admin/tests/:code/start', requireAdmin, route(async (req, res) => {
+    const response = await startTest(req, req.params.code, { compact: true });
+    signalTest(req.params.code, 'test_started', { test: response.test });
+    res.json(response);
+  }));
+  router.post('/api/admin/tests/:code/close', requireAdmin, route(async (req, res) => {
+    const response = await closeTest(req, req.params.code, { compact: true });
+    signalTest(req.params.code, 'test_closed', { test: response.test });
+    res.json(response);
+  }));
+  router.post('/api/admin/tests/:code/reopen', requireAdmin, route(async (req, res) => {
+    const response = await reopenTest(req, req.params.code, { compact: true });
+    signalTest(req.params.code, 'test_reopened', { test: response.test });
+    res.json(response);
+  }));
   // Everyone starts again from a blank paper, now - running or finished.
-  router.post('/api/admin/tests/:code/restart-quiz', requireAdmin, route(async (req, res) => res.json(await restartQuiz(req, req.params.code, req.body || {}))));
-  router.post('/api/admin/tests/:code/reset', requireAdmin, route(async (req, res) => res.json(await resetTest(req, req.params.code))));
-  router.post('/api/admin/tests/:code/results/release', requireAdmin, route(async (req, res) => res.json(await releaseResults(req, req.params.code))));
-  router.post('/api/admin/tests/:code/attempts/restart', requireAdmin, route(async (req, res) => res.json(await restartAllAttempts(req, req.params.code))));
+  router.post('/api/admin/tests/:code/restart-quiz', requireAdmin, route(async (req, res) => {
+    const response = await restartQuiz(req, req.params.code, req.body || {}, { compact: true });
+    signalTest(req.params.code, 'quiz_restarted', { test: response.test });
+    res.json(response);
+  }));
+  router.post('/api/admin/tests/:code/reset', requireAdmin, route(async (req, res) => {
+    const response = await resetTest(req, req.params.code, { compact: true });
+    signalTest(req.params.code, 'test_reset', { test: response.test });
+    res.json(response);
+  }));
+  router.post('/api/admin/tests/:code/results/release', requireAdmin, route(async (req, res) => {
+    const response = await releaseResults(req, req.params.code, { compact: true });
+    signalTest(req.params.code, 'results_released', { test: response.test });
+    res.json(response);
+  }));
+  router.post('/api/admin/tests/:code/attempts/restart', requireAdmin, route(async (req, res) => {
+    const response = await restartAllAttempts(req, req.params.code, { compact: true });
+    signalTest(req.params.code, 'attempts_restarted', { test: response.test });
+    res.json(response);
+  }));
   router.post('/api/admin/tests/:code/attempts/bulk/:action', requireAdmin, route(async (req, res) => {
-    res.json(await bulkAttemptAction(req, req.params.code, req.params.action, req.body || {}));
+    const response = await bulkAttemptAction(req, req.params.code, req.params.action, req.body || {}, { compact: true });
+    signalTest(req.params.code, 'attempts_bulk_updated', { test: response.test });
+    res.json(response);
   }));
   router.post('/api/admin/tests/:code/duplicate', requireAdmin, route(async (req, res) => res.status(201).json(await duplicateTest(req, req.params.code))));
   router.post('/api/admin/tests/:code/archive', requireAdmin, route(async (req, res) => res.json(await archiveTest(req, req.params.code, req.body || {}))));
@@ -240,7 +349,9 @@ export function createApiRouter() {
   /* ---------------------------------------------------- admin: per student */
   const registrationPath = '/api/admin/tests/:code/registrations/:registrationId';
   router.post('/api/admin/tests/:code/registrations/bulk/:action', requireAdmin, route(async (req, res) => {
-    res.json(await bulkDecision(req, req.params.code, req.params.action, req.body || {}));
+    const response = await bulkDecision(req, req.params.code, req.params.action, req.body || {}, { compact: true });
+    signalTest(req.params.code, 'registrations_changed', { test: response.test });
+    res.json(response);
   }));
   router.get(`${registrationPath}/manual-review`, requireAdmin, route(async (req, res) => {
     res.json(await manualReview(req, req.params.code, req.params.registrationId));
@@ -252,29 +363,45 @@ export function createApiRouter() {
     res.json(await gradeManualAnswer(req, req.params.code, req.params.registrationId, req.body || {}));
   }));
   router.post(`${registrationPath}/sap-id`, requireAdmin, route(async (req, res) => {
-    res.json(await updateStudentSapId(req, req.params.code, req.params.registrationId, req.body || {}));
+    const response = await updateStudentSapId(req, req.params.code, req.params.registrationId, req.body || {}, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'registration_updated', { registration: response.registration });
+    res.json(response);
   }));
   router.post(`${registrationPath}/location-override`, requireAdmin, route(async (req, res) => {
-    res.json(await setLocationOverride(req, req.params.code, req.params.registrationId, req.body || {}));
+    const response = await setLocationOverride(req, req.params.code, req.params.registrationId, req.body || {}, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'location_override', { registration: response.registration });
+    res.json(response);
   }));
   router.post(`${registrationPath}/resume`, requireAdmin, route(async (req, res) => {
-    res.json(await resumeAttempt(req, req.params.code, req.params.registrationId));
+    const response = await resumeAttempt(req, req.params.code, req.params.registrationId, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'attempt_revived', { registration: response.registration });
+    res.json(response);
   }));
   router.post(`${registrationPath}/restart`, requireAdmin, route(async (req, res) => {
-    res.json(await restartAttempt(req, req.params.code, req.params.registrationId));
+    const response = await restartAttempt(req, req.params.code, req.params.registrationId, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'attempt_restarted', { registration: response.registration });
+    res.json(response);
   }));
   router.post(`${registrationPath}/pause`, requireAdmin, route(async (req, res) => {
-    res.json(await pauseAttempt(req, req.params.code, req.params.registrationId));
+    const response = await pauseAttempt(req, req.params.code, req.params.registrationId, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'attempt_paused', { registration: response.registration });
+    res.json(response);
   }));
   router.post(`${registrationPath}/continue`, requireAdmin, route(async (req, res) => {
-    res.json(await continueAttempt(req, req.params.code, req.params.registrationId));
+    const response = await continueAttempt(req, req.params.code, req.params.registrationId, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'attempt_continued', { registration: response.registration });
+    res.json(response);
   }));
   router.post(`${registrationPath}/submit`, requireAdmin, route(async (req, res) => {
-    res.json(await submitStudentPaper(req, req.params.code, req.params.registrationId));
+    const response = await submitStudentPaper(req, req.params.code, req.params.registrationId, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'attempt_submitted', { registration: response.registration });
+    res.json(response);
   }));
   // Keep last: :action would otherwise swallow the named routes above.
   router.post(`${registrationPath}/:action`, requireAdmin, route(async (req, res) => {
-    res.json(await decideRegistration(req, req.params.code, req.params.registrationId, req.params.action));
+    const response = await decideRegistration(req, req.params.code, req.params.registrationId, req.params.action, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'registration_changed', { registration: response.registration });
+    res.json(response);
   }));
 
   return router;
