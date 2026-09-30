@@ -42,7 +42,7 @@ export function GuestsNotAllowed({ test }) {
 }
 
 export function TestTimeOver({ test, reload }) {
-  usePolling(reload, 15_000, 25_000);
+  usePolling(reload, 30_000, 45_000);
   return (
     <section className="join-card card">
       <TestHeader test={test}/>
@@ -79,13 +79,18 @@ export function TestClosed({ test }) {
 }
 
 export function RegistrationPending({ test, registration, reload }) {
-  usePolling(reload, 8_000, 12_000);
+  // EventSource delivers approval immediately. This is only the fallback for
+  // a network/proxy that cannot keep an EventSource connection open.
+  usePolling(reload, 25_000, 35_000);
   return (
     <section className="join-card card">
       <TestHeader test={test}/>
       <p className="eyebrow" style={{ color: 'var(--warning)' }}>Registration pending</p>
       <h2>Waiting for approval</h2>
       <p>Your request was sent at {dateTime(registration.requestedAt)}. This page checks for the decision automatically.</p>
+      {registration.expiresAt && (
+        <p className="help">If it is not approved by {dateTime(registration.expiresAt)}, the request is withdrawn and you can send it again.</p>
+      )}
       <button className="button button-secondary button-wide" onClick={reload}>Check now</button>
     </section>
   );
@@ -106,7 +111,7 @@ export function EndLine({ test }) {
  * checks every few seconds.
  */
 export function WaitingForStart({ test, serverTime, reload }) {
-  usePolling(reload, 8_000, 12_000);
+  usePolling(reload, 25_000, 35_000);
   const scheduled = test.startMode === 'scheduled' && test.opensAt;
   const { secondsLeft, known } = useCountdown(scheduled ? test.opensAt : null, serverTime);
   const due = scheduled && known && secondsLeft <= 0;
@@ -142,7 +147,7 @@ export function WaitingForStart({ test, serverTime, reload }) {
  * page asks every few seconds, carrying on the moment the teacher continues.
  */
 export function PausedAttempt({ attempt, reload }) {
-  usePolling(reload, 4_000, 7_000);
+  usePolling(reload, 12_000, 16_000);
   const leftMs = attempt.deadlineAt ? Math.max(0, Date.parse(attempt.deadlineAt) - Date.parse(attempt.serverTime)) : null;
   return (
     <section className="join-card card lock-card pause-card">
@@ -164,7 +169,7 @@ export function PausedAttempt({ attempt, reload }) {
  * wait is configured instead, it counts down to its own unlock.
  */
 export function LockedAttempt({ attempt, reload }) {
-  usePolling(reload, 4_000, 7_000);
+  usePolling(reload, 12_000, 16_000);
   const { secondsLeft, known } = useCountdown(attempt.unlocksAt, attempt.serverTime);
   const tries = attempt.fullscreenExitLimit || 0;
   const awaySeconds = attempt.fullscreenAbsenceLimitSeconds || 0;

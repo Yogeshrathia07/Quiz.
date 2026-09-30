@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  answeredCountWith, applyPending, clearCache, clearDurableCache, clearOtherCaches, isPermanentRejection, loadCache,
+  answeredCountWith, applyPending, clearCache, clearDurableCache, clearOtherCaches, createDebouncedDurableCacheWriter, isPermanentRejection, loadCache,
   loadCacheForCode, loadDurableCache, mergeAnswerAcknowledgement, mergeAttemptState, retryDelay, saveCache, saveDurableCache
 } from '../client/src/lib/offline-answers.js';
 
@@ -155,4 +155,23 @@ test('durable storage safely degrades where IndexedDB is unavailable', async () 
   assert.equal(await loadDurableCache(null, 'NET-101'), null);
   assert.equal(await saveDurableCache(null, 'NET-101', { id: 'abc' }, new Map()), false);
   assert.equal(await clearDurableCache(null, 'NET-101'), false);
+});
+
+test('durable snapshots coalesce, and a clear cannot be followed by a stale write', async () => {
+  const calls = [];
+  const writer = createDebouncedDurableCacheWriter(null, 'NET-101', {
+    delay: 20,
+    save: async (_db, _code, attempt, pending) => { calls.push({ type: 'save', id: attempt.id, pending: [...pending] }); },
+    clear: async () => { calls.push({ type: 'clear' }); }
+  });
+  writer.schedule({ id: 'older' }, new Map([[1, { answerText: 'A' }]]));
+  writer.schedule({ id: 'newest' }, new Map([[1, { answerText: 'B' }]]));
+  await writer.flush();
+  assert.deepEqual(calls, [{ type: 'save', id: 'newest', pending: [[1, { answerText: 'B' }]] }]);
+
+  // This queued snapshot must be cancelled before it can escape after Submit.
+  writer.schedule({ id: 'stale' }, new Map());
+  await writer.clear();
+  await writer.dispose();
+  assert.deepEqual(calls.map((call) => call.type), ['save', 'clear']);
 });

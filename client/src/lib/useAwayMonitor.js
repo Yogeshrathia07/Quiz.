@@ -80,6 +80,15 @@ const BEGIN_GRACE_MS = 30_000;
 export const BLUR_GRACE_MS = 1_000;
 
 /**
+ * Typing an answer: a text box has the keyboard. Also just after one lost it -
+ * the page can drop the box's focus a moment before it is put away.
+ */
+const TEXT_INPUTS = new Set(['text', 'search', 'email', 'number', 'tel', 'url']);
+const isTextBox = (element) => Boolean(element && !element.readOnly
+  && (element.tagName === 'TEXTAREA' || (element.tagName === 'INPUT' && TEXT_INPUTS.has(element.type))));
+const TYPING_AFTERGLOW_MS = 1_500;
+
+/**
  * Notices when a student leaves the test, by any route a phone or a laptop
  * offers: leaving fullscreen, switching tab or app, locking the screen, the
  * window losing focus (split screen, a floating app, another window), or the
@@ -113,6 +122,10 @@ export function useAwayMonitor({ enabled, enforceFullscreen, serverAway, onLeave
   serverAwayRef.current = serverAway;
   // A departure the server never heard about has no return to report either.
   const silent = useRef(false);
+  // Whether the current departure began while typing an answer.
+  const typingLeave = useRef(false);
+  // When a text box last lost the keyboard.
+  const lastTyped = useRef(0);
   // "Look again now" for the gate's button - see the return below.
   const recheckRef = useRef(() => null);
 
@@ -129,7 +142,13 @@ export function useAwayMonitor({ enabled, enforceFullscreen, serverAway, onLeave
       return !document.hidden && !blurred.current && !isSplitScreen() && (!mustBeFullscreen || inFullscreen());
     };
 
-    const leave = (detail, { report = true, counted = true, since = Date.now() } = {}) => {
+    // On an iPhone a keyboard's own button (voice typing on Gboard or SwiftKey,
+    // its settings) opens that keyboard's app and puts this page away, just
+    // like switching apps. Said with the departure, so the server can make
+    // it only a note if the student is back within moments. A page closing or
+    // reloading is never that.
+    const typingNow = () => isTextBox(document.activeElement) || Date.now() - lastTyped.current < TYPING_AFTERGLOW_MS;
+    const leave = (detail, { report = true, counted = true, since = Date.now(), typing = false } = {}) => {
       if (awaySince.current) {
         if (!silent.current || !counted) return;
         // Really leaving while fullscreen was still being asked for: that one counts.
@@ -143,24 +162,27 @@ export function useAwayMonitor({ enabled, enforceFullscreen, serverAway, onLeave
       awaySince.current = since;
       reason.current = detail;
       silent.current = !counted;
+      typingLeave.current = typing;
       setAway(true);
       setAwayReason(detail);
-      if (report && counted) leaveRef.current(detail);
+      if (report && counted) leaveRef.current(detail, { typing });
     };
     const settle = () => {
       if (!awaySince.current || !present()) return;
       const durationMs = Date.now() - awaySince.current;
       const detail = reason.current;
       const wasCounted = !silent.current;
+      const typing = typingLeave.current;
       awaySince.current = null;
       reason.current = null;
       silent.current = false;
+      typingLeave.current = false;
       setAway(false);
       setAwayReason(null);
-      if (wasCounted) returnRef.current(durationMs, detail);
+      if (wasCounted) returnRef.current(durationMs, detail, { typing });
     };
 
-    const onVisibility = () => (document.hidden ? leave('tab_switch') : settle());
+    const onVisibility = () => (document.hidden ? leave('tab_switch', { typing: typingNow() }) : settle());
     const onFullscreen = () => {
       if (!inFullscreen()) return mustBeFullscreen && leave('fullscreen');
       settle();
@@ -192,18 +214,20 @@ export function useAwayMonitor({ enabled, enforceFullscreen, serverAway, onLeave
       if (pausedDepth > 0 || document.hidden) return;
       blurred.current = true;
       const since = Date.now();
+      const typing = typingNow();
       window.clearTimeout(blurTimer);
       blurTimer = window.setTimeout(() => {
         // Back already (some phones skip the focus event): nothing happened -
         // and if that blink held up a return (fullscreen coming back, say),
         // the return is settled now rather than left waiting for a tap.
         if (!blurred.current || document.hasFocus()) { blurred.current = false; settle(); return; }
-        leave('focus_lost', { since });
+        leave('focus_lost', { since, typing });
       }, BLUR_GRACE_MS);
     };
     const onFocus = () => { window.clearTimeout(blurTimer); blurred.current = false; settle(); };
     // Safari on iOS often skips visibilitychange when the app is swiped away.
     const onPageHide = () => leave('tab_switch');
+    const onTextBoxLeft = (event) => { if (isTextBox(event.target)) lastTyped.current = Date.now(); };
     // Entering or leaving split screen changes the window's size - but so,
     // for a moment, do the phone keyboard closing, turning the phone and
     // going fullscreen. Only a size that holds is judged a split.
@@ -249,8 +273,10 @@ export function useAwayMonitor({ enabled, enforceFullscreen, serverAway, onLeave
     document.addEventListener('pointerdown', onTap, true);
     // A text field losing focus is when a keyboard-shrunk window is judged again.
     document.addEventListener('focusout', onResize);
+    document.addEventListener('focusout', onTextBoxLeft);
 
     return () => {
+      document.removeEventListener('focusout', onTextBoxLeft);
       window.clearTimeout(splitTimer);
       window.clearTimeout(blurTimer);
       recheckRef.current = () => null;

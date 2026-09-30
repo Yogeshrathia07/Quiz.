@@ -16,6 +16,26 @@ const LATEST_KEY = (code) => `quiz-offline-latest:${String(code || '').toUpperCa
 const DB_NAME = 'campus-quiz-offline';
 const DB_VERSION = 1;
 const STORE = 'attempts';
+// IndexedDB opens and transactions finish asynchronously. Without an ordered
+// lane, a slow older write can finish after a newer answer (or a submit's
+// delete) and put stale paper data back on the device.
+const durableOperations = new Map();
+
+const durableCode = (code) => String(code || '').toUpperCase();
+
+function serializeDurable(code, work) {
+  const key = durableCode(code);
+  const previous = durableOperations.get(key) || Promise.resolve();
+  const operation = previous.catch(() => null).then(work);
+  // Keep the lane usable if a browser rejects one transaction. The individual
+  // public operation still resolves with its own true/false result.
+  const settled = operation.catch(() => null);
+  durableOperations.set(key, settled);
+  settled.finally(() => {
+    if (durableOperations.get(key) === settled) durableOperations.delete(key);
+  });
+  return operation;
+}
 
 /** localStorage throws in private windows and when full; never break the exam for it. */
 function safely(run, fallback = null) {
@@ -124,15 +144,15 @@ export async function loadDurableCache(indexedDb, code) {
   finally { database.close(); }
 }
 
-export async function saveDurableCache(indexedDb, code, attempt, pending) {
+async function saveDurableSnapshot(indexedDb, code, attempt, pending) {
   const database = await openOfflineDb(indexedDb);
   if (!database) return false;
   try {
     const request = database.transaction(STORE, 'readwrite').objectStore(STORE).put({
-      code: String(code || attempt?.code || '').toUpperCase(),
+      code: durableCode(code || attempt?.code),
       attemptId: attempt?.id,
       attempt,
-      pending: [...(pending || new Map())],
+      pending,
       savedAt: new Date().toISOString()
     });
     await idbRequest(request);
@@ -141,15 +161,84 @@ export async function saveDurableCache(indexedDb, code, attempt, pending) {
   finally { database.close(); }
 }
 
-export async function clearDurableCache(indexedDb, code) {
+/** Writes are ordered per test code, and the pending Map is snapshotted before
+ * the asynchronous work begins. */
+export function saveDurableCache(indexedDb, code, attempt, pending) {
+  const snapshot = [...(pending || new Map())];
+  return serializeDurable(code || attempt?.code, () => saveDurableSnapshot(indexedDb, code, attempt, snapshot));
+}
+
+async function clearDurableSnapshot(indexedDb, code) {
   const database = await openOfflineDb(indexedDb);
   if (!database) return false;
   try {
-    const request = database.transaction(STORE, 'readwrite').objectStore(STORE).delete(String(code || '').toUpperCase());
+    const request = database.transaction(STORE, 'readwrite').objectStore(STORE).delete(durableCode(code));
     await idbRequest(request);
     return !request.error;
   } catch { return false; }
   finally { database.close(); }
+}
+
+/** A clear joins the same lane as writes, so a submitted paper cannot be
+ * resurrected by a late IndexedDB transaction. */
+export function clearDurableCache(indexedDb, code) {
+  return serializeDurable(code, () => clearDurableSnapshot(indexedDb, code));
+}
+
+/**
+ * Coalesce frequent answer edits before they reach IndexedDB. localStorage is
+ * still written synchronously by the caller, so this never trades away the
+ * student's immediate offline safety. `save`/`clear` are injectable for the
+ * small deterministic tests of ordering below this module's public API.
+ */
+export function createDebouncedDurableCacheWriter(indexedDb, code, {
+  delay = 220, save = saveDurableCache, clear = clearDurableCache
+} = {}) {
+  let timer = null;
+  let staged = null;
+  let disposed = false;
+  let chain = Promise.resolve();
+
+  const append = (work) => {
+    chain = chain.catch(() => null).then(work);
+    return chain;
+  };
+  const cancelTimer = () => {
+    if (timer) globalThis.clearTimeout(timer);
+    timer = null;
+  };
+  const drain = () => {
+    cancelTimer();
+    const snapshot = staged;
+    staged = null;
+    if (!snapshot) return chain;
+    return append(() => save(indexedDb, code, snapshot.attempt, snapshot.pending));
+  };
+
+  return {
+    schedule(attempt, pending) {
+      if (disposed) return;
+      // A Map is copied now, before a later response removes an answer from it.
+      staged = { attempt, pending: new Map(pending || []) };
+      cancelTimer();
+      timer = globalThis.setTimeout(drain, Math.max(0, Number(delay) || 0));
+    },
+    flush() {
+      return drain();
+    },
+    clear() {
+      cancelTimer();
+      staged = null;
+      return append(() => clear(indexedDb, code));
+    },
+    dispose() {
+      if (disposed) return chain;
+      disposed = true;
+      // A normal navigation should keep the newest local paper. A submit/reset
+      // calls clear() first, which removes the staged snapshot.
+      return drain();
+    }
+  };
 }
 
 const hasContent = (payload) => (payload.answerText !== undefined

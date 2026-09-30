@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { liveEventsFromPayload, useLiveUpdate } from '../../lib/live-updates.js';
 import { leavingRules } from './leaving-rules.js';
 import { PrivateWindowRequired } from './PrivateWindowRequired.jsx';
 import { api, isOffline, isSignedOut, post } from '../../lib/api.js';
@@ -7,13 +8,14 @@ import {
   fullscreenSupported, inFullscreen, markResumed, requestTestFullscreen, useAwayMonitor, useClipboardGuard, useKeyboardLockdown, withoutAwayCheck
 } from '../../lib/useAwayMonitor.js';
 import {
-  applyPending, clearCache, clearDurableCache, clearOtherCaches, isPermanentRejection, loadCache, loadCacheForCode,
-  loadDurableCache, mergeAnswerAcknowledgement, mergeAttemptState, retryDelay, saveCache, saveDurableCache
+  applyPending, clearCache, clearDurableCache, clearOtherCaches, createDebouncedDurableCacheWriter, isPermanentRejection, loadCache, loadCacheForCode,
+  loadDurableCache, mergeAnswerAcknowledgement, mergeAttemptState, retryDelay, saveCache
 } from '../../lib/offline-answers.js';
 import { setExamInProgress } from '../../lib/useAppUpdate.js';
 import { useKeepAwake } from '../../lib/keep-awake.js';
 import { useExtensionWatch } from '../../lib/extension-watch.js';
 import { getBrowserLocation } from '../../lib/geo.js';
+import { LocationHelp } from '../../components/LocationCheck.jsx';
 import { QuestionPalette } from './QuestionPalette.jsx';
 import { QuestionPaper } from './QuestionPaper.jsx';
 import { QuestionList } from './QuestionList.jsx';
@@ -32,11 +34,14 @@ const wait = (ms) => new Promise((resolve) => { window.setTimeout(resolve, ms); 
  * page backs off. No class now lands on one fixed second.
  */
 export const attemptPollDelay = (attempt, hidden = typeof document !== 'undefined' && document.hidden, random = Math.random()) => {
-  if (attempt?.isLocked || attempt?.paused) return 5_000 + Math.round(random * 3_000);
-  if (hidden) return 28_000 + Math.round(random * 8_000);
+  // SSE carries ordinary admin changes in well under a second. Polling stays
+  // as a safety net for a proxy that blocks EventSource, but must remain below
+  // the server's 60 s offline threshold even on a quiet paper.
+  if (attempt?.isLocked || attempt?.paused) return 12_000 + Math.round(random * 4_000);
+  if (hidden) return 36_000 + Math.round(random * 8_000);
   const deadline = Date.parse(attempt?.endsAt || attempt?.deadlineAt || '');
-  if (Number.isFinite(deadline) && deadline - Date.now() < 2 * 60_000) return 7_000 + Math.round(random * 4_000);
-  return 18_000 + Math.round(random * 7_000);
+  if (Number.isFinite(deadline) && deadline - Date.now() < 2 * 60_000) return 12_000 + Math.round(random * 5_000);
+  return 32_000 + Math.round(random * 8_000);
 };
 export const locationPollDelay = (closed, random = Math.random()) => {
   const base = closed ? 12_000 : 54_000;
@@ -47,10 +52,22 @@ export const locationPollDelay = (closed, random = Math.random()) => {
 const REPORT_MS = 15_000;
 /** Submit waits at most this long for the location reading that goes on the record. */
 const SUBMIT_LOCATION_MS = 3_000;
+/** As the server (attempt-service KEYBOARD_GRACE_MS): leaving while typing, back this quickly, is a note. */
+const KEYBOARD_GRACE_MS = 15_000;
+const KEYBOARD_NOTES_MAX = 3;
 /** Avoid every timed paper opening one connection on the exact same millisecond. */
 const AUTO_SUBMIT_JITTER_MS = 8_000;
 /** Worth trying again: the connection dropped, or the server was momentarily overloaded. */
 const isRetryable = (error) => isOffline(error) || isSignedOut(error) || error.status >= 500 || error.status === 429 || error.status === 408;
+// These events change what a student is permitted to see or do. Activity
+// frames (answer_saved, location, integrity) are for the administrator only;
+// re-fetching a complete paper for each of those was needless traffic.
+const PAPER_REFRESH_EVENTS = new Set([
+  'resync', 'stream_reconnected', 'time_changed', 'test_settings_changed', 'test_closed', 'test_reopened',
+  'quiz_restarted', 'test_reset', 'attempts_restarted', 'attempts_bulk_updated',
+  'attempt_revived', 'attempt_restarted', 'attempt_paused', 'attempt_continued',
+  'attempt_submitted', 'registration_changed', 'location_override', 'results_released'
+]);
 
 /**
  * Shown over the paper when this device was signed out mid-test - normally
@@ -312,7 +329,7 @@ function VenueGate({ venue, radiusMeters, checking, problem, onCheck }) {
             ? `Your device says you are ${away || 'away from the venue'}. Answers cannot be saved from outside${radiusMeters ? ` the ${radiusMeters} m test area` : ' the test area'}.`
             : 'Your device has stopped telling us where it is. Allow location access, and keep this page open at the venue.'}
         </p>
-        {problem && <p className="notice danger" role="alert">{problem}</p>}
+        <LocationHelp problem={problem}/>
         <p className="help">
           The check runs again every few seconds. Your paper and your answers are safe, your time keeps running, and this is recorded for your administrator.
         </p>
@@ -324,12 +341,12 @@ function VenueGate({ venue, radiusMeters, checking, problem, onCheck }) {
   );
 }
 
-export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone = () => {}, windowKind, privateExempt = false, onDeclareWindow = () => {} }) {
+export function AttemptScreen({ code, initialAttempt = null, microsoft = null, showToast, onPaperGone = () => {}, windowKind, privateExempt = false, onDeclareWindow = () => {} }) {
   // Sent with every poll, so a private-window rule switched on mid-test is
   // recorded against the window the paper is actually in.
   const windowRef = useRef(windowKind);
   windowRef.current = windowKind;
-  const [attempt, setAttempt] = useState(null);
+  const [attempt, setAttempt] = useState(() => initialAttempt || null);
   const [result, setResult] = useState(null);
   const [index, setIndex] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -378,57 +395,109 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
   const answerRetryTimer = useRef(null);
   const answerRetryRound = useRef(0);
   const [answerRetrySignal, setAnswerRetrySignal] = useState(0);
+  const loadInFlight = useRef(null);
+  const loadAgain = useRef(false);
+  const usedInitialAttempt = useRef(Boolean(initialAttempt));
+  const durableWriter = useRef(null);
+  const clearDurable = useCallback(() => {
+    const writer = durableWriter.current;
+    return writer ? writer.clear() : clearDurableCache(durableStorage, code);
+  }, [code]);
+
+  // localStorage remains immediate for a just-typed answer. IndexedDB is a
+  // slower second durable copy, so coalesce its repeated snapshots while
+  // retaining strict write/clear ordering around a submission or reset.
+  useEffect(() => {
+    const writer = createDebouncedDurableCacheWriter(durableStorage, code);
+    durableWriter.current = writer;
+    return () => {
+      if (durableWriter.current === writer) durableWriter.current = null;
+      void writer.dispose();
+    };
+  }, [code]);
 
   /* ------------------------------------------------------- loading the paper */
 
   const loadAttempt = useCallback(async () => {
-    try {
-      const query = new URLSearchParams();
-      if (windowRef.current) query.set('window', windowRef.current);
-      if (attemptRef.current?.revision) query.set('revision', attemptRef.current.revision);
-      const queryText = query.toString();
-      const response = await api(`/api/tests/${encodeURIComponent(code)}/attempt${queryText ? `?${queryText}` : ''}`);
-      // A 204 is a successful heartbeat: the server confirms that the paper's
-      // revision has not changed, without downloading it again.
-      if (!response) {
+    if (loadInFlight.current) {
+      loadAgain.current = true;
+      return loadInFlight.current;
+    }
+    let job;
+    job = (async () => {
+      try {
+        const query = new URLSearchParams();
+        if (windowRef.current) query.set('window', windowRef.current);
+        if (attemptRef.current?.revision) query.set('revision', attemptRef.current.revision);
+        const queryText = query.toString();
+        const response = await api(`/api/tests/${encodeURIComponent(code)}/attempt${queryText ? `?${queryText}` : ''}`);
+        // A 204 is a successful heartbeat: the server confirms that the paper's
+        // revision has not changed, without downloading it again.
+        if (!response) {
+          setOnline(true);
+          setSignedOut('');
+          return attemptRef.current;
+        }
+        setAttempt(response.attempt);
         setOnline(true);
         setSignedOut('');
-        return attemptRef.current;
-      }
-      setAttempt(response.attempt);
-      setOnline(true);
-      setSignedOut('');
-      return response.attempt;
-    } catch (error) {
-      if (isSignedOut(error)) { setSignedOut(error.message); return null; }
-      // The quiz was restarted or reset: this paper is gone.
-      if (error.code === 'NO_ATTEMPT') {
-        clearCache(storage, attemptIdRef.current);
-        void clearDurableCache(durableStorage, code);
-        paperGone();
-        return null;
-      }
-      if (isRetryable(error)) {
-        setOnline(false);
-        // Fall back to the paper this device already holds, so a reload during
-        // an outage still shows the test rather than an error.
-        const cached = (attemptIdRef.current && loadCache(storage, attemptIdRef.current))
-          || loadCacheForCode(storage, code)
-          || await loadDurableCache(durableStorage, code);
-        if (cached) {
-          attemptIdRef.current = cached.attempt.id;
-          setAttempt(cached.attempt);
-          setPending(cached.pending);
-          return cached.attempt;
+        return response.attempt;
+      } catch (error) {
+        if (isSignedOut(error)) { setSignedOut(error.message); return null; }
+        // The quiz was restarted or reset: this paper is gone.
+        if (error.code === 'NO_ATTEMPT') {
+          clearCache(storage, attemptIdRef.current);
+          void clearDurable();
+          paperGone();
+          return null;
         }
+        if (isRetryable(error)) {
+          setOnline(false);
+          // Fall back to the paper this device already holds, so a reload during
+          // an outage still shows the test rather than an error.
+          const cached = (attemptIdRef.current && loadCache(storage, attemptIdRef.current))
+            || loadCacheForCode(storage, code)
+            || await loadDurableCache(durableStorage, code);
+          if (cached) {
+            attemptIdRef.current = cached.attempt.id;
+            setAttempt(cached.attempt);
+            setPending(cached.pending);
+            return cached.attempt;
+          }
+          return null;
+        }
+        showToast(error.message);
         return null;
       }
-      showToast(error.message);
-      return null;
+    })();
+    loadInFlight.current = job;
+    try { return await job; }
+    finally {
+      if (loadInFlight.current === job) {
+        loadInFlight.current = null;
+        if (loadAgain.current) {
+          loadAgain.current = false;
+          window.setTimeout(() => { void loadAttempt(); }, 0);
+        }
+      }
     }
-  }, [code, showToast]);
+  }, [code, showToast, clearDurable, paperGone]);
 
-  useEffect(() => { loadAttempt(); }, [loadAttempt]);
+  useEffect(() => {
+    if (usedInitialAttempt.current) {
+      usedInitialAttempt.current = false;
+      return undefined;
+    }
+    void loadAttempt();
+    return undefined;
+  }, [loadAttempt]);
+  useLiveUpdate(
+    attempt?.id ? `/api/tests/${encodeURIComponent(code)}/events` : null,
+    (payload) => {
+      if (liveEventsFromPayload(payload).some((event) => PAPER_REFRESH_EVENTS.has(event?.kind))) void loadAttempt();
+    },
+    Boolean(attempt?.id)
+  );
 
   // Remember which attempt this device holds, and drop any older one.
   useEffect(() => {
@@ -447,7 +516,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
   useEffect(() => {
     if (!attempt?.id || attempt.status === 'submitted') return;
     saveCache(storage, attempt.id, attempt, pending);
-    void saveDurableCache(durableStorage, code, attempt, pending);
+    durableWriter.current?.schedule(attempt, pending);
   }, [attempt, pending, code]);
 
   /* ------------------------------------------------- sending queued answers */
@@ -628,7 +697,9 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
   }, [attempt]);
 
   useEffect(() => {
-    if (!attempt?.id || attempt.status === 'submitted') return undefined;
+    // Locked and paused screens have their own focused fallback poll below;
+    // keeping this paper heartbeat there too doubled their traffic.
+    if (!attempt?.id || attempt.status === 'submitted' || attempt.isLocked || attempt.paused) return undefined;
     let timer;
     const tick = async () => {
       const fresh = await loadAttempt();
@@ -636,7 +707,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
     };
     timer = window.setTimeout(tick, attemptPollDelay(attemptRef.current));
     return () => window.clearTimeout(timer);
-  }, [attempt?.id, attempt?.status, loadAttempt]);
+  }, [attempt?.id, attempt?.status, attempt?.isLocked, attempt?.paused, loadAttempt]);
 
   const attemptId = attempt?.id;
   // The admin turned on "Private window only" and this is a normal window:
@@ -661,7 +732,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
   const checkingLocation = useRef(false);
   const [checkingNow, setCheckingNow] = useState(false);
   // Why the device's location could not be had, and what to do about it.
-  const [locationProblem, setLocationProblem] = useState('');
+  const [locationProblem, setLocationProblem] = useState(null);
   const checkLocation = useCallback(async (trigger = 'timer') => {
     if (!attemptIdRef.current || !attempt?.locationRequired || checkingLocation.current || document.hidden) return;
     checkingLocation.current = true;
@@ -675,8 +746,8 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
         .then((status) => status.state === 'prompt', () => false);
       try {
         point = await (prompts ? withoutAwayCheck(getBrowserLocation) : getBrowserLocation());
-        setLocationProblem('');
-      } catch (error) { setLocationProblem(error.message); /* reported as inconclusive below */ }
+        setLocationProblem(null);
+      } catch (error) { setLocationProblem(error); /* reported as inconclusive below */ }
       // Still reported when there is no reading: the server hears from the paper.
       const response = await api(`/api/test-attempts/${attemptIdRef.current}/location`, {
         method: 'POST', body: JSON.stringify({ ...point, trigger }), signal: AbortSignal.timeout?.(REPORT_MS)
@@ -731,15 +802,25 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
   // it never dims and locks by itself mid-question.
   useKeepAwake(attempt?.status === 'in_progress');
 
+  // Keyboard-app notes so far in this sitting (the server keeps the real count).
+  const keyboardNotes = useRef(0);
   const { away, awayReason, recheck } = useAwayMonitor({
     // A locked or paused attempt has no paper on screen, so leaving it is not watched.
     enabled: sitting && !attempt?.isLocked && !attempt?.paused,
     enforceFullscreen,
     serverAway: Boolean(attempt?.isAway),
-    onLeave: (detail) => reportPresence({ type: 'exit', detail }),
-    onReturn: (durationMs, detail) => {
+    onLeave: (detail, { typing = false } = {}) => reportPresence({ type: 'exit', detail, ...(typing ? { typing: true } : {}) }),
+    onReturn: (durationMs, detail, { typing = false } = {}) => {
       reportPresence({ type: 'return', durationMs, detail });
       const current = attemptRef.current;
+      // Away only a moment, while typing: most likely the keyboard's own app
+      // (voice typing, its settings). The server makes that a note, not a
+      // departure - the same limits as there, so this never promises more.
+      if (typing && durationMs <= KEYBOARD_GRACE_MS && keyboardNotes.current < KEYBOARD_NOTES_MAX) {
+        keyboardNotes.current += 1;
+        showToast("Your keyboard opened another app. Back this quickly, it is only noted for your teacher, not counted as leaving. To be safe, use the phone's own keyboard and type rather than dictate.", 'info', { title: 'Keyboard app' });
+        return;
+      }
       // A test that only warns: say so each time, so going past the limit is never silent.
       // ("Lock only" shows no warning: the lock itself is the message.)
       if (current && !current.locksOnViolation && current.warnsOnViolation !== false) {
@@ -899,7 +980,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
         }
       }
       clearCache(storage, attempt.id);
-      void clearDurableCache(durableStorage, code);
+      void clearDurable();
       writePresence(attempt.id, []);
       setAttempt(response.attempt);
     } catch (error) {
@@ -934,7 +1015,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
         try {
           const response = await post(`/api/test-attempts/${attemptIdRef.current}/submit`);
           clearCache(storage, attemptIdRef.current);
-          void clearDurableCache(durableStorage, code);
+          void clearDurable();
           writePresence(attemptIdRef.current, []);
           setAttempt(response.attempt);
           return;
@@ -947,7 +1028,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
     } finally {
       autoSubmitting.current = false;
     }
-  }, [code, flush, flushPresence, loadAttempt]);
+  }, [flush, flushPresence, loadAttempt, clearDurable]);
   useEffect(() => { if (attempt?.timeOver && attempt.status === 'in_progress') autoSubmit(); }, [attempt?.timeOver, attempt?.status, autoSubmit]);
   // An extension while the gate is up gives the paper back.
   useEffect(() => { if (attempt?.status === 'in_progress' && !attempt.timeOver && !autoSubmitting.current) setTimeUp(false); }, [attempt]);
@@ -980,7 +1061,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
       const response = await post(`/api/test-attempts/${attemptIdRef.current}/next`, carried ? { questionId, answer: carried } : { questionId });
       if (response.attempt.status === 'submitted') {
         clearCache(storage, attemptIdRef.current);
-        void clearDurableCache(durableStorage, code);
+        void clearDurable();
         writePresence(attemptIdRef.current, []);
       }
       setAttempt(response.attempt);
@@ -1003,7 +1084,7 @@ export function AttemptScreen({ code, microsoft = null, showToast, onPaperGone =
       moving.current = false;
       setMovingOn(false);
     }
-  }, [code, loadAttempt, showToast]);
+  }, [code, loadAttempt, showToast, clearDurable]);
 
   const signedBackIn = async () => {
     setSignedOut('');
