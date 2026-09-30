@@ -635,6 +635,12 @@
 /* Paused by the teacher is a hold, not a penalty: blue, not the lock's red. */
 .pause-card .lock-stats div{background:rgba(21,152,209,.14)}
 .pause-card .lock-stats strong{color:#3DB3E6}
+/* A user's name, with Edit beside it (Users → open a person) */
+.user-name{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px}
+.user-name h1{margin:0}
+.user-name .link-button{display:inline-flex;align-items:center;gap:5px;font-size:.85rem}
+.user-name-form{margin:0 0 6px}
+.user-name-form .text-input{min-width:min(100%,260px)}
 
 /* Tapping an option must never move the paper:no double-tap zoom, and a
    header row that cannot wrap when its save label changes. */
@@ -1354,3 +1360,24 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .table-pagination{display:flex;align-items:center;justify-content:flex-end;gap:12px;padding:12px 16px 4px;color:var(--muted);font-size:.86rem}
 .table-pagination span{min-width:150px;text-align:center}
 @media(max-width:560px){.table-pagination{justify-content:space-between;padding:12px 4px 2px;gap:6px}.table-pagination span{min-width:0;font-size:.78rem}}
+
+/* A note under a status card's text keeps its distance from the button below it. */
+.join-card .help + .button{margin-top:16px}
+
+/* The venue step (components/LocationCheck.jsx): what is about to be asked,
+   then "found", or the numbered way out of what went wrong. */
+.launch-venue{display:grid;gap:10px;margin:16px 0}
+.launch-venue .notice,.att-mark-form .location-ask,.att-mark-form .location-help,.att-mark-form .location-ok{margin:12px 0}
+.launch-venue .notice{margin:0}
+.location-ask .help{margin:6px 0 12px}
+.location-allow,.location-retry{display:inline-flex;align-items:center;gap:7px}
+.location-ok{display:flex;align-items:center;gap:9px}
+.location-ok svg{flex:none}
+.location-steps{display:grid;gap:7px;margin:9px 0 12px;padding-left:20px;line-height:1.45}
+.location-help .location-steps{color:#F2D4D5}
+.location-copy{display:flex;gap:8px;margin:0 0 12px}
+.location-copy .text-input{flex:1;min-width:0;height:38px;min-height:38px;font-size:.8rem}
+.location-copy .button{display:inline-flex;align-items:center;gap:6px;flex:none}
+.away-gate-card .location-help{text-align:left}
+.location-actions{display:flex;flex-wrap:wrap;gap:8px}
+.location-reload{display:inline-flex;align-items:center;gap:7px}

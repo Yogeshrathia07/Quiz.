@@ -973,9 +973,13 @@ th.cell-num{text-align:right}
    screen. Too narrow for three in a row, the main action takes the full row
    and Edit / More share the next; narrower still, "Edit test" says "Edit". */
 [data-area] .schedule-banner{container-type:inline-size}
+/* Too narrow for words: one row of equal round buttons, each just its icon -
+   its name stays its tooltip and what a screen reader says. */
 @container (max-width: 620px){
-  [data-area] .banner-actions{width:100%;grid-auto-flow:row;grid-template-columns:1fr 1fr;grid-auto-columns:auto}
-  [data-area] .banner-actions>.button:first-child:not(:only-of-type){grid-column:1 / -1}
+  [data-area] .banner-actions{display:flex;flex-wrap:nowrap;width:100%;gap:10px}
+  [data-area] .banner-actions .action-menu{display:block}
+  [data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{flex:none;width:44px;min-width:44px;max-width:44px;height:44px;min-height:44px;padding:0;gap:0;border-radius:50%;justify-content:center}
+  [data-area] .banner-actions :is(.toolbar-text,.toolbar-chevron){display:none}
 }
 @container (max-width: 340px){
   [data-area] .label-more{display:none}
