@@ -10,8 +10,9 @@ import { PublicTestError } from './lib/errors.js';
 import { portalSessionMiddleware } from './auth/portal-auth.js';
 import { createApiRouter } from './routes/api-router.js';
 import { startScheduler } from './services/scheduler.js';
-import { trafficMiddleware } from './services/traffic.js';
+import { isLiveStreamRequest, trafficMiddleware } from './services/traffic.js';
 import { closeExportWorkers } from './export/worker-pool.js';
+import { closeLiveUpdates } from './realtime/live-updates.js';
 
 await initializeCoordination();
 // Index creation and legacy-data repairs are safe to repeat, but they should
@@ -20,13 +21,30 @@ await serializeWrite('startup:database', initializeDatabase, { ttlMs: 120_000, r
 
 const app = express();
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+// Set once this process starts shutting down (see `stop` below).
+let stopping = false;
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
+// A process being replaced (PM2's one-at-a-time reload) answers what it has
+// and tells each browser to open its next connection afresh - which lands on
+// a process that is staying - instead of reusing one that is about to close.
+app.use((_req, res, next) => {
+  if (stopping) res.set('Connection', 'close');
+  next();
+});
 // JSON, HTML and SVG shrink substantially on slow/mobile links. Hashed assets
 // benefit too when a proxy does not already compress them; tiny responses are
 // left alone because compression overhead would be larger than the saving.
-app.use(compression({ threshold: 1024 }));
+// EventSource frames must remain uncompressed: compressor buffering can turn a
+// sub-second update into a multi-second delay behind a tunnel or proxy.
+app.use(compression({
+  threshold: 1024,
+  filter(req, res) {
+    if (isLiveStreamRequest(req.method, req.path)) return false;
+    return compression.filter(req, res);
+  }
+}));
 app.use((_req, res, next) => {
   res.set({
     'Referrer-Policy': 'same-origin',
@@ -76,12 +94,14 @@ server.headersTimeout = 96_000;
 // Starts scheduled tests and submits every paper when a test's time is up.
 const stopScheduler = startScheduler();
 
-let stopping = false;
 const stop = (signal) => {
   if (stopping) return;
   stopping = true;
   console.log(`${signal}: finishing active requests before shutdown.`);
   stopScheduler();
+  // Server-sent event connections are intentionally long-lived. End them
+  // first so server.close() does not wait for every browser to navigate away.
+  closeLiveUpdates();
   const forced = setTimeout(() => process.exit(1), 15_000);
   forced.unref?.();
   server.close(async () => {
@@ -99,3 +119,7 @@ const stop = (signal) => {
 };
 process.once('SIGTERM', () => stop('SIGTERM'));
 process.once('SIGINT', () => stop('SIGINT'));
+// Windows has no such signals for PM2 to send: with `shutdown_with_message`
+// (ecosystem.config.cjs) it asks by message instead. Without this, a reload
+// killed each process mid-request.
+process.on('message', (message) => { if (message === 'shutdown') stop('shutdown'); });

@@ -15,6 +15,10 @@
  *
  *   npm run check:load                 # 200 students
  *   STUDENTS=100 npm run check:load
+ *
+ * LOAD_CHECK_URL points it at a server that is already running - several
+ * processes under PM2, say - instead of starting one of its own. That server
+ * must use the same MONGODB_URI as this script.
  */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -33,7 +37,8 @@ const WAITING_ROUNDS = Math.max(0, Number(process.env.WAITING_ROUNDS ?? 3));
 const BACKGROUND_POLLING = process.env.BACKGROUND_POLLING !== '0';
 const ANSWER_JITTER_MS = Math.max(0, Number(process.env.ANSWER_JITTER_MS ?? 2000));
 const PORT = Number(process.env.LOAD_CHECK_PORT || 3997);
-const BASE = `http://127.0.0.1:${PORT}`;
+const EXTERNAL = String(process.env.LOAD_CHECK_URL || '').trim().replace(/\/$/, '');
+const BASE = EXTERNAL || `http://127.0.0.1:${PORT}`;
 const run = `${Date.now()}`;
 const admin = { portalUser: { email: `load-${run}@ddn.upes.ac.in`, displayName: 'Load Admin', role: 'admin' } };
 
@@ -129,6 +134,7 @@ let server = null;
 let serverExit = null;
 let polling = false;
 async function startServer() {
+  if (EXTERNAL) return;
   server = spawn(process.execPath, ['src/server.js'], { env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.on('exit', (code, signal) => { serverExit = { code, signal }; });
   await new Promise((resolve, reject) => {
@@ -280,7 +286,7 @@ try {
   for (const [phase, values] of timings) {
     const row = [phase.padEnd(16), String(values.length).padStart(8),
       `${percentile(values, 50).toFixed(0)} ms`.padStart(8), `${percentile(values, 95).toFixed(0)} ms`.padStart(8),
-      `${Math.max(...values).toFixed(0)} ms`.padStart(8)];
+      `${values.reduce((top, value) => (value > top ? value : top), 0).toFixed(0)} ms`.padStart(8)];
     console.log(`  ${row.join(' ')}`);
   }
   console.log(`\n  Verified ${checked} stored answers and marks, and every departure.`);
@@ -297,13 +303,13 @@ try {
 } catch (error) {
   console.error(`\n  Load check failed: ${error.message}`);
   if (serverExit) console.error(`    server exited: code ${serverExit.code ?? 'none'}, signal ${serverExit.signal ?? 'none'}`);
-  else console.error('    server process was still running when the failure was observed.');
+  else if (!EXTERNAL) console.error('    server process was still running when the failure was observed.');
   if (timings.size) {
     console.error('\n  phase            requests    p50      p95      max');
     for (const [phase, values] of timings) {
       const row = [phase.padEnd(16), String(values.length).padStart(8),
         `${percentile(values, 50).toFixed(0)} ms`.padStart(8), `${percentile(values, 95).toFixed(0)} ms`.padStart(8),
-        `${Math.max(...values).toFixed(0)} ms`.padStart(8)];
+        `${values.reduce((top, value) => (value > top ? value : top), 0).toFixed(0)} ms`.padStart(8)];
       console.error(`  ${row.join(' ')}`);
     }
   }

@@ -19,7 +19,10 @@
     "check:redis": "node scripts/redis-lock-check.js",
     "check:migration": "node scripts/migration-check.js",
     "db:backup": "node scripts/db-backup.js",
-    "db:restore": "node scripts/db-restore.js"
+    "db:restore": "node scripts/db-restore.js",
+    "cluster:start": "node scripts/cluster.js start",
+    "cluster:reload": "node scripts/cluster.js reload",
+    "cluster:stop": "node scripts/cluster.js stop"
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",

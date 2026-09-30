@@ -4,7 +4,7 @@ import test, { after } from 'node:test';
 import { cachedJson, invalidateCached } from '../src/coordination/index.js';
 import { dashboardCounts, paginateDashboard } from '../src/services/admin-service.js';
 import { config } from '../src/config.js';
-import { isPollableRequest, trafficMiddleware } from '../src/services/traffic.js';
+import { isLiveStreamRequest, isPollableRequest, trafficMiddleware } from '../src/services/traffic.js';
 import { closeExportWorkers, runExportJob } from '../src/export/worker-pool.js';
 import { attemptRevision, compactAnswerResponse } from '../src/domain/attempt-sync.js';
 
@@ -74,6 +74,38 @@ test('only safe repeatable GET routes are classified as pollable', () => {
   assert.equal(isPollableRequest('POST', '/api/test-attempts/a/answer'), false);
   assert.equal(isPollableRequest('POST', '/api/test-attempts/a/submit'), false);
   assert.equal(isPollableRequest('GET', '/api/me/results'), false);
+  assert.equal(isLiveStreamRequest('GET', '/api/tests/TEST-X/events'), true);
+  assert.equal(isLiveStreamRequest('GET', '/api/admin/tests/TEST-X/events'), true);
+  assert.equal(isLiveStreamRequest('POST', '/api/tests/TEST-X/events'), false);
+  assert.equal(isLiveStreamRequest('GET', '/api/tests/TEST-X/attempt'), false);
+});
+
+test('live EventSource sockets do not consume active HTTP request capacity', () => {
+  const before = { ...config.performance };
+  config.performance.softActiveRequests = 1;
+  config.performance.hardActiveRequests = 2;
+  const response = () => {
+    const res = new EventEmitter();
+    res.statusCode = 200;
+    res.set = () => res;
+    res.status = (status) => { res.statusCode = status; return res; };
+    res.json = (body) => { res.body = body; res.emit('finish'); return res; };
+    return res;
+  };
+  try {
+    const stream = response();
+    let streamRan = false;
+    trafficMiddleware({ method: 'GET', path: '/api/tests/TEST-X/events' }, stream, () => { streamRan = true; });
+    assert.equal(streamRan, true);
+
+    const answer = response();
+    let answerRan = false;
+    trafficMiddleware({ method: 'POST', path: '/api/test-attempts/a/answer' }, answer, () => { answerRan = true; });
+    assert.equal(answerRan, true, 'the idle live stream cannot consume an answer-write slot');
+    answer.emit('finish');
+  } finally {
+    Object.assign(config.performance, before);
+  }
 });
 
 test('overload protection sheds a poll before an answer write', () => {
