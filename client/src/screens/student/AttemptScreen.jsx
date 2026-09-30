@@ -178,10 +178,9 @@ function TimeUpGate({ unsent, answered, total, online }) {
 }
 
 /**
- * Every tap on an option queues an answer for a split second. A normal save
- * shows nothing: the answer is already kept on this device. The strip appears
- * only when sending is really stuck - longer than slow classroom Wi-Fi takes
- * for one save - or when offline.
+ * Every tap on an option queues an answer for a split second, shown beside
+ * its question as "Saving…". Only sending that is really stuck - longer than
+ * slow classroom Wi-Fi takes for one save - says so in amber.
  */
 const STUCK_AFTER_MS = 8_000;
 
@@ -198,31 +197,6 @@ const FLAG_WARNINGS = {
 };
 // Whether an answer carried with a move has anything in it (a cleared one does not).
 const hasContent = (answer) => Boolean((answer?.answerText || '').trim() || answer?.selectedOptions?.length);
-
-function ConnectionNotice({ online, unsent }) {
-  // The browser still has a network, so it is the test server that is unreachable.
-  const serverDown = !online && typeof navigator !== 'undefined' && navigator.onLine;
-  const [stuck, setStuck] = useState(false);
-  const hasUnsent = unsent > 0;
-  useEffect(() => {
-    if (!hasUnsent) { setStuck(false); return undefined; }
-    const timer = window.setTimeout(() => setStuck(true), STUCK_AFTER_MS);
-    return () => window.clearTimeout(timer);
-  }, [hasUnsent]);
-  const synced = online && unsent === 0;
-  const title = synced ? 'Synced' : online ? (stuck ? 'Still sending…' : 'Saved on this device') : serverDown ? 'Can’t reach the server' : 'You are offline';
-  const detail = synced ? 'All answers are saved on the server.' : online ? 'Keep this page open.'
-    : serverDown ? 'Answers are saved here; lost time is given back.'
-      : 'Answers are saved here. Over a minute offline counts as leaving.';
-  const saved = unsent > 0 ? ` · ${unsent} waiting to send` : '';
-  return (
-    <div className={`connection-strip${synced ? ' is-synced' : online ? '' : ' is-down'}`} role="status" title={`${title}. ${detail}`}>
-      <span className="connection-dot" aria-hidden="true"/>
-      <strong>{title}</strong>
-      <span className="connection-detail">{saved || ` · ${detail}`}</span>
-    </div>
-  );
-}
 
 /** Past the test's switch allowance (a test that only warns never locks, so the student can go past it). */
 const pastLimit = (attempt) => attempt.fullscreenExitLimit > 0 && (attempt.timesLeft || 0) > attempt.fullscreenExitLimit;
@@ -930,6 +904,17 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   };
 
   const questions = useMemo(() => applyPending(attempt?.questions, pending), [attempt?.questions, pending]);
+  // How sending stands, shown beside every question number (QuestionPaper SaveState).
+  const hasUnsent = pending.size > 0;
+  const [sendingStuck, setSendingStuck] = useState(false);
+  useEffect(() => {
+    if (!hasUnsent) { setSendingStuck(false); return undefined; }
+    const timer = window.setTimeout(() => setSendingStuck(true), STUCK_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [hasUnsent]);
+  // Offline - or the browser still has a network, so it is the test server that cannot be reached.
+  const connection = online ? (sendingStuck ? 'stuck' : 'online')
+    : typeof navigator !== 'undefined' && navigator.onLine ? 'server' : 'offline';
   const showAll = attempt?.questionLayout === 'all';
   const current = questions[Math.min(index, Math.max(0, questions.length - 1))];
   const openCount = questions.filter((question) => !question.answered).length;
@@ -1153,6 +1138,11 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
 
   return (
     <section className={`exam-screen exam-protected${showAll ? ' is-list' : ''}`}>
+      {/* Said aloud when the connection drops; each question shows it in words beside its number. */}
+      <span className="sr-only" role="status">
+        {connection === 'offline' ? 'You are offline. Your answers are kept on this device.'
+          : connection === 'server' ? 'Cannot reach the server. Your answers are kept on this device.' : ''}
+      </span>
       <ExamHeader
         attempt={attempt}
         strict={strict}
@@ -1169,7 +1159,6 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
         : <QuestionPalette questions={questions} currentIndex={showAll ? -1 : current.index} onSelect={showAll ? scrollToQuestion : selectQuestion}/>}
 
       <div className="exam-notices">
-        <ConnectionNotice online={online} unsent={pending.size}/>
         {extensionSeen && (
           <p className="notice danger" role="status">
             <strong>A browser extension is changing this page.</strong> Turn extensions off, or take the test in a private (Incognito) window. This is recorded.
@@ -1199,8 +1188,8 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
           </div>
         )}
         {showAll
-          ? <QuestionList questions={questions} onSave={saveAnswer} onTextBurst={onTextBurst}/>
-          : <QuestionPaper key={current.id} question={current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} onTextBurst={onTextBurst}/>}
+          ? <QuestionList questions={questions} onSave={saveAnswer} onTextBurst={onTextBurst} connection={connection}/>
+          : <QuestionPaper key={current.id} question={current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} onTextBurst={onTextBurst} connection={connection}/>}
         {strict && movingOn && (
           <div className="strict-switching" role="status">{isLastStrict ? 'Submitting your paper…' : 'Opening the next question…'}</div>
         )}

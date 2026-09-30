@@ -5,11 +5,11 @@ import { QuestionPaper } from './QuestionPaper.jsx';
  * still renders read-only once the server marks it final, so the only thing
  * that differs from the one-at-a-time paper is how much you can see at once.
  */
-export function QuestionList({ questions, onSave, onTextBurst }) {
+export function QuestionList({ questions, onSave, onTextBurst, connection }) {
   return (
     <div className="q-list">
       {questions.map((question) => (
-        <QuestionPaper key={question.id} question={question} total={questions.length} onSave={onSave} onTextBurst={onTextBurst}/>
+        <QuestionPaper key={question.id} question={question} total={questions.length} onSave={onSave} onTextBurst={onTextBurst} connection={connection}/>
       ))}
     </div>
   );

@@ -96,7 +96,7 @@ strong,b{font-weight:650}
 .notice.danger{background:rgba(239,91,95,.1);border-color:rgba(239,91,95,.35);color:#FFB1B3}
 .notice.success{background:rgba(39,182,111,.1);border-color:rgba(39,182,111,.35);color:#9BE6C0}
 .schedule-banner{background:var(--bg-raised);border:1px solid var(--border);color:var(--text)}
-.schedule-banner span{color:var(--text-2)}
+.schedule-banner .banner-text>span{color:var(--text-2)}
 .empty{color:var(--text-2)}
 /* Messages: plain white frosted glass with no outline, so the edges fade
    into the page, which stays faintly visible behind.
@@ -357,9 +357,6 @@ kbd{background:var(--bg-raised);border-color:var(--border);color:var(--text-2)}
 .strict-foot .exam-submit:not(.is-secondary){background:var(--primary);color:#fff}
 .strict-foot .exam-submit:not(.is-secondary):hover:not(:disabled){background:var(--primary-hover);border-color:var(--primary-hover)}
 .question-clock,.exam-clock.is-question{background:var(--bg-raised);color:var(--text);border:1px solid var(--border)}
-.connection-strip{background:var(--bg-raised);color:var(--text-2);border-color:var(--border)}
-.connection-dot{background:var(--ok)}
-.connection-strip.is-down .connection-dot{background:var(--bad)}
 .screenshot-shield,.exam-body .screenshot-shield{background:var(--bg-raised);color:var(--text)}
 .away-gate{background:var(--bg-page)}
 .away-gate .eyebrow{color:var(--text-3)}

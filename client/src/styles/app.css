@@ -1068,7 +1068,7 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .schedule-summary{margin:0}
 .schedule-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;margin:0 0 16px;padding:14px 16px;border-radius:12px;background:#33373B;color:#F7FAFC}
 .schedule-banner strong{display:block;font-size:1.05rem;font-variant-numeric:tabular-nums}
-.schedule-banner span{display:block;margin-top:3px;color:#AAB6BC;font-size:.82rem}
+.schedule-banner .banner-text>span{display:block;margin-top:3px;color:#AAB6BC;font-size:.82rem}
 .schedule-banner.is-waiting{background:rgba(21,152,209,.12)}
 .schedule-banner.is-live{background:rgba(39,182,111,.14)}
 .schedule-banner.is-ending{background:rgba(239,91,95,.14)}
@@ -1226,15 +1226,17 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .confirm-gate-card p{margin:0;color:#D5DEE2;line-height:1.5}
 @keyframes confirm-in{from{opacity:0}to{opacity:1}}
 /* Connection trouble:one slim line under the progress bar, never a block. */
-.connection-strip{display:flex;align-items:center;gap:6px;min-width:0;padding:5px 10px;border-radius:999px;background:rgba(21,152,209,.12);color:#F39A4A;font-size:.76rem;line-height:1.2;white-space:nowrap;overflow:hidden}
-.connection-strip.is-down{background:rgba(239,91,95,.14);color:#EF5B5F}
-.connection-strip.is-synced{background:rgba(32,181,120,.11);color:#72D5AA}
-.connection-strip strong{flex:0 0 auto}
-.connection-detail{min-width:0;overflow:hidden;text-overflow:ellipsis}
-.connection-dot{flex:0 0 8px;width:8px;height:8px;border-radius:50%;background:#1598D1}
-.connection-strip.is-synced .connection-dot{background:#20B578}
-.connection-strip.is-down .connection-dot{background:#EF5B5F;animation:waiting-pulse 1.4s ease-in-out infinite}
-@media (prefers-reduced-motion:reduce){.confirm-gate,.connection-strip.is-down .connection-dot{animation:none}}
+/* On the right of each question's header: where its answer stands
+   (QuestionPaper SaveState), as coloured text - green saved, blue saving,
+   amber waiting on this device, grey before an answer. A long one wraps and
+   stays on the right. */
+.q-card .q-head{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 10px}
+.q-card .q-head .q-state{margin-left:auto;padding:0;border:0;background:none;font-size:.78rem;font-weight:600;line-height:1.35;text-align:right}
+.q-card .q-head .q-state.is-saved{color:#43CF88}
+.q-card .q-head .q-state.is-sending{color:#5CC3EE}
+.q-card .q-head .q-state.is-waiting{color:#F5A45C}
+.q-card .q-head .q-state.is-empty,.q-card .q-head .q-state.is-final{color:#89979E;font-weight:500}
+@media (prefers-reduced-motion:reduce){.confirm-gate{animation:none}}
 
 /* ------------------------------------------------ exam header:focus on the question ----
    One timer that matters right now, with a bar that drains; everything else

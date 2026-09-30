@@ -37,10 +37,31 @@ function revealBox(box) {
 // queued, so it reads "Saved" at once: a "Saving…" flickering on every tap told
 // the student nothing. Only real trouble (stuck, or offline) is shown, by the
 // strip above the paper.
-function SaveState({ question }) {
-  if (question.locked) return <span className="q-state">Final</span>;
-  if (question.answered) return <span className="q-state is-saved">Saved</span>;
-  return null;
+/**
+ * On the right of the question's header: where this answer stands, in colour. "Saved"
+ * means on the server - an answer still waiting on this device says so, and
+ * why (sending, stuck, offline, the server unreachable). Before an answer:
+ * that it saves by itself.
+ *
+ *   connection: 'online' | 'stuck' (sending for a while) | 'offline' | 'server'
+ */
+const SAVE_STATES = {
+  saved: ['is-saved', 'Saved'],
+  online: ['is-sending', 'Saving…'],
+  stuck: ['is-waiting', 'Still sending… keep this page open'],
+  offline: ['is-waiting', 'Saved on this device · sends when you are back online'],
+  server: ['is-waiting', 'Saved on this device · sends when the server is back'],
+  empty: ['is-empty', 'Saves automatically when you answer'],
+  emptyOffline: ['is-waiting', 'Offline · your answers are kept on this device']
+};
+function SaveState({ question, connection = 'online' }) {
+  if (question.locked) return <span className="q-state is-final">Final</span>;
+  const away = connection === 'offline' || connection === 'server';
+  const key = question.unsent ? connection
+    : question.answered ? 'saved'
+      : away ? 'emptyOffline' : 'empty';
+  const [tone, text] = SAVE_STATES[key];
+  return <span className={`q-state ${tone}`}>{text}</span>;
 }
 
 /**
@@ -51,7 +72,7 @@ function SaveState({ question }) {
  * Mounted with `key={question.id}`, so the typed draft below belongs to exactly
  * one question and a background refresh can never overwrite it mid-sentence.
  */
-export function QuestionPaper({ question, total, onSave, flushRef, draftRef, onTextBurst }) {
+export function QuestionPaper({ question, total, onSave, flushRef, draftRef, onTextBurst, connection }) {
   const [answerText, setAnswerText] = useState(question.answerText);
   const box = useRef(null);
   const burstRef = useRef(onTextBurst);
@@ -143,7 +164,7 @@ export function QuestionPaper({ question, total, onSave, flushRef, draftRef, onT
     <article className="q-card" id={`question-${question.id}`}>
       <div className="q-head">
         <span className="q-count">Question {question.number}<span>/{total}</span></span>
-        <SaveState question={question}/>
+        <SaveState question={question} connection={connection}/>
       </div>
       <RichText className="q-prompt" text={question.prompt}/>
       <p className="q-hint">{HINT[question.type]}</p>
