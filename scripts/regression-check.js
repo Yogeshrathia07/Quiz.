@@ -1196,6 +1196,24 @@ try {
   const guestAttempt = await startAttempt(guestSeat.studentRequest, guestTest.test.code);
   assert.equal(guestAttempt.status, 'in_progress');
 
+  // A guest's SAP ID is compared only with other guests': one a registered student has is fine - even in the
+  // same test as that student - but two guests cannot share one. A teacher editing a guest's follows the same rule.
+  const studentsSap = (await studentProfile(studentReq)).profile.sapId;
+  const guestIn = async (name) => {
+    const session = await beginGuestSession(cookieResponse(), { name, testCode: guestTest.test.code });
+    profileEmails.push(session.user.email);
+    return { portalUser: { email: session.user.email, displayName: session.user.name, role: 'student' } };
+  };
+  const twin = await registerForTest(await guestIn('Sap Twin'), cookieResponse(), guestTest.test.code, { sapId: studentsSap });
+  assert.equal(twin.registration.status, 'pending', 'a guest may use a SAP ID a registered student has');
+  const sameStudent = await registerForTest(studentReq, cookieResponse(), guestTest.test.code, { sapId: studentsSap });
+  assert.equal(sameStudent.registration.status, 'pending', 'and that student can still join the same test');
+  await expectPublicError(async () => registerForTest(await guestIn('Sap Copy'), cookieResponse(), guestTest.test.code, { sapId: studentsSap }), 409);
+  await expectPublicError(() => updateStudentSapId(adminReq, guestTest.test.code, guestSeat.registration.id, { sapId: studentsSap }), 409);
+  await updateStudentSapId(adminReq, guestTest.test.code, guestSeat.registration.id, { sapId: otherSapId });
+  assert.equal((await registrations().findOne({ testCode: guestTest.test.code, id: guestSeat.registration.id })).sapId, otherSapId,
+    'a teacher can give a guest a SAP ID a registered student has');
+
   // Turning the toggle off shuts the door again, for sessions and registrations.
   await closeTest(adminReq, guestTest.test.code);
   const guestOff = await createTest(adminReq, objectivePayload(`Guest off ${identifier}`));

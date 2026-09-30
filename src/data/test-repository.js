@@ -33,6 +33,16 @@ export const cachedTestDocByCode = (code) => cachedJson(
 
 export const invalidateTestCache = (code) => invalidateCached(testCacheResource(code));
 
+/*
+ * A SAP ID is only ever compared within its own kind: a guest's with other
+ * guests', a student's with other students'. A guest types theirs each time
+ * and it is never checked against accounts, so a guest can never lock a
+ * registered student out - or be refused because of one.
+ * Guest seats say so (accountType), and older ones by their @guest.test email.
+ */
+export const GUEST_SEATS = { $or: [{ accountType: 'guest' }, { collegeEmail: /@guest\.test$/i }] };
+export const STUDENT_SEATS = { $nor: [{ accountType: 'guest' }, { collegeEmail: /@guest\.test$/i }] };
+
 /** This test's students matching `filter`, in the order they registered. */
 export const registrationsOf = (code, filter = {}) => registrations()
   .find({ testCode: normalizeCode(code), ...filter }, REGISTRATION_VIEW)

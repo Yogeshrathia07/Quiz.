@@ -14,6 +14,7 @@ import { endTimeMs, normalizeSapId } from '../domain/test-builder.js';
 import {
   deleteRegistrationsOf, invalidateTestCache, publicCode, registrationsOf, requireOwnedRegistration, requireOwnedTest, serializeTestWrite,
   testDocByCode, updateAttemptWhere, updateRegistration, updateRegistrationFields, updateRegistrationsWhere, updateTest
+, GUEST_SEATS, STUDENT_SEATS
 } from '../data/test-repository.js';
 import { buildAttempt, finalizeAttempt, venueClosed } from './attempt-service.js';
 import { activityLog } from '../domain/activity.js';
@@ -824,8 +825,11 @@ export async function updateStudentSapId(req, code, registrationId, raw, options
   // The check and the change run together in this test's queue, where new
   // seats are also taken, so nobody can register with the ID in between.
   await serializeTestWrite(test.code, async () => {
-    const [alreadyUsed] = await registrationsOf(test.code, { id: { $ne: registration.id }, sapId, exitedAt: null });
-    if (alreadyUsed) throw new PublicTestError(409, 'Another student in this test already uses that SAP ID.');
+    // Compared only with the same kind of seat: a guest's with guests', a student's with students'.
+    const [alreadyUsed] = await registrationsOf(test.code, {
+      id: { $ne: registration.id }, sapId, exitedAt: null, ...(accountType === 'guest' ? GUEST_SEATS : STUDENT_SEATS)
+    });
+    if (alreadyUsed) throw new PublicTestError(409, `Another ${accountType === 'guest' ? 'guest' : 'student'} in this test already uses that SAP ID.`);
     // A guest's SAP ID belongs to this seat only; it is never saved to a profile.
     if (accountType !== 'guest') {
       try {

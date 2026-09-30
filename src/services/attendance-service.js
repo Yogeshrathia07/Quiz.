@@ -207,14 +207,22 @@ async function collegeStudent(rawLookup) {
   return { email: profile.email, name, sapId, isGuest: false };
 }
 
+/*
+ * A SAP ID is compared only within its own kind: a guest's with other
+ * guests' marks, a college student's with other college students'. A guest
+ * may give a SAP ID a registered student has - it is never checked against
+ * accounts - and a guest's mark never stops that student marking.
+ */
+const sameSapId = (mark, sapId, isGuest) => Boolean(sapId) && mark.sapId === sapId && Boolean(mark.isGuest) === Boolean(isGuest);
+/** For the write itself: no mark of the same kind with this SAP ID arrived meanwhile. */
+const noSapIdClash = (sapId, isGuest) => (sapId
+  ? { marks: { $not: { $elemMatch: { sapId, isGuest: isGuest ? true : { $ne: true } } } } }
+  : {});
+
 /** Anyone else, by name and SAP ID - just as they would mark themselves as a guest. */
 async function guestStudent(raw) {
   const name = cleanText(raw.name, 'Name', 2, 120);
   const sapId = normalizeSapId(raw.sapId);
-  const profile = await studentProfiles().findOne({ sapId });
-  if (profile) {
-    throw new PublicTestError(409, `SAP ID ${sapId} belongs to ${profile.displayName || profile.email}, who has an account. Add them as a college student instead.`);
-  }
   return { email: null, name, sapId, isGuest: true };
 }
 
@@ -227,7 +235,7 @@ async function guestStudent(raw) {
 export async function addManualMark(req, code, raw = {}) {
   const session = await requireOwnedSession(req, code);
   const { email, name, sapId, isGuest } = raw.as === 'guest' ? await guestStudent(raw) : await collegeStudent(raw.lookup);
-  const clash = (session.marks || []).find((mark) => (sapId && mark.sapId === sapId) || (email && mark.email === email));
+  const clash = (session.marks || []).find((mark) => sameSapId(mark, sapId, isGuest) || (email && mark.email === email));
   if (clash) {
     throw new PublicTestError(409, clash.status === 'rejected'
       ? `${clash.name} was removed from this class. Use Restore on their row instead.`
@@ -251,7 +259,7 @@ export async function addManualMark(req, code, raw = {}) {
   };
   // The student may scan at this very moment: only one of the two lands.
   const { modifiedCount } = await attendanceSessions().updateOne(
-    { code: session.code, ...(sapId ? { 'marks.sapId': { $ne: sapId } } : {}), ...(email ? { 'marks.email': { $ne: email } } : {}) },
+    { code: session.code, ...noSapIdClash(sapId, isGuest), ...(email ? { 'marks.email': { $ne: email } } : {}) },
     { $push: { marks: mark } }
   );
   if (!modifiedCount) throw new PublicTestError(409, `${name} has just marked themselves.`);
@@ -318,13 +326,10 @@ export async function markAttendance(req, code, raw = {}) {
   let sapId = null;
   if (isGuest) {
     sapId = normalizeSapId(raw.sapId);
-    if (await studentProfiles().findOne({ sapId })) {
-      throw new PublicTestError(409, 'This SAP ID belongs to a registered student. Sign in with your college email instead.');
-    }
   } else if (user.role === 'student') {
     sapId = await sapIdForStudent(email, displayName(user), raw.sapId);
   }
-  if (sapId && (session.marks || []).some((mark) => mark.sapId === sapId)) {
+  if ((session.marks || []).some((mark) => sameSapId(mark, sapId, isGuest))) {
     throw new PublicTestError(409, 'Attendance has already been marked for this SAP ID.');
   }
 
@@ -366,7 +371,7 @@ export async function markAttendance(req, code, raw = {}) {
       code: session.code,
       rounds: { $elemMatch: { number: round.number, closedAt: null } },
       'marks.email': { $ne: email },
-      ...(sapId ? { 'marks.sapId': { $ne: sapId } } : {})
+      ...noSapIdClash(sapId, isGuest)
     },
     { $push: { marks: mark } }
   );

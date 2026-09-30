@@ -139,7 +139,6 @@ try {
   await expectPublicError(() => addManualMark(adminReq, session.code, { as: 'college', lookup: sap(3) }), 409);
   await expectPublicError(() => addManualMark(adminReq, session.code, { as: 'college', lookup: studentEmail('dev') }), 409, undefined);
   await expectPublicError(() => addManualMark(adminReq, session.code, { as: 'college', lookup: sap(5) }), 404, 'NOT_REGISTERED');
-  await expectPublicError(() => addManualMark(adminReq, session.code, { as: 'guest', sapId: sap(3), name: 'Not Chen' }), 409);
   added = await addManualMark(adminReq, session.code, { as: 'guest', sapId: sap(5), name: 'No Phone' });
   const guestMark = added.session.marks.find((mark) => mark.sapId === sap(5));
   assert.equal(guestMark.isGuest, true);
@@ -185,6 +184,29 @@ try {
   const putBack = (await setMarkStatus(adminReq, open.code, byHand.id, 'restore')).session;
   assert.equal(putBack.isOpen, true);
   assert.equal(putBack.marks[0].status, 'present', 'a mark added by hand comes back present');
+
+  // A guest's SAP ID is compared only with other guests': one a registered
+  // student has is fine, that student can still mark, and only a second
+  // guest giving it is refused - scanning or added by the teacher.
+  const { session: kinds } = await createAttendance(adminReq, { title: `SAP kinds ${identifier}`, allowGuests: true });
+  createdCodes.push(kinds.code);
+  const guestScan2 = async (name) => {
+    const visitor = await beginAttendanceGuest(cookieResponse(), { attendanceCode: kinds.code, name });
+    return scan({ portalUser: { email: visitor.user.email, displayName: visitor.user.name, role: visitor.user.role } }, kinds);
+  };
+  // Asha's SAP ID (sap 1) is on her account: a guest gives it first, then Asha marks herself.
+  await markAttendance((await guestScan2('Visitor Two')).request, kinds.code, { sapId: sap(1) });
+  await markAttendance((await scan(student('asha'), kinds)).request, kinds.code, {});
+  let kindMarks = (await attendanceForAdmin(adminReq, kinds.code)).session.marks;
+  assert.equal(kindMarks.filter((mark) => mark.sapId === sap(1)).length, 2, 'a guest with a registered SAP ID does not stop its student marking');
+  assert.deepEqual(kindMarks.filter((mark) => mark.sapId === sap(1)).map((mark) => Boolean(mark.isGuest)).sort(), [false, true]);
+  await expectPublicError(async () => markAttendance((await guestScan2('Visitor Three')).request, kinds.code, { sapId: sap(1) }), 409);
+  // Added by the teacher: a guest with Chen's SAP ID (sap 3), then Chen himself; a second guest with it is refused.
+  await addManualMark(adminReq, kinds.code, { as: 'guest', sapId: sap(3), name: 'Guest With Chens SAP' });
+  await addManualMark(adminReq, kinds.code, { as: 'college', lookup: sap(3) });
+  await expectPublicError(() => addManualMark(adminReq, kinds.code, { as: 'guest', sapId: sap(3), name: 'Second Guest' }), 409);
+  kindMarks = (await attendanceForAdmin(adminReq, kinds.code)).session.marks;
+  assert.equal(kindMarks.filter((mark) => mark.sapId === sap(3)).length, 2, 'one guest and Chen share a SAP ID; no more');
 
   // Another admin cannot see it.
   await expectPublicError(() => attendanceForAdmin({ portalUser: { email: `other-${identifier}@ddn.upes.ac.in`, role: 'admin' } }, session.code), 404);

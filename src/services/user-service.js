@@ -5,7 +5,7 @@ import { isAllowedEmail, normalizeEmail, revokeSessionsFor, roleForEmail } from 
 import { cleanText, normalizeSapId } from '../domain/test-builder.js';
 import { studentResponseData, timeTakenSeconds } from '../domain/presenters.js';
 import { integrityRecord } from '../domain/integrity.js';
-import { serializeTestWrite, testsForEmail } from '../data/test-repository.js';
+import { STUDENT_SEATS, serializeTestWrite, testsForEmail } from '../data/test-repository.js';
 import { pendingManualCount, responsesAvailable } from './attempt-service.js';
 
 /**
@@ -151,7 +151,7 @@ export async function setUserSapId(req, rawEmail, raw = {}) {
   if (roleForEmail(email) !== 'student') throw new PublicTestError(409, 'Only student accounts have a SAP ID.');
   const sapId = normalizeSapId(raw.sapId);
   const clash = await registrations().findOne(
-    { sapId, collegeEmail: { $ne: email }, exitedAt: null, accountType: { $ne: 'guest' } },
+    { sapId, collegeEmail: { $ne: email }, exitedAt: null, ...STUDENT_SEATS },
     { projection: { testCode: 1 } }
   );
   if (clash) throw new PublicTestError(409, `Another student already uses this SAP ID on test ${clash.testCode}.`);

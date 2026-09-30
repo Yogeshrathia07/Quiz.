@@ -9,6 +9,7 @@ import { integrityRecord } from '../domain/integrity.js';
 import {
   adminEmail, insertRegistrationUnless, registrationCookie, registrationFor, registrationsOf, requireTest, requireTestForStudent, seatTokenFrom,
   submittedRegistrationFor, testsForEmail, updateRegistration, updateRegistrationFields
+, GUEST_SEATS, STUDENT_SEATS
 } from '../data/test-repository.js';
 import {
   GUEST_EMAIL_DOMAIN, hasLiveSession, isGuestAccount, issueSession, normalizeEmail, roleForEmail
@@ -198,19 +199,17 @@ export async function registerForTest(req, res, code, raw) {
   }
 
   // Faculty have no SAP ID. A student's is kept on their profile. A guest's is
-  // typed each time and never saved, so it can never lock a student out.
+  // typed each time and never saved. Each is compared only with its own kind
+  // (see GUEST_SEATS): a guest may use a SAP ID a registered student has.
   let sapId = null;
   let taken = { collegeEmail };
   if (accountType === 'student') {
     sapId = await sapIdForStudent(collegeEmail, fullName, raw.sapId);
-    taken = { $or: [{ collegeEmail }, { sapId, exitedAt: null, accountType: { $ne: 'guest' } }] };
+    taken = { $or: [{ collegeEmail }, { sapId, exitedAt: null, ...STUDENT_SEATS }] };
   } else if (accountType === 'guest') {
     sapId = normalizeSapId(raw.sapId);
-    if (await studentProfiles().findOne({ sapId })) {
-      throw new PublicTestError(409, 'This SAP ID belongs to a registered student. Sign in with your college email instead.');
-    }
     await releaseAbandonedGuestSeats(test, sapId);
-    taken = { $or: [{ collegeEmail }, { sapId, exitedAt: null }] };
+    taken = { $or: [{ collegeEmail }, { sapId, exitedAt: null, ...GUEST_SEATS }] };
   }
 
   const token = randomId();
