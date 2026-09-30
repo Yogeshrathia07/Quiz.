@@ -110,7 +110,7 @@ export default function App() {
   // know more (a test's name) refine it with usePageTitle.
   useEffect(() => {
     document.body.dataset.area = route.test ? 'test' : 'portal';
-    const titles = { attendance: 'Attendance', users: 'Users', create: 'New test', edit: 'Edit test' };
+    const titles = { attendance: 'Attendance', users: 'Users', tests: 'Tests', create: 'New test', edit: 'Edit test' };
     document.title = pageTitle(route.page === 'results' ? 'My results' : route.page === 'window-check' ? 'Private window check' : titles[route.admin] || (route.attend ? 'Attendance' : null));
   }, [route]);
 

@@ -6,6 +6,8 @@
 @import "./attendance.css";
 /* filters.css styles the tick-box filter and the search box shared by lists. */
 @import "./filters.css";
+/* home.css styles the faculty home page. */
+@import "./home.css";
 /* nav.css styles the navigation bar. */
 @import "./nav.css";
 /* craft.css is the portal finishing layer (never the test pages). */

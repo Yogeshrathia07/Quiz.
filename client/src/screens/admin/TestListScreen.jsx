@@ -171,7 +171,7 @@ export function TestListScreen({ go, showToast }) {
   const filtered = query || status !== 'all';
 
   const header = (
-    <header className="ql-head">
+    <header className="ql-head" id="my-quizzes">
       <div>
         <p className="page-kicker">Admin portal</p>
         <h1>My quizzes</h1>

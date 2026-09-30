@@ -1,4 +1,3 @@
-import { ClipboardList, QrCode } from 'lucide-react';
 import { AuthForm } from '../components/AuthForm.jsx';
 import { BRAND } from '../brand.js';
 import { MyResultsScreen } from './student/MyResultsScreen.jsx';
@@ -19,10 +18,6 @@ export function HomeScreen({ auth, onSignedIn, go, showToast }) {
       <section className="sign-in-page">
         <div className="sign-in-intro">
           <h1 className="sign-in-tagline">{BRAND.tagline}</h1>
-          <ul className="sign-in-who">
-            <li><QrCode size={18} aria-hidden="true"/><span><strong>Students</strong> scan the QR your teacher shows in class, then sign in with your college email.</span></li>
-            <li><ClipboardList size={18} aria-hidden="true"/><span><strong>Faculty</strong> sign in to set tests and take attendance.</span></li>
-          </ul>
         </div>
         <div className="sign-in-panel">
           {issue && <div className="notice danger">{AUTH_MESSAGES[issue] || AUTH_MESSAGES.failed}</div>}

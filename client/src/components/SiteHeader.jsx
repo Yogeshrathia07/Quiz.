@@ -16,6 +16,8 @@ function activeLink(route) {
   if (route.admin === 'users') return 'users';
   if (route.page === 'results') return 'results';
   if (route.test || route.attend) return null;
+  // The quiz list, and a test's dashboard, creator or editor: all the Tests section.
+  if (route.admin && route.admin !== 'portal') return 'tests';
   return 'home';
 }
 
@@ -50,6 +52,7 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
 
   const links = [
     { id: 'home', url: '/', label: 'Home' },
+    isAdmin && { id: 'tests', url: '/?admin=tests', label: 'Tests' },
     isAdmin && { id: 'attendance', url: '/?admin=attendance', label: 'Attendance' },
     isAdmin && { id: 'results', url: '/?page=results', label: 'Results' },
     user?.canManageUsers && { id: 'users', url: '/?admin=users', label: 'Users' }
