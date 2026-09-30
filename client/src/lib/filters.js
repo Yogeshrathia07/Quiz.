@@ -23,3 +23,27 @@ export const allOptionIds = (groups) => groups.flatMap((group) => group.options.
 export const optionCounts = (rows, groups) => Object.fromEntries(
   groups.flatMap((group) => group.options).map((option) => [option.id, rows.filter(option.test).length])
 );
+
+/**
+ * The groups laid out in `count` columns, the tallest as short as it can be,
+ * so the panel is as short as it can be - short enough to open beside its
+ * button rather than over the page. The biggest groups are placed first, each
+ * into the shortest column so far; a column then reads in the groups' own
+ * order, and so do the columns.
+ */
+export function packColumns(groups, count) {
+  const weight = (group) => group.weight ?? group.options.length + 1; // its options and its heading
+  const columns = Array.from({ length: Math.max(1, Math.min(count, groups.length)) }, () => ({ height: 0, entries: [] }));
+  groups.map((group, index) => ({ group, index }))
+    .sort((a, b) => weight(b.group) - weight(a.group) || a.index - b.index)
+    .forEach((entry) => {
+      const shortest = columns.reduce((best, column) => (column.height < best.height ? column : best));
+      shortest.entries.push(entry);
+      shortest.height += weight(entry.group);
+    });
+  return columns
+    .filter((column) => column.entries.length)
+    .map((column) => column.entries.sort((a, b) => a.index - b.index))
+    .sort((a, b) => a[0].index - b[0].index)
+    .map((entries) => entries.map((entry) => entry.group));
+}

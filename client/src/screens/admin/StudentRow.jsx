@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronDown, CircleCheck, ClipboardPaste, IdCard, Lock, MapPin, MapPinOff, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
+import { AlertTriangle, ChevronDown, CircleCheck, ClipboardPaste, IdCard, Keyboard, Lock, MapPin, MapPinOff, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
 import { durationLabel, shortDateTime } from '../../lib/format.js';
 import { StatusPill } from '../../components/StatusPill.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
@@ -174,6 +174,10 @@ export function StudentRow({ test, registration, act, openSapId, isBusy, columns
     record?.flags?.extension > 0 && <Issue key="extension" icon={Puzzle} tone="danger" label="A browser extension changed the test page"/>,
     record?.flags?.text_burst > 0 && (
       <Issue key="burst" icon={ClipboardPaste} tone="danger" label={`Text appeared all at once ${record.flags.text_burst}× (pasted, or voice typing): see the answers`}>{record.flags.text_burst}</Issue>
+    ),
+    // Left while typing and back within moments - most likely the keyboard's own app. Not counted as leaving.
+    record?.flags?.keyboard_app > 0 && (
+      <Issue key="keyboard" icon={Keyboard} tone="warn" label={`Keyboard opened another app while typing ${record.flags.keyboard_app}× (back within 15 s; not counted as leaving)`}>{record.flags.keyboard_app}</Issue>
     ),
     record && !record.leaveCount && !registration.isLocked && registration.attemptStatus && <Issue key="clean" icon={CircleCheck} tone="ok" label="Never left the test"/>
   ].filter(Boolean);

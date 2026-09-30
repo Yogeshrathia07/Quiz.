@@ -10,9 +10,9 @@ export function SapIdModal({ code, registration, onClose, onSaved, showToast }) 
     event.preventDefault();
     setSaving(true);
     try {
-      await post(`/api/admin/tests/${encodeURIComponent(code)}/registrations/${encodeURIComponent(registration.id)}/sap-id`, { sapId });
+      const updated = await post(`/api/admin/tests/${encodeURIComponent(code)}/registrations/${encodeURIComponent(registration.id)}/sap-id`, { sapId });
       showToast('SAP ID updated.');
-      onSaved();
+      onSaved(updated);
       onClose();
     } catch (error) { setSaving(false); showToast(error.message); }
   };

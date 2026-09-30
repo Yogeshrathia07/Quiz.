@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { allOptionIds, applyFilters, optionCounts } from '../client/src/lib/filters.js';
+import { allOptionIds, applyFilters, optionCounts, packColumns } from '../client/src/lib/filters.js';
 import { RESULT_FILTERS, STUDENT_FILTERS, VENUE_FILTERS, paperState, studentFilters } from '../client/src/screens/admin/student-filters.js';
 import { ATTENDANCE_FILTERS } from '../client/src/screens/attendance/attendance-filters.js';
 import { USER_FILTERS } from '../client/src/screens/admin/user-filters.js';
@@ -132,4 +132,21 @@ test('results: marking and how it ended', () => {
   assert.equal(pick('marking:done').length, RESULTS.length * (2 / 3), 'no short answers counts as fully marked');
   assert.ok(pick('finish:unknown').every((row) => row.submittedBy === null));
   assert.ok(RESULT_FILTERS.flatMap((group) => group.options).find((option) => option.id === 'finish:unknown').rare, 'hidden until needed');
+});
+
+test('the filter panel packs its groups into short, balanced columns', () => {
+  const ids = (columns) => columns.map((column) => column.map((group) => group.id));
+  const students = studentFilters({ locationRequired: true });
+  // Three across: registration and account share a column; paper and venue have one each.
+  assert.deepEqual(ids(packColumns(students, 3)), [['registration', 'account'], ['paper'], ['venue']]);
+  // Two across: no column taller than it has to be (a plain two-by-two grid would be 10 rows).
+  const tallest = (columns) => Math.max(...columns.map((column) => column.reduce((sum, group) => sum + group.options.length + 1, 0)));
+  assert.equal(tallest(packColumns(students, 2)), 9);
+  assert.equal(tallest(packColumns(students, 3)), 7);
+  assert.deepEqual(ids(packColumns(students, 1)), [['registration', 'paper', 'account', 'venue']]);
+  // Never more columns than groups, and every group exactly once.
+  assert.deepEqual(ids(packColumns(RESULT_FILTERS, 3)), [['marking'], ['finish']]);
+  for (const count of [1, 2, 3, 4]) {
+    assert.deepEqual(packColumns(students, count).flat().map((group) => group.id).sort(), students.map((group) => group.id).sort());
+  }
 });

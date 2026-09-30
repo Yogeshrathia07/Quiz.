@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLiveUpdate } from '../../lib/live-updates.js';
 import { api, downloadSpreadsheet, post } from '../../lib/api.js';
 import { countdown, durationLabel, shortDateTime } from '../../lib/format.js';
 import { useCountdown } from '../../lib/useCountdown.js';
@@ -6,13 +7,13 @@ import { Skeleton } from '../../components/Skeleton.jsx';
 import { usePageTitle } from '../../brand.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import {
-  BadgeCheck, CheckCheck, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, FileCheck2, FileCog, FileSpreadsheet, LayoutDashboard,
-  LocateOff, Lock, LockOpen, MapPin, MapPinOff, Pause, Pencil, PenLine, Play, RotateCcw, Search, Send, ShieldCheck, TimerOff, Undo2, UserCheck,
+  ArrowDownAZ, BadgeCheck, CheckCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, FileCheck2, FileCog, FileSpreadsheet, LayoutDashboard,
+  LocateOff, Lock, LockOpen, MapPin, MapPinOff, MoreHorizontal, Pause, Pencil, PenLine, Play, RotateCcw, Search, Send, ShieldCheck, TimerOff, Undo2, UserCheck,
   UserCog, UserRound, UserX, Users
 } from 'lucide-react';
 import { StudentRow } from './StudentRow.jsx';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
-import { RESULT_FILTERS, awaitingMarking, studentFilters } from './student-filters.js';
+import { RESULT_FILTERS, STUDENT_FILTERS, VENUE_FILTERS, awaitingMarking, studentFilters } from './student-filters.js';
 import { ResponseRow } from './ResponseRow.jsx';
 import { QrModal } from './modals/QrModal.jsx';
 import { SapIdModal } from './modals/SapIdModal.jsx';
@@ -44,6 +45,58 @@ const FILTER_ICONS = {
   'finish:teacher': { icon: Send, tone: 'muted' },
   'finish:unknown': { icon: CircleHelp, tone: 'muted' }
 };
+
+/** A busy class sends an event with every answer: the dashboard redraws at most this often. */
+const LIVE_GAP_MS = 1_500;
+
+/*
+ * The open tab, the search and each list's filter are kept in the address as
+ * well: ?tab=students&q=Asha&students=paper:locked. A phone reloads a page by
+ * itself - pull-to-refresh while scrolling, or reopening a tab it put away
+ * while another app was open - and the teacher comes back to the same list,
+ * not to everyone again.
+ */
+const TABS = ['test', 'students', 'responses'];
+/**
+ * The Results list's orders: a field, either way round (the first direction
+ * is where choosing the field starts). The first field's first direction is
+ * the usual order. The server sorts (admin-service RESULT_SORTS).
+ */
+const RESULT_SORTS = [
+  { id: 'order', label: 'Registration time', icon: UserRoundPlus, directions: [{ id: 'asc', label: 'Oldest first' }, { id: 'desc', label: 'Newest first' }] },
+  { id: 'submitted', label: 'Submission time', icon: Clock, directions: [{ id: 'desc', label: 'Latest first' }, { id: 'asc', label: 'Earliest first' }] },
+  { id: 'score', label: 'Score', icon: Trophy, directions: [{ id: 'desc', label: 'Highest first' }, { id: 'asc', label: 'Lowest first' }] },
+  { id: 'name', label: 'Name', icon: ArrowDownAZ, directions: [{ id: 'asc', label: 'A–Z' }, { id: 'desc', label: 'Z–A' }] }
+];
+/**
+ * The Students list's orders. Registration time, oldest first, is the usual
+ * one - and with it, whoever is waiting for a decision stays at the top.
+ */
+const STUDENT_SORTS = [
+  { id: 'order', label: 'Registration time', icon: UserRoundPlus, directions: [{ id: 'asc', label: 'Oldest first' }, { id: 'desc', label: 'Newest first' }] },
+  { id: 'name', label: 'Name', icon: ArrowDownAZ, directions: [{ id: 'asc', label: 'A–Z' }, { id: 'desc', label: 'Z–A' }] },
+  { id: 'sap', label: 'SAP ID', icon: Hash, directions: [{ id: 'asc', label: 'Ascending' }, { id: 'desc', label: 'Descending' }] },
+  { id: 'answered', label: 'Questions answered', icon: ListChecks, directions: [{ id: 'desc', label: 'Most first' }, { id: 'asc', label: 'Fewest first' }] }
+];
+const USUAL_SORT = 'order-asc';
+const USUAL_RESULT_SORT = USUAL_SORT;
+const sortIds = (sorts) => sorts.flatMap((field) => field.directions.map((way) => `${field.id}-${way.id}`));
+const RESULT_SORT_IDS = sortIds(RESULT_SORTS);
+const STUDENT_SORT_IDS = sortIds(STUDENT_SORTS);
+/** Links saved before an order could be reversed. */
+const LEGACY_RESULT_SORTS = { order: 'order-asc', latest: 'submitted-desc', 'score-high': 'score-desc', 'score-low': 'score-asc', name: 'name-asc' };
+/** " · Name: Z–A" for a list's summary line - nothing for the usual order. */
+function sortNote(sorts, sort) {
+  if (!sort || sort === USUAL_SORT) return '';
+  const [fieldId, wayId] = sort.split('-');
+  const field = sorts.find((option) => option.id === fieldId);
+  const way = field?.directions.find((option) => option.id === wayId);
+  return field && way ? ` · ${field.label}: ${way.label}` : '';
+}
+const STUDENT_FILTER_IDS = new Set([...STUDENT_FILTERS, VENUE_FILTERS].flatMap((group) => group.options.map((option) => option.id)));
+const RESULT_FILTER_IDS = new Set(RESULT_FILTERS.flatMap((group) => group.options.map((option) => option.id)));
+const fromAddress = (key) => new URLSearchParams(window.location.search).get(key) || '';
+const filtersFromAddress = (key, known) => [...new Set(fromAddress(key).split(',').filter((id) => known.has(id)))];
 
 function releaseLabel(test) {
   if (test.resultReleaseMode === 'instant') return 'Marks show on submission';
@@ -98,9 +151,7 @@ function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0 }) {
   if (test.isClosed) {
     tone = 'is-done';
     title = `${test.closedAutomatically ? 'Ended automatically' : 'Closed'} · ${shortDateTime(test.closedAt)}`;
-    detail = canResume(test)
-      ? 'Every paper has been submitted. Closed by mistake? More → Resume test reopens them where they were, with the time they had left.'
-      : 'Every paper has been submitted.';
+    detail = 'Every paper has been submitted.';
   } else if (!test.isStarted) {
     tone = 'is-waiting';
     if (test.startMode === 'scheduled') {
@@ -118,8 +169,8 @@ function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0 }) {
     detail = test.untimed
       ? 'Close the test when everyone is done; that submits every paper.'
       : owed && !ticking
-        ? 'Their papers stay open for the time you paused them (or while still paused). Close test hands them in now.'
-        : `At ${shortDateTime(test.endsAt)}, every paper still open is submitted automatically.${owed ? ` ${owed} paused student${owed === 1 ? ' gets' : 's get'} that time added.` : ''}`;
+        ? 'Close test hands their papers in now.'
+        : `At ${shortDateTime(test.endsAt)}, every paper still open is submitted automatically.`;
     if (!test.untimed) {
       extra = (
         <div className="quick-picks banner-extend">
@@ -191,7 +242,7 @@ function Tabs({ tab, onSelect, counts }) {
  * A search box and the tick-box filter, shared by both tables. `pool` is the
  * searched rows before filtering: what the filter's counts are taken from.
  */
-function TableToolbar({ title, summary, query, setQuery, filters, setFilters, groups, pool, filterCounts, pagination, filterTitle, allLabel, children }) {
+function TableToolbar({ title, summary, query, setQuery, filters, setFilters, groups, pool, filterCounts, pagination, filterTitle, allLabel, sorts, sort, onSort, sortHint, children }) {
   return (
     <header className="students-toolbar">
       <div>
@@ -208,6 +259,7 @@ function TableToolbar({ title, summary, query, setQuery, filters, setFilters, gr
           groups={groups} rows={pool} selected={filters} onChange={setFilters} icons={FILTER_ICONS}
           title={filterTitle} allLabel={allLabel} counts={filterCounts}
           total={pagination?.unfilteredTotal} shown={pagination?.total}
+          sorts={sorts} sort={sort} onSort={onSort} sortHint={sortHint}
         />
         {children}
       </div>
@@ -235,14 +287,18 @@ function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpe
     <div className="overview-grid">
       <section className="card overview-panel">
         <ScheduleBanner test={test} serverTime={serverTime} isBusy={isBusy} act={act} owed={counts.owedTime} actions={<>
+          {/* Words drop away when the banner is narrow: each button is then its icon (theme.css). */}
           {primary && (
-            <button className={`button button-${primary.tone}`} disabled={isBusy} onClick={primary.onSelect}>
-              <primary.icon size={16} aria-hidden="true"/>{primary.label}
+            <button className={`button button-${primary.tone}`} disabled={isBusy} onClick={primary.onSelect} aria-label={primary.label} title={primary.label}>
+              <primary.icon size={16} aria-hidden="true"/><span className="toolbar-text">{primary.label}</span>
             </button>
           )}
-          <button className="button button-secondary" disabled={isBusy} onClick={onEdit}><Pencil size={16} aria-hidden="true"/>Edit</button>
+          <button className="button button-secondary" disabled={isBusy} onClick={onEdit} aria-label="Edit" title="Edit">
+            <Pencil size={16} aria-hidden="true"/><span className="toolbar-text">Edit</span>
+          </button>
           <ActionMenu
             label="More"
+            icon={MoreHorizontal}
             align="right"
             disabled={isBusy}
             items={[
@@ -329,15 +385,16 @@ function PageControls({ pagination, onPage }) {
   );
 }
 
-function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, filterCounts, pagination, onPage, isBusy, act, onOpenSapId }) {
+function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, act, onOpenSapId }) {
   const [openRegistrationId, setOpenRegistrationId] = useState(null);
   return (
     <section className="card students-card is-compact">
       <TableToolbar
         title="Students"
-        summary={`${counts.total} registered · ${counts.started} started · ${counts.pending} awaiting approval`}
+        summary={`${counts.total} registered · ${counts.started} started · ${counts.pending} awaiting approval${sortNote(STUDENT_SORTS, sort)}`}
         query={query} setQuery={setQuery} filters={filters} setFilters={setFilters}
-        groups={studentFilters(test)} pool={pool} filterCounts={filterCounts} pagination={pagination} filterTitle="Filter students" allLabel="Everyone"
+        groups={studentFilters(test)} pool={pool} filterCounts={filterCounts} pagination={pagination} filterTitle="Sort & filter students" allLabel="Everyone"
+        sorts={STUDENT_SORTS} sort={sort} onSort={setSort}
       >
         <BulkDecisionMenu test={test} rows={rows} isBusy={isBusy} act={act}/>
         <BulkAttemptMenu test={test} rows={rows} isBusy={isBusy} act={act}/>
@@ -409,14 +466,18 @@ function BulkAttemptMenu({ test, rows, isBusy, act }) {
   );
 }
 
-function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, filterCounts, pagination, onPage, isBusy, showToast, onOpenAnalysis }) {
+function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, showToast, onOpenAnalysis }) {
   return (
     <section className="card students-card is-compact">
       <TableToolbar
         title="Results"
-        summary={`${counts.submitted} submitted · ${counts.awaitingMarking} awaiting marking`}
+        summary={`${counts.submitted} submitted · ${counts.awaitingMarking} awaiting marking${sortNote(RESULT_SORTS, sort)}`}
         query={query} setQuery={setQuery} filters={filters} setFilters={setFilters}
-        groups={RESULT_FILTERS} pool={pool} filterCounts={filterCounts} pagination={pagination} filterTitle="Filter results" allLabel="All submitted"
+        groups={RESULT_FILTERS} pool={pool} filterCounts={filterCounts} pagination={pagination} filterTitle="Sort & filter results" allLabel="All submitted"
+        sorts={RESULT_SORTS} sort={sort} onSort={setSort}
+        sortHint={sort.startsWith('score-') && counts.awaitingMarking > 0
+          ? `${counts.awaitingMarking} of ${counts.submitted} papers still have answers to mark. Until they are marked, a score counts only what has been marked${rows.length > 1 && rows.every((row) => row.score === rows[0].score) ? ' - so for now every score is the same, and the order is by hand-in time' : ''}.`
+          : null}
       >
         <button className="button button-secondary" disabled={isBusy} aria-label="Export Excel" title="Export Excel"
           onClick={() => downloadSpreadsheet(test.code).catch((error) => showToast(error.message))}>
@@ -455,15 +516,17 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
 export function DashboardScreen({ code, go, showToast }) {
   const [dashboard, setDashboard] = useState(null);
   // ?tab=responses opens straight on a tab - the quiz list's "View results" does.
-  const [tab, setTab] = useState(() => {
-    const asked = new URLSearchParams(window.location.search).get('tab');
-    return ['test', 'students', 'responses'].includes(asked) ? asked : 'test';
+  const [tab, setTab] = useState(() => (TABS.includes(fromAddress('tab')) ? fromAddress('tab') : 'test'));
+  const [query, setQuery] = useState(() => fromAddress('q'));
+  const [studentFilterIds, setStudentFilterIds] = useState(() => filtersFromAddress('students', STUDENT_FILTER_IDS));
+  const [resultFilterIds, setResultFilterIds] = useState(() => filtersFromAddress('results', RESULT_FILTER_IDS));
+  const [resultSort, setResultSort] = useState(() => {
+    const asked = fromAddress('sort');
+    return RESULT_SORT_IDS.includes(asked) ? asked : LEGACY_RESULT_SORTS[asked] || USUAL_RESULT_SORT;
   });
-  const [query, setQuery] = useState('');
-  const [studentFilterIds, setStudentFilterIds] = useState([]);
-  const [resultFilterIds, setResultFilterIds] = useState([]);
+  const [studentSort, setStudentSort] = useState(() => (STUDENT_SORT_IDS.includes(fromAddress('ssort')) ? fromAddress('ssort') : USUAL_SORT));
   const [page, setPage] = useState(1);
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState(() => fromAddress('q').trim());
   const [modal, setModal] = useState(null);
   const [actionPath, setActionPath] = useState('');
   const headRef = useRef(null);
@@ -473,22 +536,88 @@ export function DashboardScreen({ code, go, showToast }) {
     return () => window.clearTimeout(timer);
   }, [query]);
 
+  // Written back as they change - replaced, not added, so Back still leaves the page.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const keep = (key, value) => (value ? url.searchParams.set(key, value) : url.searchParams.delete(key));
+    keep('tab', tab === 'test' ? '' : tab);
+    keep('q', debouncedQuery);
+    keep('students', studentFilterIds.join(','));
+    keep('results', resultFilterIds.join(','));
+    keep('sort', resultSort === USUAL_RESULT_SORT ? '' : resultSort);
+    keep('ssort', studentSort === USUAL_SORT ? '' : studentSort);
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url);
+  }, [tab, debouncedQuery, studentFilterIds, resultFilterIds, resultSort, studentSort]);
+
   const selectedFilters = tab === 'responses' ? resultFilterIds : tab === 'students' ? studentFilterIds : [];
   const filterKey = selectedFilters.join(',');
-  useEffect(() => { setPage(1); }, [tab, debouncedQuery, filterKey]);
+  const tabSort = tab === 'responses' ? resultSort : tab === 'students' ? studentSort : USUAL_SORT;
+  const sortKey = tabSort !== USUAL_SORT ? tabSort : '';
+  useEffect(() => { setPage(1); }, [tab, debouncedQuery, filterKey, sortKey]);
 
+  // Only the newest request may paint the screen. A search typed while a live
+  // refresh for the old one was still on its way used to be overwritten by
+  // that refresh landing late: the old list flashed back - the flicker.
+  const latestRequest = useRef(0);
+  const inFlightLoad = useRef(null);
   const load = useCallback(async (silent = false) => {
     const params = new URLSearchParams({ section: tab, page: String(page), pageSize: '100' });
     if (debouncedQuery) params.set('search', debouncedQuery);
     if (filterKey) params.set('filters', filterKey);
-    try {
-      const next = await api(`/api/admin/tests/${encodeURIComponent(code)}?${params}`);
-      setDashboard(next);
-      return next;
-    }
-    catch (error) { if (!silent) showToast(error.message); }
-    return null;
-  }, [code, tab, page, debouncedQuery, filterKey, showToast]);
+    if (sortKey) params.set('sort', sortKey);
+    const path = `/api/admin/tests/${encodeURIComponent(code)}?${params}`;
+    // Events, the fallback timer and a button can all ask for the same page
+    // at once. Share that one request instead of making MongoDB build the
+    // same dashboard three times.
+    if (inFlightLoad.current?.path === path) return inFlightLoad.current.promise;
+    latestRequest.current += 1;
+    const request = latestRequest.current;
+    const promise = (async () => {
+      try {
+        const next = await api(path);
+        if (request !== latestRequest.current) return null;
+        setDashboard(next);
+        return next;
+      }
+      catch (error) { if (!silent && request === latestRequest.current) showToast(error.message); }
+      finally {
+        if (inFlightLoad.current?.promise === promise) inFlightLoad.current = null;
+      }
+      return null;
+    })();
+    inFlightLoad.current = { path, promise };
+    return promise;
+  }, [code, tab, page, debouncedQuery, filterKey, sortKey, showToast]);
+  const loadRef = useRef(load);
+  loadRef.current = load;
+
+  // Admin mutation endpoints return only the changed test/row, not a full
+  // class table. Paint that immediately, then reconcile counts and rows that
+  // are not on this page in the background.
+  const applyActionResult = useCallback((response) => {
+    if (!response?.test && !response?.registration) return;
+    setDashboard((current) => {
+      if (!current) return current;
+      const registrations = response.registration
+        ? current.registrations.map((entry) => (entry.id === response.registration.id ? response.registration : entry))
+        : current.registrations;
+      return {
+        ...current,
+        ...(response.serverTime ? { serverTime: response.serverTime } : {}),
+        ...(response.test ? { test: { ...current.test, ...response.test } } : {}),
+        registrations
+      };
+    });
+  }, []);
+  const reconcileTimer = useRef(null);
+  const scheduleReconcile = useCallback((delay = 900) => {
+    window.clearTimeout(reconcileTimer.current);
+    reconcileTimer.current = window.setTimeout(() => {
+      reconcileTimer.current = null;
+      if (!document.hidden && !busyRef.current && !typingRef.current) void loadRef.current(true);
+    }, delay);
+  }, []);
+  useEffect(() => () => window.clearTimeout(reconcileTimer.current), []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -497,17 +626,48 @@ export function DashboardScreen({ code, go, showToast }) {
   // so nothing changes under the admin's hand. A hidden tab does not poll.
   const busyRef = useRef(false);
   busyRef.current = Boolean(modal || actionPath);
+  // Mid-typing, a refresh would show a list the next keystroke replaces.
+  const typingRef = useRef(false);
+  typingRef.current = query.trim() !== debouncedQuery;
+  // During a test every answer is an event. Refresh at most once per
+  // LIVE_GAP_MS and never two at once: whatever arrives meanwhile is one more
+  // refresh afterwards - always for the search as it now stands (loadRef).
+  const liveBusy = useRef(false);
+  const liveDirty = useRef(false);
+  const refreshLive = useCallback(async () => {
+    if (liveBusy.current) { liveDirty.current = true; return; }
+    if (document.hidden || busyRef.current || typingRef.current) { liveDirty.current = true; return; }
+    liveBusy.current = true;
+    try {
+      do {
+        liveDirty.current = false;
+        if (document.hidden || busyRef.current || typingRef.current) { liveDirty.current = true; break; }
+        await loadRef.current(true);
+        await new Promise((resolve) => { window.setTimeout(resolve, LIVE_GAP_MS); });
+      } while (liveDirty.current);
+    } finally { liveBusy.current = false; }
+  }, []);
+  useLiveUpdate(`/api/admin/tests/${encodeURIComponent(code)}/events`, refreshLive, Boolean(code));
+  useEffect(() => {
+    if (!modal && !actionPath && liveDirty.current && !document.hidden) {
+      liveDirty.current = false;
+      void refreshLive();
+    }
+  }, [modal, actionPath, refreshLive]);
   useEffect(() => {
     let timer;
     const refresh = async () => {
       let next = dashboard;
-      if (!document.hidden && !busyRef.current) next = await load(true) || next;
+      if (!document.hidden && !busyRef.current && !typingRef.current) next = await load(true) || next;
       const live = next?.test?.isStarted && !next?.test?.isClosed;
       const attention = live || (next?.counts?.pending || 0) > 0;
-      const base = next?.test?.isClosed ? 30_000 : attention ? 5_000 : 12_000;
+      // EventSource is the normal fast path. This is deliberately only a
+      // safety net for captive portals and old proxies, not a class-wide
+      // five-second MongoDB poll during an exam.
+      const base = next?.test?.isClosed ? 60_000 : attention ? 20_000 : 45_000;
       timer = window.setTimeout(refresh, base + Math.round(Math.random() * base * 0.4));
     };
-    timer = window.setTimeout(refresh, 5_000 + Math.round(Math.random() * 2_000));
+    timer = window.setTimeout(refresh, 15_000 + Math.round(Math.random() * 4_000));
     const onVisible = () => {
       if (document.hidden) return;
       window.clearTimeout(timer);
@@ -526,7 +686,11 @@ export function DashboardScreen({ code, go, showToast }) {
     setActionPath(path);
     try {
       const next = await post(`/api/admin/tests/${encodeURIComponent(code)}/${path}`, body);
-      await load();
+      applyActionResult(next);
+      // Do not hold a button response behind a complete dashboard build.
+      // This one quiet reconciliation also covers totals or rows outside the
+      // visible page, after the immediate response has already painted.
+      scheduleReconcile();
       showToast(typeof next?.affectedCount === 'number'
         ? `${next.affectedCount} student${next.affectedCount === 1 ? '' : 's'} updated.`
         : 'Dashboard updated.');
@@ -605,6 +769,7 @@ export function DashboardScreen({ code, go, showToast }) {
           pool={all}
           counts={counts}
           query={query} setQuery={setQuery} filters={studentFilterIds} setFilters={setStudentFilterIds}
+          sort={studentSort} setSort={setStudentSort}
           filterCounts={dashboard.filterCounts} pagination={dashboard.pagination} onPage={setPage}
           isBusy={isBusy}
           act={act}
@@ -619,6 +784,7 @@ export function DashboardScreen({ code, go, showToast }) {
           pool={all}
           counts={counts}
           query={query} setQuery={setQuery} filters={resultFilterIds} setFilters={setResultFilterIds}
+          sort={resultSort} setSort={setResultSort}
           filterCounts={dashboard.filterCounts} pagination={dashboard.pagination} onPage={setPage}
           isBusy={isBusy}
           showToast={showToast}
@@ -627,9 +793,9 @@ export function DashboardScreen({ code, go, showToast }) {
       )}
 
       {modal === 'qr' && <QrModal test={test} joinUrl={joinUrl} onClose={closeModal} showToast={showToast}/>}
-      {modal === 'setup' && <TestSetupModal code={code} test={test} onClose={closeModal} onSaved={load} showToast={showToast}/>}
-      {modal === 'restart' && <RestartQuizModal code={code} test={test} counts={counts} onClose={closeModal} onSaved={load} showToast={showToast}/>}
-      {modal?.type === 'sap' && <SapIdModal code={code} registration={modal.registration} onClose={closeModal} onSaved={load} showToast={showToast}/>}
+      {modal === 'setup' && <TestSetupModal code={code} test={test} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
+      {modal === 'restart' && <RestartQuizModal code={code} test={test} counts={counts} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
+      {modal?.type === 'sap' && <SapIdModal code={code} registration={modal.registration} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal?.type === 'analysis' && <StudentAnalysisModal code={code} registration={modal.registration} onClose={closeModal} onSaved={load} showToast={showToast} showIntegrity={false}/>}
     </>
   );

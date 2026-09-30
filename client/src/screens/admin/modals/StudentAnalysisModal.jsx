@@ -105,6 +105,7 @@ function IntegrityReport({ integrity, location }) {
         <div><span>Split screen</span><strong>{leaves.split_screen}</strong></div>
         <div><span>Copy / paste / drag tries</span><strong>{(integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)}</strong></div>
         <div><span>Text all at once</span><strong>{integrity.flags?.text_burst || 0}</strong></div>
+        <div><span>Keyboard app while typing (not counted)</span><strong>{integrity.flags?.keyboard_app || 0}</strong></div>
         <div><span>Screenshot / print tries</span><strong>{(integrity.flags?.screenshot || 0) + (integrity.flags?.print || 0)}</strong></div>
         <div><span>Developer tools tries</span><strong>{integrity.flags?.devtools || 0}</strong></div>
         <div><span>Browser extension seen</span><strong>{integrity.flags?.extension || 0}</strong></div>

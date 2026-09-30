@@ -15,18 +15,36 @@
 .filter-trigger-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left}
 .filter-trigger.is-active{border-color:var(--primary,#1598D1);background:rgba(21,152,209,.12)}
 .filter-trigger.is-active>svg:first-child{color:var(--primary,#1598D1)}
+/* Hovered, pressed or open, it fills blue like every other button - so its
+   icon turns white, never blue on blue. (On a phone a tapped button stays
+   "hovered", and the icon used to vanish into it.) */
+.filter-menu .filter-trigger:is(:hover,.is-open):not(:disabled)>svg{color:#FFFFFF}
+.filter-menu .filter-trigger.is-open{background:#1598D1;border-color:transparent;color:#FFFFFF}
+/* A touch screen has no real hover: once closed, it looks "filters on" again. */
+@media (hover:none){
+  .filter-menu .filter-trigger.is-active:hover:not(.is-open):not(:disabled){background:rgba(21,152,209,.12);border-color:var(--primary,#1598D1)}
+  .filter-menu .filter-trigger.is-active:hover:not(.is-open):not(:disabled)>svg{color:var(--primary,#1598D1)}
+}
 
-/* The panel */
-.filter-panel{position:fixed;z-index:1100;display:grid;gap:4px;width:min(540px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow-y:auto;padding:8px;border:1px solid var(--border,#474C52);border-radius:14px;background:var(--bg-raised,#33373B);color:var(--text,#F7FAFC);box-shadow:0 18px 44px rgba(0,0,0,.45);animation:modal-fade-in .12s ease-out}
-/* The head and the buttons at the foot stay in view while a tall list of
-   options scrolls between them - on a phone the panel is taller than the screen. */
-.filter-panel-head{position:sticky;top:-8px;z-index:1;display:flex;align-items:center;gap:12px;margin:-8px -8px 0;padding:10px 10px 8px 18px;border-bottom:1px solid var(--border,#474C52);border-radius:14px 14px 0 0;background:var(--bg-raised,#33373B)}
+/* The panel: its title and its buttons stay put, and only the options between
+   them scroll. It is never taller than the room it has (useFloatingPanel), so
+   Done and the last option can always be reached. */
+.filter-panel{position:fixed;z-index:1100;display:flex;flex-direction:column;width:min(540px,calc(100vw - 16px));max-height:calc(100vh - 16px);overflow:hidden;border:1px solid var(--border,#474C52);border-radius:14px;background:var(--bg-raised,#33373B);color:var(--text,#F7FAFC);box-shadow:0 18px 44px rgba(0,0,0,.45);animation:modal-fade-in .12s ease-out}
+.filter-panel-head{flex:none;display:flex;align-items:center;gap:12px;padding:10px 10px 8px 18px;border-bottom:1px solid var(--border,#474C52)}
 .filter-panel-head strong{margin-right:auto;font-size:.95rem}
 .filter-close{display:grid;place-items:center;flex:none;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--text-2,#AAB6BC);cursor:pointer}
 .filter-close:hover{background:var(--bg-input,#3A3E43);color:var(--text,#F7FAFC)}
 .filter-close:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:1px}
 .filter-panel-head span{color:var(--text-2,#AAB6BC);font-size:.8rem;font-variant-numeric:tabular-nums}
-.filter-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 8px;padding:4px 0}
+.filter-groups{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start;gap:4px 10px;padding:6px 8px}
+/* The groups sit in balanced columns (FilterMenu): as many as the window allows. */
+.filter-panel.cols-1 .filter-groups{grid-template-columns:minmax(0,1fr)}
+.filter-panel.cols-3 .filter-groups{grid-template-columns:repeat(3,minmax(0,1fr))}
+.filter-panel.cols-1{width:min(340px,calc(100vw - 16px))}
+.filter-panel.cols-3{width:min(780px,calc(100vw - 16px))}
+.filter-panel.cols-4 .filter-groups{grid-template-columns:repeat(4,minmax(0,1fr))}
+.filter-panel.cols-4{width:min(1010px,calc(100vw - 16px))}
+.filter-col{display:grid;align-content:start;gap:4px;min-width:0}
 .filter-group{display:grid;align-content:start;gap:2px;min-width:0;margin:0;padding:6px 0 4px;border:0}
 .filter-group legend{padding:0 10px 4px;color:var(--text-3,#75848B);font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
 .filter-option{position:relative;display:flex;align-items:center;gap:10px;min-height:38px;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:.86rem;font-weight:600}
@@ -37,12 +55,40 @@
 .filter-box{display:grid;place-items:center;flex:none;width:18px;height:18px;border:1.5px solid #5A6066;border-radius:5px;background:transparent;color:#FFFFFF;transition:background .12s,border-color .12s}
 .filter-option.is-on .filter-box{border-color:var(--primary,#1598D1);background:var(--primary,#1598D1)}
 .filter-option input:focus-visible+.filter-box{box-shadow:0 0 0 3px rgba(21,152,209,.35)}
+/* Sort by: one choice, so round. */
+.filter-radio{flex:none;width:18px;height:18px;border:1.5px solid #5A6066;border-radius:50%;transition:background .12s,border-color .12s}
+.filter-option.is-on .filter-radio{border-color:var(--primary,#1598D1);background:radial-gradient(circle,var(--primary,#1598D1) 0 4px,transparent 4.5px)}
+.filter-option input:focus-visible+.filter-radio{box-shadow:0 0 0 3px rgba(21,152,209,.35)}
+/* Which way round: two halves of one switch, under the sort fields. */
+.filter-direction{display:grid;grid-template-columns:1fr 1fr;gap:3px;margin:6px 6px 2px;padding:3px;border-radius:10px;background:var(--bg-input,#3A3E43)}
+.filter-direction button{min-height:32px;padding:0 8px;border:0;border-radius:8px;background:transparent;color:var(--text-2,#AAB6BC);font:inherit;font-size:.8rem;font-weight:700;white-space:nowrap;cursor:pointer;transition:background .12s,color .12s}
+.filter-direction button:hover{color:var(--text,#F7FAFC)}
+.filter-direction button.is-on{background:var(--primary,#1598D1);color:#FFFFFF}
+.filter-direction button:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:1px}
+.filter-sort-hint{margin:8px 8px 2px;color:#F5A45C;font-size:.76rem;line-height:1.45}
 .filter-icon{flex:none}
 .filter-label{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .filter-count{flex:none;min-width:26px;padding:1px 7px;border-radius:999px;background:var(--bg-input,#3A3E43);color:var(--text-2,#AAB6BC);font-size:.72rem;font-weight:700;text-align:center;font-variant-numeric:tabular-nums}
 .filter-option.is-on .filter-count{background:rgba(21,152,209,.25);color:var(--text,#F7FAFC)}
-.filter-panel-foot{position:sticky;bottom:-8px;z-index:1;display:flex;align-items:center;gap:6px;margin:0 -8px -8px;padding:8px 12px 10px;border-top:1px solid var(--border,#474C52);border-radius:0 0 14px 14px;background:var(--bg-raised,#33373B)}
+.filter-panel-foot{flex:none;display:flex;align-items:center;gap:6px;padding:8px 12px 10px;border-top:1px solid var(--border,#474C52)}
 .filter-panel-foot .button-primary{margin-left:auto}
+
+/*
+ * When it does not fit beside its button - a short window, or any phone - it
+ * opens over the page instead (useFloatingPanel), and the page behind is
+ * blurred and held still, as the Add student window does. Its options scroll,
+ * never the page.
+ */
+.filter-backdrop{position:fixed;inset:0;z-index:1099;background:rgba(10,12,14,.5);-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px);touch-action:none;animation:modal-fade-in .15s ease-out}
+:root:has(.filter-backdrop){overflow:hidden}
+.filter-panel.is-dialog{top:50%;left:50%;width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100dvh - 32px));border-radius:18px;transform:translate(-50%,-50%);animation:filter-dialog-in .16s ease-out}
+.filter-panel.is-dialog .filter-panel-head{padding:12px 12px 10px 20px}
+.filter-panel.is-dialog .filter-panel-head strong{font-size:1rem}
+.filter-panel.is-dialog .filter-panel-foot{padding:10px 14px 12px}
+.filter-panel.is-dialog.cols-3{width:min(800px,calc(100vw - 32px))}
+.filter-panel.is-dialog.cols-4{width:min(1030px,calc(100vw - 32px))}
+.filter-panel.is-dialog.cols-1{width:min(380px,calc(100vw - 32px))}
+@keyframes filter-dialog-in{from{opacity:0;transform:translate(-50%,-47%)}to{opacity:1;transform:translate(-50%,-50%)}}
 
 /* What each icon means, in the colours the pills use */
 .tone-ok{color:#1BA566}
@@ -51,6 +97,17 @@
 .tone-info{color:#1598D1}
 .tone-muted{color:var(--text-2,#AAB6BC)}
 
+/* A phone: the dialog is a sheet up from the bottom of the screen, as tall as it needs up to most of it. */
 @media (max-width:560px){
+  .filter-panel.is-dialog:is(.cols-1,.cols-2,.cols-3,.cols-4){top:auto;right:0;bottom:0;left:0;width:100%;max-height:min(88vh,calc(100dvh - 40px));border-width:1px 0 0;border-radius:18px 18px 0 0;box-shadow:0 -12px 40px rgba(0,0,0,.45);transform:none;animation:filter-sheet-up .2s ease-out}
+  .filter-panel.is-dialog::before{content:"";flex:none;align-self:center;width:38px;height:4px;margin-top:8px;border-radius:999px;background:#5A6066}
+  .filter-panel.is-dialog .filter-panel-head{padding:8px 10px 10px 18px}
   .filter-groups{grid-template-columns:1fr}
+  .filter-panel.is-dialog .filter-groups{padding:4px 8px 8px}
+  .filter-panel.is-dialog .filter-option{min-height:44px;font-size:.92rem}
+  .filter-panel.is-dialog .filter-direction button{min-height:38px;font-size:.86rem}
+  .filter-panel.is-dialog .filter-panel-foot{padding:10px 14px calc(12px + env(safe-area-inset-bottom))}
+  .filter-panel.is-dialog .filter-panel-foot .button{min-height:40px;padding-left:16px;padding-right:16px}
 }
+@keyframes filter-sheet-up{from{transform:translateY(40px);opacity:.4}to{transform:none;opacity:1}}
+@media (prefers-reduced-motion:reduce){.filter-panel,.filter-backdrop{animation:none}}
