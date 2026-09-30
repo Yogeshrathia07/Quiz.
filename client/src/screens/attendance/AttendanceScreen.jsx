@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, post } from '../../lib/api.js';
 import { dateTime } from '../../lib/format.js';
-import { getBrowserLocation } from '../../lib/geo.js';
+import { LocationProblem } from '../../lib/geo.js';
+import { LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
 import { Check, Clock3, X } from 'lucide-react';
 import { AuthForm } from '../../components/AuthForm.jsx';
 
@@ -92,6 +93,8 @@ function MarkForm({ code, session, user, onMarked, showToast }) {
   const [sapId, setSapId] = useState('');
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
+  // Asked as its own step, and any problem kept on the page with its steps.
+  const location = useLocationCheck(Boolean(session.locationRequired));
 
   useEffect(() => {
     if (!needsProfile) return;
@@ -107,8 +110,7 @@ function MarkForm({ code, session, user, onMarked, showToast }) {
       let point = {};
       if (session.locationRequired) {
         setStep('Checking your location…');
-        // The message already says what went wrong and what to do on this phone.
-        point = await getBrowserLocation();
+        point = location.fresh() || await location.request();
       }
       setStep('Marking…');
       const data = await post(`/api/attendance/${encodeURIComponent(code)}/mark`, {
@@ -116,7 +118,8 @@ function MarkForm({ code, session, user, onMarked, showToast }) {
       });
       onMarked(data.session);
     } catch (error) {
-      showToast(error.message);
+      // A location problem is already on the page, with what to do.
+      if (!(error instanceof LocationProblem)) showToast(error.message);
       setBusy(false);
       setStep('');
     }
@@ -135,7 +138,7 @@ function MarkForm({ code, session, user, onMarked, showToast }) {
           {!user.isGuest && <p className="help">Saved to your account; after that only an administrator can change it.</p>}
         </>
       )}
-      {session.locationRequired && <p className="help">Your location is checked once, to confirm you are in the classroom.</p>}
+      {session.locationRequired && <LocationPanel check={location} intro="Your location is checked once, to confirm you are in the classroom."/>}
       <button className="button button-primary button-wide att-mark-button" type="submit"
         disabled={busy || (asksSapId && sapId.length !== SAP_ID_LENGTH)}>
         {busy ? step || 'Marking…' : 'Mark my attendance'}

@@ -1,43 +1,63 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { leavingRules } from './leaving-rules.js';
 import { post } from '../../lib/api.js';
 import { durationLabel } from '../../lib/format.js';
-import { getBrowserLocation } from '../../lib/geo.js';
+import { LocationHelp, LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
+import { locationPermission } from '../../lib/geo.js';
 import { fullscreenSupported, markBegan, requestTestFullscreen } from '../../lib/useAwayMonitor.js';
 import { EndLine, TestHeader } from './StatusScreens.jsx';
 
-export function TestLaunch({ test, code, reload, showToast, windowKind }) {
+export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast, windowKind }) {
   const [busy, setBusy] = useState(false);
-  // Why the venue check failed and what to do, kept on the page (a toast
-  // would be gone before the steps could be followed).
-  const [locationProblem, setLocationProblem] = useState('');
+  // The venue check is its own step above Begin (components/LocationCheck).
+  // What the server says about the reading - too vague to place them - is kept
+  // on the page too: a toast would be gone before the steps could be followed.
+  const location = useLocationCheck(Boolean(test.locationRequired));
+  const [serverProblem, setServerProblem] = useState('');
+  const venueRef = useRef(null);
+  const showVenue = () => venueRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   const canFullscreen = fullscreenSupported();
 
   const begin = async () => {
     setBusy(true);
-    setLocationProblem('');
+    setServerProblem('');
     try {
-      // Required wherever the browser has it. Asked for first, while the tap
-      // still counts: a browser allows fullscreen only for a few seconds after
-      // one, and finding the location can take longer than that. If it is
+      // Found a moment ago with "Allow location": used as it is, nothing asked twice.
+      let point = test.locationRequired ? location.fresh() : null;
+      let locationError = null;
+      // Not allowed yet: the phone's "use your location?" question comes first,
+      // on the page as it is. Asked while the page was switching to fullscreen,
+      // on some phones the question was hidden or dismissed by the switch - the
+      // student never saw it, and the location was simply refused.
+      if (test.locationRequired && !point && await locationPermission() !== 'granted') {
+        try { point = await location.request(); } catch (error) { locationError = error; }
+      }
+      // Fullscreen is asked for while the tap still counts (a browser allows it
+      // only for a few seconds after one); if that has passed, or it is
       // refused, the paper asks again - and a slow start is never counted as
-      // leaving the test.
-      if (fullscreenSupported()) await requestTestFullscreen();
+      // leaving the test. Not when the location failed: the page stays as it
+      // is, to show how to fix it - unless the server lets them in anyway.
+      if (fullscreenSupported() && !locationError) await requestTestFullscreen();
       markBegan();
       // A refused or failed location is not the end: a student the admin has
       // given a location exception may begin without one, and only the server
       // knows that. iPhones refuse far more often (Location Services for
       // Safari is off by default), so this is where an exception matters most.
-      let location = null;
-      let locationError = null;
-      if (test.locationRequired) {
-        try { location = await getBrowserLocation(); } catch (error) { locationError = error; }
+      if (test.locationRequired && !point && !locationError) {
+        try { point = await location.request(); } catch (error) { locationError = error; }
       }
       try {
-        await post(`/api/tests/${encodeURIComponent(code)}/start`, { ...(location || {}), window: windowKind });
+        const started = await post(`/api/tests/${encodeURIComponent(code)}/start`, { ...(point || {}), window: windowKind });
+        // Start already returns the full authorised paper. Reusing it avoids a
+        // second request per student right when the class presses Begin.
+        if (started?.attempt) {
+          onStarted(started.attempt);
+          return;
+        }
       } catch (error) {
-        if (error.code === 'LOCATION_NEEDED' && locationError) { setLocationProblem(locationError.message); setBusy(false); return; }
-        if (error.code === 'LOCATION_IMPRECISE') { setLocationProblem(error.message); setBusy(false); return; }
+        // The venue step above now says what went wrong and how to fix it.
+        if (error.code === 'LOCATION_NEEDED' && locationError) { setBusy(false); showVenue(); return; }
+        if (error.code === 'LOCATION_IMPRECISE') { setServerProblem(error.message); setBusy(false); showVenue(); return; }
         throw error;
       }
       await reload();
@@ -75,18 +95,12 @@ export function TestLaunch({ test, code, reload, showToast, windowKind }) {
           </p>
         </div>
       )}
-      {test.locationRequired && (locationProblem ? (
-        <div className="notice danger" role="alert">
-          <strong>Your location is needed to begin</strong>
-          <p className="help">{locationProblem}</p>
-          <p className="help">Then press Begin again.</p>
+      {test.locationRequired && (
+        <div ref={venueRef} className="launch-venue">
+          <LocationPanel check={location} intro={`Your location confirms you are within ${test.locationRadiusMeters} m of the test venue.`}/>
+          {serverProblem && <LocationHelp problem={serverProblem}/>}
         </div>
-      ) : (
-        <div className="notice">
-          <strong>Venue check required</strong>
-          <p className="help">Allow location access to confirm you are within {test.locationRadiusMeters} m of the test venue. When your phone asks, choose Allow (with Precise location on).</p>
-        </div>
-      ))}
+      )}
       <div className="notice">
         <strong>Stay on this page until you submit</strong>
         <p className="help">
