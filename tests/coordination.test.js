@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { coordinationMode, runAsLeader, serializeWrite } from '../src/coordination/index.js';
+import { coordinationMode, onLiveEvent, publishLiveEvent, runAsLeader, serializeWrite } from '../src/coordination/index.js';
 
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
@@ -43,6 +43,21 @@ test('one-process scheduler leadership runs normally without Redis', async () =>
   const result = await runAsLeader('scheduler-test', async () => { calls += 1; return 42; });
   assert.deepEqual(result, { acquired: true, value: 42 });
   assert.equal(calls, 1);
+});
+
+test('a local live signal reaches subscribers without Redis', async () => {
+  const received = [];
+  const unsubscribe = onLiveEvent((event) => received.push(event));
+  try {
+    await publishLiveEvent({ code: 'TEST-LIVE', attemptId: 'attempt-1', kind: 'answer_saved' });
+  } finally {
+    unsubscribe();
+  }
+  assert.equal(received.length, 1);
+  assert.equal(received[0].code, 'TEST-LIVE');
+  assert.equal(received[0].attemptId, 'attempt-1');
+  assert.equal(received[0].kind, 'answer_saved');
+  assert.equal(typeof received[0].at, 'number');
 });
 
 test('cluster startup is refused when REDIS_URL is missing', () => {

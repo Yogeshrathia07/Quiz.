@@ -1,14 +1,22 @@
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { config } from '../config.js';
 import { coordinationStats } from '../coordination/index.js';
+import { liveUpdateStats } from '../realtime/live-updates.js';
 
 const loopDelay = monitorEventLoopDelay({ resolution: 20 });
 loopDelay.enable();
 
 const state = {
   startedAt: new Date(), active: 0, peakActive: 0, completed: 0,
-  shedPolls: 0, shedHard: 0, errors: 0, totalDurationMs: 0
+  shedPolls: 0, shedHard: 0, errors: 0, totalDurationMs: 0,
+  liveStreamsBypassed: 0
 };
+
+/** Long-lived EventSource sockets have their own bounded capacity. */
+export function isLiveStreamRequest(method, path) {
+  if (method !== 'GET') return false;
+  return /^\/api\/(?:tests|admin\/tests)\/[^/]+\/events$/.test(path);
+}
 
 /** Reads that are safe for the browser to retry and never carry an answer. */
 export function isPollableRequest(method, path) {
@@ -33,6 +41,15 @@ function rejectBusy(res, hard = false) {
  * first. The hard ceiling protects the process from an unbounded socket burst.
  */
 export function trafficMiddleware(req, res, next) {
+  // An SSE response deliberately lives for the duration of the exam. Counting
+  // it as an active HTTP request would make a healthy class of 600 students
+  // exhaust the normal request reserve and shed their own fallback polls.
+  // live-updates.js applies a separate bounded stream cap instead.
+  if (isLiveStreamRequest(req.method, req.path)) {
+    state.liveStreamsBypassed += 1;
+    return next();
+  }
+
   const hard = config.performance.hardActiveRequests;
   const soft = Math.min(config.performance.softActiveRequests, hard - 1);
   if (state.active >= hard) return rejectBusy(res, true);
@@ -69,6 +86,7 @@ export function performanceSnapshot(extra = {}) {
       errors: state.errors,
       shedPolls: state.shedPolls,
       shedHard: state.shedHard,
+      liveStreamsBypassed: state.liveStreamsBypassed,
       averageMs: state.completed ? Number((state.totalDurationMs / state.completed).toFixed(1)) : 0
     },
     eventLoop: {
@@ -79,7 +97,7 @@ export function performanceSnapshot(extra = {}) {
     },
     memory: Object.fromEntries(Object.entries(process.memoryUsage()).map(([key, bytes]) => [key, Math.round(bytes / 1024 / 1024)])),
     coordination: coordinationStats(),
+    liveUpdates: liveUpdateStats(),
     ...extra
   };
 }
-

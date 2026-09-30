@@ -22,6 +22,8 @@ const clusteredProcess = () => process.env.QUIZ_CLUSTERED === 'true'
 const lockKey = (resource) => `${config.redis.keyPrefix}:lock:${encodeURIComponent(String(resource))}`;
 const cacheKey = (resource) => `${config.redis.keyPrefix}:cache:${encodeURIComponent(String(resource))}`;
 const cacheInvalidationChannel = () => `${config.redis.keyPrefix}:cache-invalidations`;
+const liveEventChannel = () => `${config.redis.keyPrefix}:live-events`;
+const liveEventListeners = new Set();
 const extensionThreshold = () => Math.max(500, Math.min(5_000, Math.floor(config.redis.lockTtlMs / 3)));
 const retryCount = () => Math.max(0, Math.ceil(config.redis.lockWaitMs / 100));
 
@@ -80,14 +82,22 @@ export async function initializeCoordination() {
   });
   manager.on('error', reportRedisError);
   try {
-    await subscriber.subscribe(cacheInvalidationChannel());
+    await subscriber.subscribe(cacheInvalidationChannel(), liveEventChannel());
   } catch (error) {
     subscriber.disconnect(false);
     client.disconnect(false);
     throw new Error(`Could not start Redis cache invalidation: ${error.message}`);
   }
   subscriber.on('message', (channel, resource) => {
-    if (channel === cacheInvalidationChannel()) localCache.delete(resource);
+    if (channel === cacheInvalidationChannel()) {
+      localCache.delete(resource);
+      return;
+    }
+    if (channel !== liveEventChannel()) return;
+    try {
+      const event = JSON.parse(resource);
+      for (const listener of liveEventListeners) listener(event);
+    } catch { /* an invalid notification never disrupts the exam */ }
   });
   redisClient = client;
   redisSubscriber = subscriber;
@@ -188,6 +198,27 @@ export const coordinationStats = () => ({
   cacheLoads: cacheLoads.size,
   cache: { ...cacheCounters }
 });
+
+/** Receive small, non-authoritative UI refresh signals in this Node worker. */
+export function onLiveEvent(listener) {
+  liveEventListeners.add(listener);
+  return () => liveEventListeners.delete(listener);
+}
+
+/**
+ * Signals are deliberately tiny: clients fetch their own authorised state
+ * after receiving one. Redis fans them out between workers; one local process
+ * calls its listeners directly for development.
+ */
+export async function publishLiveEvent(event) {
+  const payload = JSON.stringify({ ...event, at: Date.now() });
+  if (!redisClient) {
+    for (const listener of liveEventListeners) listener(JSON.parse(payload));
+    return;
+  }
+  try { await redisClient.publish(liveEventChannel(), payload); }
+  catch (error) { reportRedisError(error); }
+}
 
 const unavailable = (error) => {
   const wrapped = new PublicTestError(
