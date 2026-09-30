@@ -135,9 +135,19 @@ td .att-flag{display:inline}
 .att-or::before,.att-or::after{content:"";flex:1;height:1px;background:var(--line)}
 .att-guest-button{margin-top:10px}
 
-@media (max-width:760px){
-  .att-board{grid-template-columns:1fr}
-  .att-board-side{order:-1}
+/* A tablet has enough room for the navigation but not for a useful table and
+   a 300 px QR column. Keep the table full width here: its cells remain easy
+   to read and the page never gains a horizontal scrollbar. */
+@media (max-width:980px){
+  .att-board{grid-template-columns:minmax(0,1fr)}
+  .att-board-side{order:-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(230px,.72fr);align-items:stretch}
+  .att-board-side>*{min-width:0}
+  .att-qr,.att-side{height:100%}
+  .att-table{min-width:0}
+}
+
+@media (max-width:620px){
+  .att-board-side{grid-template-columns:minmax(0,1fr)}
   .att-create-options{grid-template-columns:1fr}
   .min-list-side span:first-child{display:none}
   .att-student{margin-top:8px;padding:22px}
@@ -148,7 +158,7 @@ td .att-flag{display:inline}
    headings staying put, and the QR shrinks to the height that is left. A
    narrow or very short screen, or the edit form open, and the page scrolls
    as usual. */
-@media (min-width:901px) and (min-height:560px){
+@media (min-width:981px) and (min-height:560px){
   .shell:has(.att-session:not(.is-editing)){height:100vh;height:100dvh;min-height:0;overflow:hidden}
   .main:has(.att-session:not(.is-editing)){display:flex;flex-direction:column;height:calc(100dvh - 56px - env(safe-area-inset-top))}
   .att-session:not(.is-editing){display:flex;flex-direction:column;flex:1;min-height:0}

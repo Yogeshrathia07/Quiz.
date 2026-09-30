@@ -80,7 +80,8 @@ function SessionForm({ session = null, onSave, onCancel, showToast }) {
 
 export function AttendanceListScreen({ go, showToast }) {
   const [sessions, setSessions] = useState(null);
-  const [creating, setCreating] = useState(false);
+  // ?new=1 (the home page's "Take attendance") opens straight on the form.
+  const [creating, setCreating] = useState(() => new URLSearchParams(window.location.search).get('new') === '1');
   useEffect(() => {
     api('/api/admin/attendance').then((data) => setSessions(data.sessions)).catch((error) => showToast(error.message));
   }, [showToast]);
