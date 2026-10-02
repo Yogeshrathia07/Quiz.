@@ -750,8 +750,6 @@
 .q-head{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px}
 .q-count{font-size:.9rem;font-weight:700;color:var(--ink)}
 .q-count span{color:var(--faint);font-weight:600}
-.q-state{font-size:.75rem;color:var(--faint)}
-.q-state.is-saved{color:var(--teal)}
 .q-prompt{margin:0;font-size:1.08rem;font-weight:500;line-height:1.55;letter-spacing:0;color:var(--ink);white-space:pre-wrap}
 .q-hint{margin:8px 0 16px;font-size:.78rem;color:var(--faint)}
 .q-options{display:grid;gap:10px}
@@ -867,7 +865,6 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .q-dot.is-current.is-done{background:var(--accent);color:#F7FAFC;box-shadow:0 0 0 3px rgba(21,152,209,0.35)}
 
 .q-card{box-shadow:none}
-.q-state.is-saved{color:#27B66F}
 .q-letter{background:#33373B;color:#D5DEE2}
 .q-option:hover:not(:disabled){border-color:#1598D1}
 .q-option.is-selected{border-color:var(--accent);background:var(--accent);color:#F7FAFC}
@@ -931,6 +928,19 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .private-steps{margin:14px 0;padding-left:20px;display:grid;gap:8px;color:#F7FAFC;line-height:1.5}
 .private-steps kbd{display:inline-block;padding:1px 6px;border:1px solid #474C52;border-bottom-width:2px;border-radius:5px;background:#33373B;font:inherit;font-size:.8rem;font-weight:700}
 .private-card .link-box{margin:6px 0 12px}
+/* Phones only or laptops only, on the wrong one (DeviceNotAllowed), and the
+   device part of the browser check page (WindowCheckScreen). */
+.device-card .link-box{margin:6px 0 12px}
+.device-card-eyebrow{display:inline-flex;align-items:center;gap:6px}
+.device-card.is-compact h1{font-size:1.35rem}
+.device-card-facts{color:var(--text-3)}
+.device-check-raw{margin:0 0 14px}
+.device-check-raw summary{margin-bottom:6px;color:var(--text-2);font-size:.86rem;font-weight:600;cursor:pointer}
+.device-check-ua{font-size:.76rem;word-break:break-all}
+/* Two cards on one fixed screen (the check page; the device card over a waiting
+   screen): they scroll together, rather than each squeezed into half the screen. */
+.main:has(.join-card) .join-stack{display:grid;align-content:start;gap:14px;width:min(100%,620px);max-height:100%;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}
+.main:has(.join-card) .join-stack>.join-card{width:100%;max-height:none;overflow:visible}
 
 /* Dashboard tabs:one fixed size, whatever the numbers do */
 .dashboard-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:min(100%,520px);gap:4px}
@@ -1226,16 +1236,28 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .confirm-gate-card p{margin:0;color:#D5DEE2;line-height:1.5}
 @keyframes confirm-in{from{opacity:0}to{opacity:1}}
 /* Connection trouble:one slim line under the progress bar, never a block. */
-/* On the right of each question's header: where its answer stands
-   (QuestionPaper SaveState), as coloured text - green saved, blue saving,
-   amber waiting on this device, grey before an answer. A long one wraps and
-   stays on the right. */
-.q-card .q-head{justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px 10px}
-.q-card .q-head .q-state{margin-left:auto;padding:0;border:0;background:none;font-size:.78rem;font-weight:600;line-height:1.35;text-align:right}
-.q-card .q-head .q-state.is-saved{color:#43CF88}
-.q-card .q-head .q-state.is-sending{color:#5CC3EE}
-.q-card .q-head .q-state.is-waiting{color:#F5A45C}
-.q-card .q-head .q-state.is-empty,.q-card .q-head .q-state.is-final{color:#89979E;font-weight:500}
+/* On the right of each question's header: a small dot for where its answer
+   stands (QuestionPaper SaveState) - green saved, blue saving, amber waiting
+   on this device, grey not answered. Hovered (where a pointer can), tapped
+   or focused, it shows the details. */
+.q-card .q-head{justify-content:space-between;align-items:center;flex-wrap:nowrap;gap:10px}
+.q-save{position:relative;display:inline-flex;flex:none;margin-left:auto;--save:#5A6066}
+.q-save.is-saved{--save:#43CF88}
+.q-save.is-sending{--save:#5CC3EE}
+.q-save.is-waiting{--save:#F5A45C}
+.q-save.is-empty,.q-save.is-final{--save:#6B767C}
+.q-save-dot{display:grid;place-items:center;width:28px;height:28px;margin:-6px -8px -6px 0;padding:0;border:0;border-radius:50%;background:transparent;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.q-save-dot span{width:9px;height:9px;border-radius:50%;background:var(--save);box-shadow:0 0 0 3px color-mix(in srgb,var(--save) 22%,transparent)}
+.q-save.is-empty .q-save-dot span{background:transparent;box-shadow:inset 0 0 0 1.5px var(--save)}
+.q-save.is-sending .q-save-dot span,.q-save.is-waiting .q-save-dot span{animation:q-save-pulse 1.4s ease-in-out infinite}
+@keyframes q-save-pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.q-save-dot:focus-visible{outline:2px solid #1598D1;outline-offset:1px}
+.q-save-tip{position:absolute;top:calc(100% + 6px);right:-6px;z-index:25;display:none;width:max-content;max-width:min(240px,70vw);padding:9px 11px;border:1px solid rgba(255,255,255,.1);border-radius:10px;background:#2A2D31;color:#D5DEE2;font-size:.76rem;font-weight:500;line-height:1.4;text-align:left;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+.q-save-tip strong{display:block;margin-bottom:2px;color:var(--save);font-size:.8rem}
+.q-save.is-empty .q-save-tip strong,.q-save.is-final .q-save-tip strong{color:#D5DEE2}
+.q-save.is-open .q-save-tip,.q-save-dot:focus-visible+.q-save-tip{display:block}
+@media (hover:hover){.q-save:hover .q-save-tip{display:block}}
+@media (prefers-reduced-motion:reduce){.q-save .q-save-dot span{animation:none}}
 @media (prefers-reduced-motion:reduce){.confirm-gate{animation:none}}
 
 /* ------------------------------------------------ exam header:focus on the question ----
@@ -1383,3 +1405,19 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .away-gate-card .location-help{text-align:left}
 .location-actions{display:flex;flex-wrap:wrap;gap:8px}
 .location-reload{display:inline-flex;align-items:center;gap:7px}
+
+/* Reopen paper (ReopenPaperModal): a small dialog - one line on the time they
+   have, minute chips for them alone, one button. */
+@media (min-width:761px){.student-analysis-sheet.reopen-dialog{width:min(100%,420px)}}
+.reopen-dialog h1{min-height:36px;margin:0 0 10px;font-size:1.3rem;line-height:1.3}
+.reopen-note{margin:0 0 16px;color:var(--text-2);font-size:.88rem;line-height:1.45}
+.reopen-note.is-over,.reopen-note.is-warn{color:var(--warn)}
+.reopen-note.is-warn{margin-top:-10px}
+.reopen-minutes{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.reopen-minutes>button{min-width:46px;height:34px;padding:0 12px;border:0;border-radius:999px;background:var(--bg-raised);color:#D5DEE2;font:inherit;font-size:.84rem;font-weight:600;cursor:pointer}
+.reopen-minutes>button:hover{background:#3D4247}
+.reopen-minutes>button.is-on{background:var(--primary);color:#FFFFFF}
+.reopen-custom{display:inline-flex;align-items:center;gap:4px;height:34px;padding:0 12px;border-radius:999px;background:var(--bg-raised);color:var(--text-3);font-size:.84rem;cursor:text}
+.reopen-custom input{min-width:1ch;height:28px;padding:0;border:0;background:transparent;color:var(--text);font:inherit;font-weight:600;text-align:right;outline:none}
+.reopen-custom:focus-within{box-shadow:0 0 0 2px var(--primary)}
+.reopen-minutes>button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}

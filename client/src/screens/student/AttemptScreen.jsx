@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { liveEventsFromPayload, useLiveUpdate } from '../../lib/live-updates.js';
 import { leavingRules } from './leaving-rules.js';
 import { PrivateWindowRequired } from './PrivateWindowRequired.jsx';
+import { DeviceNotAllowed } from './DeviceNotAllowed.jsx';
+import { deviceRefused, useDeviceCheck } from '../../lib/device.js';
 import { api, isOffline, isSignedOut, post } from '../../lib/api.js';
 import { AuthForm } from '../../components/AuthForm.jsx';
 import {
@@ -66,7 +68,7 @@ const PAPER_REFRESH_EVENTS = new Set([
   'resync', 'stream_reconnected', 'time_changed', 'test_settings_changed', 'test_closed', 'test_reopened',
   'quiz_restarted', 'test_reset', 'attempts_restarted', 'attempts_bulk_updated',
   'attempt_revived', 'attempt_restarted', 'attempt_paused', 'attempt_continued',
-  'attempt_submitted', 'registration_changed', 'location_override', 'results_released'
+  'attempt_submitted', 'registration_changed', 'location_override', 'results_released', 'paper_reopened'
 ]);
 
 /**
@@ -412,6 +414,14 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
           setSignedOut('');
           return attemptRef.current;
         }
+        // Handed in, and open again: the teacher reopened this paper (or resumed
+        // the test that closed it). Back to the paper, and why. Wherever the
+        // student is now (out of fullscreen, say) is not them leaving the test.
+        const before = attemptRef.current;
+        if (before?.id === response.attempt.id && before.status === 'submitted' && response.attempt.status === 'in_progress') {
+          markResumed();
+          showToast('Your teacher reopened your paper. Carry on where you left off.', 'info', { title: 'Paper reopened' });
+        }
         setAttempt(response.attempt);
         setOnline(true);
         setSignedOut('');
@@ -465,10 +475,21 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
     void loadAttempt();
     return undefined;
   }, [loadAttempt]);
+  // Which device the paper is open on, reported for the teacher; on a phones-
+  // or laptops-only test, the paper is covered on any other kind of device.
+  // Asked again when the rule changes or the teacher allows this device.
+  const [deviceRefresh, setDeviceRefresh] = useState(0);
+  const deviceCheck = useDeviceCheck(code, {
+    stage: 'paper',
+    enabled: Boolean(attempt?.id) && attempt?.status === 'in_progress',
+    refreshKey: `${attempt?.devices || 'any'}:${deviceRefresh}`
+  });
   useLiveUpdate(
     attempt?.id ? `/api/tests/${encodeURIComponent(code)}/events` : null,
     (payload) => {
-      if (liveEventsFromPayload(payload).some((event) => PAPER_REFRESH_EVENTS.has(event?.kind))) void loadAttempt();
+      const events = liveEventsFromPayload(payload);
+      if (events.some((event) => event?.kind === 'device_override' || event?.kind === 'test_settings_changed')) setDeviceRefresh((value) => value + 1);
+      if (events.some((event) => PAPER_REFRESH_EVENTS.has(event?.kind))) void loadAttempt();
     },
     Boolean(attempt?.id)
   );
@@ -688,7 +709,9 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   // the paper is covered until it is reopened in Incognito. Leaving this tab
   // to do that is not counted against the student.
   const privateBlocked = Boolean(attempt?.requirePrivateWindow) && !privateExempt && windowKind === 'normal' && attempt?.status !== 'submitted';
-  const sitting = Boolean(attemptId) && attempt?.status !== 'submitted' && !privateBlocked;
+  // Likewise a paper opened on a device the test does not allow.
+  const deviceBlocked = attempt?.status === 'in_progress' && deviceRefused(deviceCheck);
+  const sitting = Boolean(attemptId) && attempt?.status !== 'submitted' && !privateBlocked && !deviceBlocked;
   // The 5-minute and 1-minute notices are warnings, shown in the warning colour.
   const warnToast = useCallback((title, message) => showToast(message, 'warn', { title }), [showToast]);
   // Fullscreen is required wherever the browser offers it. If it refuses (some
@@ -1081,11 +1104,9 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   const loadResult = useCallback(async (attemptId) => {
     try {
       const next = (await api(`/api/test-attempts/${attemptId}/result`)).result;
-      // The administrator resumed a test they closed by mistake: back to the paper, where it was.
-      // Wherever the student is now (out of fullscreen, say) is not them leaving the test.
+      // Open again (the teacher reopened it, or resumed the test): loading the
+      // paper brings it back and says why.
       if (next.reopened) {
-        markResumed();
-        showToast('Your teacher reopened the test. Carry on where you were.', 'info', { title: 'Test resumed' });
         await loadAttempt();
         return;
       }
@@ -1110,6 +1131,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   if (!attempt) return <div className="empty card">Loading your paper…</div>;
   if (attempt.status === 'submitted') return <ResultScreen result={result}/>;
   if (privateBlocked) return <PrivateWindowRequired test={{ code, title: attempt.title }} showToast={showToast} onDeclare={onDeclareWindow} midTest/>;
+  if (deviceBlocked) return <DeviceNotAllowed test={{ code, title: attempt.title }} rule={attempt.devices} check={deviceCheck} stage="paper" showToast={showToast}/>;
   if (attempt.paused) return <PausedAttempt attempt={attempt} reload={loadAttempt}/>;
   if (attempt.isLocked) return <LockedAttempt attempt={attempt} reload={loadAttempt}/>;
   if (!current) return <div className="empty card">Preparing your questions…</div>;

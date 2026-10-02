@@ -22,7 +22,7 @@ import { attemptRevision, compactAnswerResponse, compactAttemptState, revisioned
 import {
   adminDashboard, adminExportData, adminTests, archiveTest, userTestAnalysis, bulkAttemptAction, duplicateTest, bulkDecision, closeTest, csvForAdmin, decideRegistration,
   deleteTest, gradeManualAnswer, manualReview, registrationAnalysis, releaseResults, restartAllAttempts, restartQuiz,
-  continueAttempt, pauseAttempt, reopenTest, restartAttempt, resetTest, resumeAttempt, submitStudentPaper, setLocationOverride, setTestEndTime, startTest, updateStudentSapId
+  continueAttempt, pauseAttempt, reopenTest, restartAttempt, resetTest, resumeAttempt, reopenStudentPaper, submitStudentPaper, setDeviceOverride, setLocationOverride, setTestEndTime, startTest, updateStudentSapId
 } from '../services/admin-service.js';
 import { exportWorkerStats, runExportJob } from '../export/worker-pool.js';
 import { performanceSnapshot } from '../services/traffic.js';
@@ -30,10 +30,12 @@ import { requireOwnedTest, requireRegistration, requireTestForStudent } from '..
 import { publishLiveEvent } from '../coordination/index.js';
 import { openAdminUpdates, openStudentUpdates } from '../realtime/live-updates.js';
 import {
-  addManualMark, attendanceExportData, attendanceForAdmin, attendanceForStudent, attendanceQrSvg, attendanceSettings, beginAttendanceGuest,
-  closeAttendance, createAttendance, deleteAttendance, listAttendance, markAttendance, reopenAttendance, searchPeople, setMarkStatus
+  addManualMark, addManualMarks, attendanceExportData, attendanceForAdmin, attendanceRegisterData, attendanceRoster, attendanceForStudent,
+  attendanceSettings, beginAttendanceGuest, closeAttendance, createAttendance, deleteAttendance, listAttendance, markAttendance,
+  reopenAttendance, searchPeople, setMarkStatus, setMarkStatuses
 } from '../services/attendance-service.js';
 import { homeSummary } from '../services/home-service.js';
+import { checkAnyDevice, checkTestDevice } from '../services/device-service.js';
 
 /** Forwards any thrown PublicTestError to the central error handler. */
 const route = (handler) => async (req, res, next) => {
@@ -161,6 +163,12 @@ export function createApiRouter() {
     signal({ code: req.params.code, kind: 'registration_created' });
     res.status(201).json(response);
   }));
+
+  // Phones only or laptops only: may this device sit it? Asked before sign-in
+  // too, so no account is needed; once registered, the answer is kept.
+  router.post('/api/tests/:code/device', route(async (req, res) => res.json(await checkTestDevice(req, req.params.code, req.body || {}))));
+  // The check page: what this device is taken for, with every signal.
+  router.post('/api/device-check', route(async (req, res) => res.json(checkAnyDevice(req, req.body || {}))));
 
   router.get('/api/tests/:code/events', requireTestTaker, route(async (req, res) => {
     const test = await requireTestForStudent(req, req.params.code);
@@ -321,29 +329,43 @@ export function createApiRouter() {
   }));
   // Admin
   router.get('/api/admin/attendance', requireAdmin, route(async (req, res) => res.json(await listAttendance(req))));
+  // Many sessions as one register: ?codes=ATT-A,ATT-B (or none, for all of them), &min=75 (per cent).
+  router.get('/api/admin/attendance-register.xlsx', requireAdmin, route(async (req, res) => {
+    const data = await attendanceRegisterData(req, req.query);
+    res.type(XLSX_TYPE).attachment(`attendance-register-${data.exportedAt.slice(0, 10)}.xlsx`).send(await runExportJob('attendanceRegister', data));
+  }));
   router.post('/api/admin/attendance', requireAdmin, route(async (req, res) => res.status(201).json(await createAttendance(req, req.body || {}))));
   router.get('/api/admin/attendance/:code', requireAdmin, route(async (req, res) => res.json(await attendanceForAdmin(req, req.params.code))));
   router.patch('/api/admin/attendance/:code', requireAdmin, route(async (req, res) => {
     res.json(await attendanceSettings(req, req.params.code, req.body || {}));
   }));
-  router.get('/api/admin/attendance/:code/qr.svg', requireAdmin, route(async (req, res) => {
-    res.set('cache-control', 'no-store').type('image/svg+xml').send(await attendanceQrSvg(req, req.params.code, baseUrl(req)));
-  }));
+  // Everyone seen in this class's other sessions: who is absent from this one.
+  router.get('/api/admin/attendance/:code/roster', requireAdmin, route(async (req, res) => res.json(await attendanceRoster(req, req.params.code))));
   router.post('/api/admin/attendance/:code/close', requireAdmin, route(async (req, res) => res.json(await closeAttendance(req, req.params.code))));
   router.post('/api/admin/attendance/:code/reopen', requireAdmin, route(async (req, res) => res.json(await reopenAttendance(req, req.params.code))));
   router.get('/api/admin/attendance/:code/people', requireAdmin, route(async (req, res) => {
     res.json(await searchPeople(req, req.params.code, req.query.q));
   }));
+  // One person ({ as, lookup | sapId, name }), or several ({ people: [...] }).
   router.post('/api/admin/attendance/:code/marks', requireAdmin, route(async (req, res) => {
-    res.status(201).json(await addManualMark(req, req.params.code, req.body || {}));
+    const body = req.body || {};
+    res.status(201).json(await (Array.isArray(body.people) ? addManualMarks(req, req.params.code, body.people) : addManualMark(req, req.params.code, body)));
+  }));
+  // Several marks removed or put back at once: { ids: [...], action: 'reject' | 'restore' }.
+  router.post('/api/admin/attendance/:code/marks/status', requireAdmin, route(async (req, res) => {
+    const body = req.body || {};
+    res.json(await setMarkStatuses(req, req.params.code, body.ids, body.action));
   }));
   router.post('/api/admin/attendance/:code/marks/:markId/:action', requireAdmin, route(async (req, res) => {
     res.json(await setMarkStatus(req, req.params.code, req.params.markId, req.params.action));
   }));
-  router.get('/api/admin/attendance/:code/export.xlsx', requireAdmin, route(async (req, res) => {
-    const session = await attendanceExportData(req, req.params.code);
-    res.type(XLSX_TYPE).attachment(`${session.code}-attendance.xlsx`).send(await runExportJob('attendance', session));
-  }));
+  // The whole session; or, posted { ids, absent, note }, just the rows on the teacher's screen.
+  const sendAttendanceSheet = (pick) => route(async (req, res) => {
+    const session = await attendanceExportData(req, req.params.code, pick(req));
+    res.type(XLSX_TYPE).attachment(`${session.code}-attendance${session.note ? '-filtered' : ''}.xlsx`).send(await runExportJob('attendance', session));
+  });
+  router.get('/api/admin/attendance/:code/export.xlsx', requireAdmin, sendAttendanceSheet(() => null));
+  router.post('/api/admin/attendance/:code/export.xlsx', requireAdmin, sendAttendanceSheet((req) => req.body || {}));
   router.delete('/api/admin/attendance/:code', requireAdmin, route(async (req, res) => res.json(await deleteAttendance(req, req.params.code))));
 
   /* ---------------------------------------------------- admin: per student */
@@ -372,6 +394,11 @@ export function createApiRouter() {
     signalRegistration(req.params.code, req.params.registrationId, 'location_override', { registration: response.registration });
     res.json(response);
   }));
+  router.post(`${registrationPath}/device-override`, requireAdmin, route(async (req, res) => {
+    const response = await setDeviceOverride(req, req.params.code, req.params.registrationId, req.body || {}, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'device_override', { registration: response.registration });
+    res.json(response);
+  }));
   router.post(`${registrationPath}/resume`, requireAdmin, route(async (req, res) => {
     const response = await resumeAttempt(req, req.params.code, req.params.registrationId, { compact: true });
     signalRegistration(req.params.code, req.params.registrationId, 'attempt_revived', { registration: response.registration });
@@ -395,6 +422,11 @@ export function createApiRouter() {
   router.post(`${registrationPath}/submit`, requireAdmin, route(async (req, res) => {
     const response = await submitStudentPaper(req, req.params.code, req.params.registrationId, { compact: true });
     signalRegistration(req.params.code, req.params.registrationId, 'attempt_submitted', { registration: response.registration });
+    res.json(response);
+  }));
+  router.post(`${registrationPath}/reopen`, requireAdmin, route(async (req, res) => {
+    const response = await reopenStudentPaper(req, req.params.code, req.params.registrationId, req.body || {}, { compact: true });
+    signalRegistration(req.params.code, req.params.registrationId, 'paper_reopened', { registration: response.registration });
     res.json(response);
   }));
   // Keep last: :action would otherwise swallow the named routes above.

@@ -1,9 +1,10 @@
 import { parentPort } from 'node:worker_threads';
-import { buildAttendanceSpreadsheet } from './attendance-sheet.js';
+import { buildAttendanceRegisterSpreadsheet, buildAttendanceSpreadsheet } from './attendance-sheet.js';
 import { buildStudentResponseSpreadsheet, buildTestSpreadsheet } from './spreadsheet.js';
 
 const builders = {
   attendance: (data) => buildAttendanceSpreadsheet(data),
+  attendanceRegister: (data) => buildAttendanceRegisterSpreadsheet(data),
   student: (data, options) => buildStudentResponseSpreadsheet(data, options),
   test: (data) => buildTestSpreadsheet(data)
 };

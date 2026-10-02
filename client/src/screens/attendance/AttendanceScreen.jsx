@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, post } from '../../lib/api.js';
+import { readDeviceSignals } from '../../lib/device.js';
 import { dateTime } from '../../lib/format.js';
 import { LocationProblem } from '../../lib/geo.js';
 import { LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
@@ -12,7 +13,7 @@ const digits = (value) => value.replace(/\D/g, '').slice(0, SAP_ID_LENGTH);
 /**
  * One id per phone, kept in its storage, so the teacher can see when a
  * single phone marked attendance for several students. Clearing storage
- * gives a new one - it is a hint for the teacher, not a lock.
+ * gives a new one - so the server keeps an id of its own in a cookie too.
  */
 function deviceId() {
   try {
@@ -23,6 +24,26 @@ function deviceId() {
     }
     return id;
   } catch { return null; }
+}
+
+/**
+ * What the phone says it is - model, system, screen, hardware - for the
+ * teacher's "possibly the same phone" (src/domain/attendance.js). A private
+ * tab reads the same; nothing here is a lock.
+ */
+async function phoneTraits() {
+  const signals = readDeviceSignals() || {};
+  let model = '';
+  let platformVersion = '';
+  try {
+    const values = await navigator.userAgentData?.getHighEntropyValues?.(['model', 'platformVersion']);
+    model = values?.model || '';
+    platformVersion = values?.platformVersion || '';
+  } catch { /* not offered: no model, no fingerprint */ }
+  return {
+    model, platformVersion, chPlatform: signals.chPlatform || '', screenW: signals.screenW, screenH: signals.screenH, dpr: signals.dpr,
+    cores: navigator.hardwareConcurrency || null, memory: navigator.deviceMemory || null
+  };
 }
 
 function Header({ session }) {
@@ -86,7 +107,7 @@ function GuestForm({ code, onSignedIn, showToast }) {
   );
 }
 
-function MarkForm({ code, session, user, onMarked, showToast }) {
+function MarkForm({ code, session, user, onMarked, onScanAgain, showToast }) {
   // A UPES student's SAP ID is on their profile; ask only when it is not.
   const needsProfile = !user.isGuest && user.role === 'student';
   const [profileSapId, setProfileSapId] = useState(needsProfile ? undefined : null);
@@ -95,6 +116,8 @@ function MarkForm({ code, session, user, onMarked, showToast }) {
   const [step, setStep] = useState('');
   // Asked as its own step, and any problem kept on the page with its steps.
   const location = useLocationCheck(Boolean(session.locationRequired));
+  const traits = useRef(null);
+  useEffect(() => { phoneTraits().then((value) => { traits.current = value; }, () => {}); }, []);
 
   useEffect(() => {
     if (!needsProfile) return;
@@ -114,10 +137,12 @@ function MarkForm({ code, session, user, onMarked, showToast }) {
       }
       setStep('Marking…');
       const data = await post(`/api/attendance/${encodeURIComponent(code)}/mark`, {
-        ...point, ...(asksSapId ? { sapId } : {}), deviceId: deviceId()
+        ...point, ...(asksSapId ? { sapId } : {}), deviceId: deviceId(), phone: traits.current
       });
       onMarked(data.session);
     } catch (error) {
+      // A pass spent or run out: the page goes back to "scan the QR".
+      if (error.code === 'SCAN_AGAIN') onScanAgain();
       // A location problem is already on the page, with what to do.
       if (!(error instanceof LocationProblem)) showToast(error.message);
       setBusy(false);
@@ -160,17 +185,19 @@ export function AttendanceScreen({ code, auth, refreshAuth, go, showToast }) {
     } catch (requestError) { setError(requestError.message); }
   }, [code]);
 
+  // The code in the scanned link, read once as the page opens - so loading
+  // again (React does, in development) still has it after it leaves the address bar.
+  const [linkKey] = useState(() => new URLSearchParams(window.location.search).get('k'));
   useEffect(() => {
-    const query = new URLSearchParams(window.location.search);
-    const key = query.get('k');
     // The code in the link is spent once read: a copied address bar is no
     // way in for someone outside the room.
-    if (key) {
+    const query = new URLSearchParams(window.location.search);
+    if (query.has('k')) {
       query.delete('k');
       window.history.replaceState({}, '', `/?${query.toString()}`);
     }
-    load(key);
-  }, [load]);
+    load(linkKey);
+  }, [load, linkKey]);
 
   // A pending mark turns into present when the teacher closes attendance.
   const waiting = session?.myMark?.status === 'pending';
@@ -204,7 +231,7 @@ export function AttendanceScreen({ code, auth, refreshAuth, go, showToast }) {
   } else if (!session.isOpen) {
     body = <p className="att-message"><strong>Attendance is closed.</strong> Late? Ask your teacher to take it again, then scan the new QR.</p>;
   } else if (!session.hasPass) {
-    body = <p className="att-message"><strong>Scan the QR code on the screen.</strong> This link has expired: the code changes every few seconds.</p>;
+    body = <p className="att-message"><strong>Scan the QR code on the screen.</strong> This link has expired: the code changes every few seconds, and each scan marks one person.</p>;
   } else if (!auth.user) {
     body = (
       <>
@@ -216,7 +243,7 @@ export function AttendanceScreen({ code, auth, refreshAuth, go, showToast }) {
   } else if (auth.user.isGuest && !session.allowGuests) {
     body = <p className="att-message">This class accepts only college accounts. Sign out, then sign in with your college email.</p>;
   } else {
-    body = <MarkForm code={code} session={session} user={auth.user} onMarked={setSession} showToast={showToast}/>;
+    body = <MarkForm code={code} session={session} user={auth.user} onMarked={setSession} onScanAgain={() => load()} showToast={showToast}/>;
   }
 
   return (

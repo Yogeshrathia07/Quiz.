@@ -13,6 +13,8 @@ import {
   serializePaperWrite, updateAttemptWhere, updateRegistrationFields
 } from '../data/test-repository.js';
 import { startIfDue } from './test-lifecycle.js';
+import { deviceFromRequest, ownsTest, recordDevice } from './device-service.js';
+import { deviceRefusal, deviceVerdict } from '../domain/device.js';
 import { justWokeUp } from './outage.js';
 import {
   EARLY_TIMEOUT_MS, STRICT_GRACE_MS, allowsNext, effectiveShownMs, emptyStrictState, isStrict, resolveStrict, strictPaper
@@ -300,6 +302,13 @@ export async function startAttempt(req, code, raw = {}) {
   if (mustUsePrivateWindow(req, test) && raw.window === 'normal') {
     throw new PublicTestError(403, 'This test must be taken in an Incognito (private) window. Open the test link in one and sign in there.');
   }
+  // Phones only, or laptops only: decided here from what the page and the
+  // request say (domain/device.js), whatever the page itself showed. Kept
+  // first, so the teacher sees a refused device too.
+  const device = deviceFromRequest(req, raw.device);
+  await recordDevice(test, registration, device, 'begin');
+  const deviceCheck = deviceVerdict(test, registration, device, { exempt: ownsTest(req, test) });
+  if (!deviceCheck.allowed) throw new PublicTestError(403, deviceRefusal(deviceCheck.rule, device), 'DEVICE_NOT_ALLOWED');
   const initialLocation = await verifyStartLocation(test, registration, raw);
   // The administrator's explicit Start action is the gate. Registration times
   // organise the cohort; they are not a second block after Start.
@@ -308,6 +317,9 @@ export async function startAttempt(req, code, raw = {}) {
   // Private-window tests: what the student's browser looked like when they
   // began - see client/src/lib/private-mode.js. Shown on the dashboard.
   if (test.requirePrivateWindow) attempt.windowCheck = WINDOW_CHECKS.includes(raw.window) ? raw.window : 'unknown';
+  // What they began on, kept with the paper: the dashboard shows it, and a
+  // paper later opened on another kind of device is noted against it.
+  attempt.device = { kind: device.kind, label: device.label };
   if (initialLocation) {
     attempt.locationChecks[initialLocation.status] = 1;
     attempt.locationChecks.last = { ...initialLocation, checkedAt: now(), trigger: 'start' };

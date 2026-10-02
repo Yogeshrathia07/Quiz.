@@ -1,3 +1,5 @@
+import { kindWord } from './device.js';
+
 /**
  * Integrity record of one attempt
  * -------------------------------
@@ -148,11 +150,16 @@ const eventLabel = (event) => {
   if (event.type === 'attempt_resumed') return event.detail === 'automatic' ? 'Unlocked automatically' : 'Revived by the administrator';
   if (event.type === 'attempt_restarted') return 'Restarted by the administrator';
   if (event.type === 'device_changed') return 'Continued in another browser or device';
+  if (event.type === 'device_kind_changed') {
+    const [opened, began] = String(event.detail || '').split(':');
+    return `Opened the paper on a ${kindWord(opened)}${began && began !== opened ? ` (began on a ${kindWord(began)})` : ''}`;
+  }
   if (event.type === 'venue_left') return 'Left the test venue';
   if (event.type === 'venue_returned') return 'Back at the test venue';
   if (event.type === 'teacher_paused') return 'Paused by the administrator (time stopped)';
   if (event.type === 'teacher_continued') return 'Continued by the administrator';
   if (event.type === 'teacher_submitted') return 'Handed in by the administrator';
+  if (event.type === 'teacher_reopened') return event.durationMs ? `Paper reopened by the administrator, with ${Math.round(event.durationMs / 60_000)} more minutes` : 'Paper reopened by the administrator';
   return event.type;
 };
 

@@ -7,6 +7,7 @@ import { buildTest, timeMs } from '../domain/test-builder.js';
 import { endModeOf, startModeOf } from '../domain/attempt-rules.js';
 import { publicTest } from '../domain/presenters.js';
 import { activeQuestions } from '../domain/question-bank.js';
+import { qrSvg } from '../domain/qr-art.js';
 import { adminEmail, invalidateTestCache, publicCode, requireOwnedTest, requireTest, testDocByCode, updateTest } from '../data/test-repository.js';
 
 /** Where each active question sits in the stored bank array. */
@@ -57,6 +58,7 @@ export async function createTest(req, raw) {
     shuffleQuestions: input.shuffleQuestions,
     allowGuests: input.allowGuests,
     requirePrivateWindow: input.requirePrivateWindow,
+    devices: input.devices,
     questionLayout: input.questionLayout,
     strictTiming: input.strictTiming,
     strictNext: input.strictNext,
@@ -162,6 +164,7 @@ export async function updateTestSettings(req, code, raw = {}) {
     allowGuests: raw.allowGuests ?? test.allowGuests,
     // Tests made before this setting existed keep behaving as they did.
     requirePrivateWindow: raw.requirePrivateWindow ?? test.requirePrivateWindow ?? false,
+    devices: raw.devices ?? test.devices,
     questionLayout: raw.questionLayout ?? test.questionLayout,
     strictTiming: raw.strictTiming ?? test.strictTiming === true,
     strictNext: raw.strictNext ?? test.strictNext !== false,
@@ -216,6 +219,7 @@ export async function updateTestSettings(req, code, raw = {}) {
       shuffleQuestions: input.shuffleQuestions,
       allowGuests: input.allowGuests,
       requirePrivateWindow: input.requirePrivateWindow,
+      devices: input.devices,
       questionLayout: input.questionLayout,
       strictTiming: input.strictTiming,
       strictNext: input.strictNext,
@@ -240,5 +244,5 @@ export async function updateTestSettings(req, code, raw = {}) {
 
 export async function testQrSvg(code, joinUrl) {
   await requireTest(code, { withStudents: false });
-  return QRCode.toString(joinUrl, { type: 'svg', margin: 1, width: 320, color: { dark: '#101828', light: '#ffffff' } });
+  return qrSvg(QRCode.create(joinUrl, { errorCorrectionLevel: 'M' }).modules, 320);
 }

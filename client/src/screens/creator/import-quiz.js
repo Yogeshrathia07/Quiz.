@@ -77,6 +77,7 @@ export function normalizeImport(raw, defaults) {
       questionLayout: ['one', 'all'].includes(source.questionLayout ?? source.question_layout) ? (source.questionLayout ?? source.question_layout) : 'one',
       allowGuests: source.allowGuests ?? source.allow_guests ?? false,
       requirePrivateWindow: source.requirePrivateWindow ?? source.require_private_window ?? false,
+      devices: ['any', 'phone', 'laptop'].includes(source.devices) ? source.devices : 'any',
       locationRequired: source.locationRequired ?? source.location_required ?? false,
       locationRadiusMeters: numberInRange(source.locationRadiusMeters ?? source.location_radius_meters, 10, 100000, 250),
       locationLatitude: source.locationLatitude ?? source.location_latitude ?? '',

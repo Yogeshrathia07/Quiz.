@@ -6,7 +6,7 @@ import { useEffect } from 'react';
  */
 export const BRAND = {
   name: 'Quiz',
-  // The wordmark in the navigation bar; a yellow full stop follows it.
+  // The wordmark in the navigation bar, after the logo (client/public/logo.svg); a blue full stop follows it.
   wordmark: 'QUIZ',
   // Shown small beside the name, e.g. a department. Leave empty to show none.
   org: '',

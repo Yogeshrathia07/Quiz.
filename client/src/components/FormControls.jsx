@@ -98,6 +98,13 @@ export function Stepper({ id, label, value, min = 0, max = 100, step = 1, onChan
 
 export const LAYOUT_OPTIONS = QUESTION_LAYOUTS.map(([value, title, description]) => ({ value, title, description }));
 
+/** Which devices may sit a test (src/domain/device.js decides what a device is). */
+export const DEVICE_OPTIONS = [
+  { value: 'any', title: 'Phone or laptop', description: 'Any device. Each student’s device is still shown to you.' },
+  { value: 'phone', title: 'Phones only', description: 'Phones and tablets. A laptop or desktop cannot begin - unless you allow that student’s device.' },
+  { value: 'laptop', title: 'Laptops only', description: 'Laptops and desktop computers. A phone or tablet cannot begin - unless you allow that student’s device.' }
+];
+
 export const MARKS_OPTIONS = [
   { value: 'instant', title: 'On submit', description: 'Each student sees their marks as soon as they submit.' },
   { value: 'after_quiz', title: 'When the test closes', description: 'Everyone sees marks together once the test is closed.' },

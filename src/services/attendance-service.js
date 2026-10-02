@@ -1,20 +1,24 @@
-import QRCode from 'qrcode';
 import { accounts, attendanceSessions, studentProfiles } from '../db/index.js';
 import { PublicTestError } from '../lib/errors.js';
 import { asInteger, randomId } from '../lib/crypto.js';
 import { now } from '../lib/time.js';
 import { cleanText, coordinate, isSapId, normalizeSapId } from '../domain/test-builder.js';
 import {
-  PASS_MS, adminSessionView, currentQrKey, currentRound, isFreshQrKey, isOpen, isValidPass, issuePass,
-  sessionSummary, studentSessionView
+  PASS_MS, adminSessionView, classRoster, currentRound, isFreshQrKey, isOpen, issuePass, phoneFingerprint, readPass,
+  registerKey, sessionSummary, studentSessionView
 } from '../domain/attendance.js';
 import { isGuestAccount, normalizeEmail } from '../auth/portal-auth.js';
 import { adminEmail } from '../data/test-repository.js';
+import { config } from '../config.js';
 import { classifyLocationCheck } from './attempt-service.js';
 import { issueGuestSession, sapIdForStudent } from './registration-service.js';
 
 const publicCode = () => `ATT-${randomId(5).toUpperCase().replace(/[-_]/g, 'X')}`;
 const passCookie = (code) => `attend_pass_${code}`;
+/** A second id for the phone, kept by the server's own cookie rather than the page's storage. */
+const DEVICE_COOKIE = 'attend_device';
+const DEVICE_COOKIE_MS = 365 * 24 * 60 * 60_000;
+const adminView = (session) => adminSessionView(session, Date.now(), { linkBase: config.publicBaseUrl });
 const sessionByCode = (code) => attendanceSessions().findOne({ code: String(code || '').toUpperCase() });
 
 async function requireSession(code) {
@@ -50,7 +54,14 @@ function readVenue(raw) {
 
 export async function listAttendance(req) {
   const sessions = await attendanceSessions().find({ ownerEmail: adminEmail(req) }).sort({ createdAt: -1 }).toArray();
-  return { sessions: sessions.map(sessionSummary) };
+  // A new session starts with the distance check on, at the last classroom used.
+  const venue = sessions.find((session) => session.locationRequired);
+  return {
+    sessions: sessions.map(sessionSummary),
+    lastVenue: venue ? {
+      locationRadiusMeters: venue.locationRadiusMeters, locationLatitude: venue.locationLatitude, locationLongitude: venue.locationLongitude
+    } : null
+  };
 }
 
 /** Creating a session opens its first round at once: the QR is live. */
@@ -62,6 +73,7 @@ export async function createAttendance(req, raw = {}) {
     ownerEmail: adminEmail(req),
     createdAt: openedAt,
     allowGuests: raw.allowGuests === true,
+    oneMarkPerPhone: raw.oneMarkPerPhone === true,
     ...readVenue(raw),
     secret: randomId(24),
     rounds: [{ number: 1, openedAt, closedAt: null }],
@@ -69,11 +81,11 @@ export async function createAttendance(req, raw = {}) {
   };
   while (await sessionByCode(doc.code)) doc.code = publicCode();
   await attendanceSessions().insertOne(doc);
-  return { session: adminSessionView(doc) };
+  return { session: adminView(doc) };
 }
 
 export async function attendanceForAdmin(req, code) {
-  return { session: adminSessionView(await requireOwnedSession(req, code)) };
+  return { session: adminView(await requireOwnedSession(req, code)) };
 }
 
 export async function attendanceSettings(req, code, raw = {}) {
@@ -81,17 +93,10 @@ export async function attendanceSettings(req, code, raw = {}) {
   const set = {};
   if (raw.title !== undefined) set.title = cleanText(raw.title, 'Title', 2, 120);
   if (raw.allowGuests !== undefined) set.allowGuests = raw.allowGuests === true;
+  if (raw.oneMarkPerPhone !== undefined) set.oneMarkPerPhone = raw.oneMarkPerPhone === true;
   if (raw.locationRequired !== undefined) Object.assign(set, readVenue(raw));
   if (Object.keys(set).length) await attendanceSessions().updateOne({ code: session.code }, { $set: set });
   return attendanceForAdmin(req, session.code);
-}
-
-/** The QR as it is right now; the admin's screen fetches it again when it changes. */
-export async function attendanceQrSvg(req, code, baseUrl) {
-  const session = await requireOwnedSession(req, code);
-  if (!isOpen(session)) throw new PublicTestError(409, 'Attendance is closed. Take attendance again to show a new QR.');
-  const url = `${baseUrl}/?attend=${encodeURIComponent(session.code)}&k=${currentQrKey(session.secret)}`;
-  return QRCode.toString(url, { type: 'svg', margin: 1, width: 420, color: { dark: '#101828', light: '#ffffff' } });
 }
 
 /** Every pending mark of the open round becomes present, stamped with this moment. */
@@ -122,28 +127,37 @@ export async function reopenAttendance(req, code) {
 }
 
 /**
- * Removing a mark (a proxy, a wrong person) and putting it back. A mark put
- * back is present if its round has closed, and pending while it is open -
- * except one the teacher added by hand, which was present from the start.
+ * Removing marks (a proxy, a wrong person) and putting them back - one, or
+ * several at once. A mark put back is present if its round has closed, and
+ * pending while it is open - except one the teacher added by hand, which was
+ * present from the start.
  */
-export async function setMarkStatus(req, code, markId, action) {
+export async function setMarkStatuses(req, code, rawIds, action) {
   const session = await requireOwnedSession(req, code);
-  const mark = (session.marks || []).find((entry) => entry.id === markId);
-  if (!mark) throw new PublicTestError(404, 'That mark no longer exists.');
-  let set;
-  if (action === 'reject') {
-    set = { 'marks.$.status': 'rejected', 'marks.$.rejectedAt': now() };
-  } else if (action === 'restore') {
-    const roundClosed = Boolean((session.rounds || []).find((round) => round.number === mark.round)?.closedAt);
-    set = roundClosed || mark.addedByTeacher
-      ? { 'marks.$.status': 'present', 'marks.$.confirmedAt': mark.confirmedAt || now(), 'marks.$.rejectedAt': null }
-      : { 'marks.$.status': 'pending', 'marks.$.rejectedAt': null };
-  } else {
-    throw new PublicTestError(404, 'Unknown action.');
-  }
-  await attendanceSessions().updateOne({ code: session.code, 'marks.id': markId }, { $set: set });
-  return attendanceForAdmin(req, session.code);
+  if (!['reject', 'restore'].includes(action)) throw new PublicTestError(404, 'Unknown action.');
+  const ids = new Set((Array.isArray(rawIds) ? rawIds : []).filter((id) => typeof id === 'string').slice(0, 2_000));
+  const marks = (session.marks || []).filter((mark) => ids.has(mark.id));
+  if (!marks.length) throw new PublicTestError(404, ids.size > 1 ? 'Those marks no longer exist.' : 'That mark no longer exists.');
+  const at = now();
+  const operations = marks.flatMap((mark) => {
+    let set;
+    if (action === 'reject') {
+      if (mark.status === 'rejected') return [];
+      set = { 'marks.$.status': 'rejected', 'marks.$.rejectedAt': at };
+    } else {
+      if (mark.status !== 'rejected') return [];
+      const roundClosed = Boolean((session.rounds || []).find((round) => round.number === mark.round)?.closedAt);
+      set = roundClosed || mark.addedByTeacher
+        ? { 'marks.$.status': 'present', 'marks.$.confirmedAt': mark.confirmedAt || at, 'marks.$.rejectedAt': null }
+        : { 'marks.$.status': 'pending', 'marks.$.rejectedAt': null };
+    }
+    return [{ updateOne: { filter: { code: session.code, 'marks.id': mark.id }, update: { $set: set } } }];
+  });
+  if (operations.length) await attendanceSessions().bulkWrite(operations, { ordered: false });
+  return { ...(await attendanceForAdmin(req, session.code)), changed: operations.length };
 }
+
+export const setMarkStatus = (req, code, markId, action) => setMarkStatuses(req, code, [markId], action);
 
 const escapeRegex = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -218,6 +232,11 @@ const sameSapId = (mark, sapId, isGuest) => Boolean(sapId) && mark.sapId === sap
 const noSapIdClash = (sapId, isGuest) => (sapId
   ? { marks: { $not: { $elemMatch: { sapId, isGuest: isGuest ? true : { $ne: true } } } } }
   : {});
+/** For a session allowing one mark per phone: no mark still standing from this phone arrived meanwhile. */
+function noPhoneClash(deviceId, deviceCookie) {
+  const ids = [deviceId && { deviceId }, deviceCookie && { deviceCookie }].filter(Boolean);
+  return ids.length ? { marks: { $not: { $elemMatch: { status: { $ne: 'rejected' }, $or: ids } } } } : {};
+}
 
 /** Anyone else, by name and SAP ID - just as they would mark themselves as a guest. */
 async function guestStudent(raw) {
@@ -234,6 +253,35 @@ async function guestStudent(raw) {
  */
 export async function addManualMark(req, code, raw = {}) {
   const session = await requireOwnedSession(req, code);
+  const { name, isGuest } = await pushManualMark(session, raw);
+  return { ...(await attendanceForAdmin(req, session.code)), added: { name, isGuest } };
+}
+
+/**
+ * Several at once - the absent list's "Mark present". Each is added as
+ * addManualMark would; anyone who cannot be (marked meanwhile, no longer
+ * registered) is skipped and named.
+ */
+export async function addManualMarks(req, code, rawPeople) {
+  const session = await requireOwnedSession(req, code);
+  const people = (Array.isArray(rawPeople) ? rawPeople : []).slice(0, 500);
+  if (!people.length) throw new PublicTestError(400, 'Choose who to mark present.');
+  let added = 0;
+  const skipped = [];
+  for (const person of people) {
+    try {
+      // Each against the session as it now is: the one before has just landed.
+      await pushManualMark(await requireSession(session.code), person);
+      added += 1;
+    } catch (error) {
+      if (!(error instanceof PublicTestError)) throw error;
+      skipped.push({ name: String(person?.name || person?.lookup || '').slice(0, 120), reason: error.message });
+    }
+  }
+  return { ...(await attendanceForAdmin(req, session.code)), added, skipped };
+}
+
+async function pushManualMark(session, raw = {}) {
   const { email, name, sapId, isGuest } = raw.as === 'guest' ? await guestStudent(raw) : await collegeStudent(raw.lookup);
   const clash = (session.marks || []).find((mark) => sameSapId(mark, sapId, isGuest) || (email && mark.email === email));
   if (clash) {
@@ -263,7 +311,7 @@ export async function addManualMark(req, code, raw = {}) {
     { $push: { marks: mark } }
   );
   if (!modifiedCount) throw new PublicTestError(409, `${name} has just marked themselves.`);
-  return { ...(await attendanceForAdmin(req, session.code)), added: { name, isGuest } };
+  return { name, isGuest };
 }
 
 export async function deleteAttendance(req, code) {
@@ -272,28 +320,91 @@ export async function deleteAttendance(req, code) {
   return { deleted: session.code };
 }
 
-export async function attendanceExportData(req, code) {
+/**
+ * Several of this teacher's sessions for one register (export/attendance-sheet.js):
+ * the ones named in `codes` (comma-separated), or all of them. Only their own.
+ * `min` is the attendance, a percentage, under which a student is short.
+ */
+export async function attendanceRegisterData(req, raw = {}) {
+  const codes = [...new Set(String(raw.codes || '').split(',').map((code) => code.trim().toUpperCase()).filter(Boolean))].slice(0, 1000);
+  const sessions = await attendanceSessions()
+    .find({ ownerEmail: adminEmail(req), ...(codes.length ? { code: { $in: codes } } : {}) })
+    .sort({ createdAt: 1 })
+    .toArray();
+  if (!sessions.length) throw new PublicTestError(404, 'There is no attendance to download.');
+  const min = asInteger(Number(raw.min ?? 75), 1, 100) ?? 75;
+  return { exportedAt: now().toISOString(), minShare: min / 100, sessions: sessions.map((session) => adminSessionView(session)) };
+}
+
+/**
+ * The class this session belongs to - this teacher's other sessions with the
+ * same title - as a roster: everyone seen in them. Whoever is on it but on
+ * none of this session's marks is absent from it.
+ */
+export async function attendanceRoster(req, code) {
+  return classRosterFor(await requireOwnedSession(req, code));
+}
+
+async function classRosterFor(session) {
+  const others = await attendanceSessions()
+    .find({ ownerEmail: session.ownerEmail, title: session.title, code: { $ne: session.code } })
+    .project({ createdAt: 1, 'marks.name': 1, 'marks.email': 1, 'marks.sapId': 1, 'marks.isGuest': 1, 'marks.status': 1 })
+    .toArray();
+  return classRoster(others);
+}
+
+/**
+ * One session for its workbook: every mark and everyone absent - or, given
+ * `pick`, just the rows the teacher had on screen, in that order (`ids` of
+ * marks, `absent` roster keys), and a line saying how they were chosen.
+ */
+export async function attendanceExportData(req, code, pick = null) {
   const session = await requireOwnedSession(req, code);
-  return adminSessionView(session);
+  const view = adminSessionView(session);
+  const roster = await classRosterFor(session);
+  const here = new Set((session.marks || []).map(registerKey));
+  const absent = roster.people.filter((person) => !here.has(person.key));
+  if (!pick) return { ...view, classSessions: roster.sessionCount, absent };
+  const list = (value) => (Array.isArray(value) ? value.filter((entry) => typeof entry === 'string').slice(0, 5_000) : []);
+  const marksById = new Map(view.marks.map((mark) => [mark.id, mark]));
+  const absentByKey = new Map(absent.map((person) => [person.key, person]));
+  const marks = list(pick.ids).map((id) => marksById.get(id)).filter(Boolean);
+  const absentPicked = list(pick.absent).map((key) => absentByKey.get(key)).filter(Boolean);
+  if (!marks.length && !absentPicked.length) throw new PublicTestError(400, 'Nothing to download: no rows are shown.');
+  return {
+    ...view, marks, absent: absentPicked, classSessions: roster.sessionCount,
+    note: typeof pick.note === 'string' ? pick.note.trim().slice(0, 300) : ''
+  };
 }
 
 /* -------------------------------------------------------------- student */
 
-const hasPass = (req, session) => isValidPass(session.secret, req.signedCookies?.[passCookie(session.code)]);
+const passOf = (req, session) => readPass(session.secret, req.signedCookies?.[passCookie(session.code)]);
 const myMark = (session, email) => (email ? (session.marks || []).find((mark) => mark.email === email) : null) || null;
+/** A pass is spent once a mark has been made with it. */
+const usablePass = (req, session) => {
+  const id = passOf(req, session);
+  return id && !(session.marks || []).some((mark) => mark.passId === id) ? id : null;
+};
 
 /**
- * Opening the scanned link. A fresh QR code hands this phone a pass for the
- * next few minutes - time to sign in - and the student marks with that.
+ * Opening the scanned link. A fresh QR code hands this phone a new pass for
+ * the next few minutes - time to sign in - and the student marks with that.
+ * The phone is also given a lasting id of its own, if it has none.
  */
 export async function attendanceForStudent(req, res, code, key) {
   const session = await requireSession(code);
-  let passed = hasPass(req, session);
-  if (!passed && isOpen(session) && isFreshQrKey(session.secret, key)) {
+  let passed = Boolean(usablePass(req, session));
+  if (isOpen(session) && isFreshQrKey(session.secret, key)) {
     res.cookie(passCookie(session.code), issuePass(session.secret), {
       httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', signed: true, maxAge: PASS_MS
     });
     passed = true;
+  }
+  if (!req.signedCookies?.[DEVICE_COOKIE]) {
+    res.cookie(DEVICE_COOKIE, randomId(12), {
+      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', signed: true, maxAge: DEVICE_COOKIE_MS
+    });
   }
   const email = normalizeEmail(req.portalUser?.email);
   return { session: studentSessionView(session, myMark(session, email), { hasPass: passed }) };
@@ -315,8 +426,10 @@ export async function markAttendance(req, code, raw = {}) {
   }
   if (existing) return view(session);
   if (!isOpen(session)) throw new PublicTestError(409, 'Attendance is closed. Ask your teacher to take attendance again.', 'ATTENDANCE_CLOSED');
-  if (!hasPass(req, session)) {
-    throw new PublicTestError(403, 'This link has expired. Scan the QR code on the screen again.', 'SCAN_AGAIN');
+  const passId = passOf(req, session);
+  if (!passId) throw new PublicTestError(403, 'This link has expired. Scan the QR code on the screen again.', 'SCAN_AGAIN');
+  if ((session.marks || []).some((mark) => mark.passId === passId)) {
+    throw new PublicTestError(403, 'This scan has already marked someone. Scan the QR code on the screen again.', 'SCAN_AGAIN');
   }
   if (isGuest && !session.allowGuests) {
     throw new PublicTestError(403, 'This class accepts only college accounts. Sign in with your college email.');
@@ -349,6 +462,13 @@ export async function markAttendance(req, code, raw = {}) {
     };
   }
 
+  const deviceId = typeof raw.deviceId === 'string' && raw.deviceId ? raw.deviceId.slice(0, 64) : null;
+  const deviceCookie = typeof req.signedCookies?.[DEVICE_COOKIE] === 'string' ? req.signedCookies[DEVICE_COOKIE] : null;
+  const samePhone = (mark) => mark.status !== 'rejected'
+    && ((deviceId && mark.deviceId === deviceId) || (deviceCookie && mark.deviceCookie === deviceCookie));
+  const phoneUsed = () => new PublicTestError(409, 'This phone has already marked attendance for another student. Ask your teacher to add you.', 'PHONE_USED');
+  if (session.oneMarkPerPhone && (session.marks || []).some(samePhone)) throw phoneUsed();
+
   const round = currentRound(session);
   const mark = {
     id: randomId(12),
@@ -362,22 +482,30 @@ export async function markAttendance(req, code, raw = {}) {
     confirmedAt: null,
     rejectedAt: null,
     location,
-    deviceId: typeof raw.deviceId === 'string' ? raw.deviceId.slice(0, 64) : null
+    deviceId,
+    deviceCookie,
+    fingerprint: phoneFingerprint(raw.phone),
+    passId
   };
-  // Lands only while this round is still open and nobody has marked this
-  // account or SAP ID in the meantime.
+  // Lands only while this round is still open, and nobody has marked this
+  // account or SAP ID - or used this pass - in the meantime.
   const { modifiedCount } = await attendanceSessions().updateOne(
     {
       code: session.code,
       rounds: { $elemMatch: { number: round.number, closedAt: null } },
       'marks.email': { $ne: email },
-      ...noSapIdClash(sapId, isGuest)
+      'marks.passId': { $ne: passId },
+      $and: [noSapIdClash(sapId, isGuest), session.oneMarkPerPhone ? noPhoneClash(deviceId, deviceCookie) : {}]
     },
     { $push: { marks: mark } }
   );
   const latest = await requireSession(session.code);
   if (!modifiedCount && !myMark(latest, email)) {
     if (!isOpen(latest)) throw new PublicTestError(409, 'Attendance closed just before your mark arrived. Ask your teacher to take attendance again.', 'ATTENDANCE_CLOSED');
+    if ((latest.marks || []).some((entry) => entry.passId === passId)) {
+      throw new PublicTestError(403, 'This scan has already marked someone. Scan the QR code on the screen again.', 'SCAN_AGAIN');
+    }
+    if (latest.oneMarkPerPhone && (latest.marks || []).some(samePhone)) throw phoneUsed();
     throw new PublicTestError(409, 'Attendance has already been marked for this SAP ID.');
   }
   return view(latest);

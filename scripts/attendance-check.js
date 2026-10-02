@@ -10,10 +10,11 @@ import { repairAttendanceNames } from '../src/db/repair-attendance-names.js';
 import { PublicTestError } from '../src/lib/errors.js';
 import { currentQrKey } from '../src/domain/attendance.js';
 import {
-  addManualMark, attendanceExportData, attendanceForAdmin, attendanceForStudent, attendanceQrSvg, attendanceSettings, beginAttendanceGuest,
-  closeAttendance, createAttendance, markAttendance, reopenAttendance, searchPeople, setMarkStatus
+  addManualMark, addManualMarks, attendanceExportData, attendanceForAdmin, attendanceRegisterData, attendanceRoster, attendanceForStudent,
+  attendanceSettings, beginAttendanceGuest, closeAttendance, createAttendance, listAttendance, markAttendance, reopenAttendance, searchPeople,
+  setMarkStatus, setMarkStatuses
 } from '../src/services/attendance-service.js';
-import { buildAttendanceSpreadsheet } from '../src/export/attendance-sheet.js';
+import { buildAttendanceRegisterSpreadsheet, buildAttendanceSpreadsheet } from '../src/export/attendance-sheet.js';
 
 const identifier = `${Date.now()}-${Math.floor(Math.random() * 10_000)}`;
 const sapBase = Date.now();
@@ -51,7 +52,8 @@ try {
   });
   createdCodes.push(session.code);
   assert.equal(session.isOpen, true, 'a new session is open at once');
-  assert.match(await attendanceQrSvg(adminReq, session.code, 'http://localhost'), /<svg/);
+  assert.equal(session.qr.keys.length, 30, 'the teacher\'s screen gets the next minute of QR codes');
+  assert.match(session.qr.link, new RegExp(`\\?attend=${session.code}&k=$`));
   const inClass = { latitude: 30.3165, longitude: 78.0322, accuracyMeters: 15 };
 
   // No pass without a fresh QR: a shared link, or an old photo of the QR.
@@ -66,6 +68,11 @@ try {
   assert.equal(marked.session.myMark.status, 'pending');
   marked = await markAttendance(asha.request, session.code, { ...inClass, deviceId: 'phone-1' });
   assert.equal(marked.session.myMark.status, 'pending', 'marking twice changes nothing');
+
+  // Ben signs in on Asha's phone and tries her scan: each scan marks one person.
+  await expectPublicError(() => markAttendance({ ...student('ben'), signedCookies: asha.request.signedCookies }, session.code, { ...inClass, sapId: sap(2), deviceId: 'phone-1' }), 403, 'SCAN_AGAIN');
+  const spent = await attendanceForStudent({ ...student('ben'), signedCookies: asha.request.signedCookies }, cookieResponse(), session.code);
+  assert.equal(spent.session.hasPass, false, 'a used pass reads as "scan again"');
 
   // Location: refused outside, required when the check is on.
   const ben = await scan(student('ben'), session);
@@ -100,7 +107,7 @@ try {
   assert.equal(view.presentCount, 3);
   assert.ok(view.marks.every((mark) => mark.confirmedAt));
   await expectPublicError(() => closeAttendance(adminReq, session.code), 409);
-  await expectPublicError(() => attendanceQrSvg(adminReq, session.code, 'http://localhost'), 409);
+  assert.equal(view.qr, null, 'no QR codes once closed');
   // Too late while closed.
   await expectPublicError(() => markAttendance(chen.request, session.code, { ...inClass, sapId: sap(3) }), 409, 'ATTENDANCE_CLOSED');
 
@@ -208,6 +215,77 @@ try {
   kindMarks = (await attendanceForAdmin(adminReq, kinds.code)).session.marks;
   assert.equal(kindMarks.filter((mark) => mark.sapId === sap(3)).length, 2, 'one guest and Chen share a SAP ID; no more');
 
+  // One mark per phone: a second student on a phone already used is sent to
+  // the teacher - known by the server's cookie even with the page's id gone -
+  // until the first mark is removed. Lookalike phones are "possibly" the same.
+  const { session: strict } = await createAttendance(adminReq, { title: `Strict ${identifier}`, oneMarkPerPhone: true });
+  createdCodes.push(strict.code);
+  assert.equal(strict.oneMarkPerPhone, true);
+  const onPhone = async (name, cookie) => {
+    const scanned = await scan(student(name), strict);
+    return { ...scanned.request, signedCookies: { ...scanned.request.signedCookies, attend_device: cookie } };
+  };
+  const pixel = { model: 'Pixel 8', platformVersion: '15', chPlatform: 'Android', screenW: 412, screenH: 915, dpr: 2.625, cores: 8, memory: 8 };
+  await markAttendance(await onPhone('asha', 'cookie-a'), strict.code, { sapId: sap(1), deviceId: 'page-a', phone: pixel });
+  await expectPublicError(async () => markAttendance(await onPhone('ben', 'cookie-a'), strict.code, { sapId: sap(2), deviceId: 'page-new' }), 409, 'PHONE_USED');
+  // A private tab on the same phone: a new cookie and page id, the same phone traits - allowed, and pointed out.
+  await markAttendance(await onPhone('dev', 'cookie-d'), strict.code, { sapId: sap(4), deviceId: 'page-d', phone: pixel });
+  let strictView = (await attendanceForAdmin(adminReq, strict.code)).session;
+  assert.deepEqual(strictView.marks.find((mark) => mark.name === 'Student dev').similarDeviceAs, ['Student asha']);
+  assert.equal(strictView.flaggedCount, 2);
+  const ashaStrict = strictView.marks.find((mark) => mark.name === 'Student asha');
+  await setMarkStatus(adminReq, strict.code, ashaStrict.id, 'reject');
+  await markAttendance(await onPhone('ben', 'cookie-a'), strict.code, { sapId: sap(2), deviceId: 'page-new' });
+
+  // Several at once: removed together, put back together.
+  strictView = (await attendanceForAdmin(adminReq, strict.code)).session;
+  const others = strictView.marks.filter((mark) => mark.status !== 'rejected').map((mark) => mark.id);
+  let changed = await setMarkStatuses(adminReq, strict.code, others, 'reject');
+  assert.equal(changed.changed, 2);
+  assert.equal(changed.session.rejectedCount, 3);
+  changed = await setMarkStatuses(adminReq, strict.code, [...others, ashaStrict.id], 'restore');
+  assert.equal(changed.changed, 3);
+  assert.equal(changed.session.rejectedCount, 0);
+  await expectPublicError(() => setMarkStatuses(adminReq, strict.code, ['nobody'], 'reject'), 404);
+
+  // The class roster: whoever came to its other sessions and not this one is
+  // absent - and can be marked present together.
+  const classTitle = `Class ${identifier}`;
+  const { session: monday } = await createAttendance(adminReq, { title: classTitle, allowGuests: true });
+  createdCodes.push(monday.code);
+  await addManualMarks(adminReq, monday.code, [
+    { as: 'college', lookup: sap(3) }, { as: 'guest', sapId: sap(8), name: 'Guest Regular' }
+  ]);
+  const { session: tuesday } = await createAttendance(adminReq, { title: classTitle });
+  createdCodes.push(tuesday.code);
+  await addManualMark(adminReq, tuesday.code, { as: 'college', lookup: sap(3) });
+  const roster = await attendanceRoster(adminReq, tuesday.code);
+  assert.equal(roster.sessionCount, 1);
+  assert.deepEqual(roster.people.map((person) => person.name).sort(), ['Guest Regular', 'Student chen']);
+  const full = await attendanceExportData(adminReq, tuesday.code);
+  assert.deepEqual(full.absent.map((person) => person.name), ['Guest Regular'], 'Chen is here; the guest is absent');
+  const both = await addManualMarks(adminReq, tuesday.code, [{ as: 'guest', sapId: sap(8), name: 'Guest Regular' }, { as: 'college', lookup: sap(3) }]);
+  assert.equal(both.added, 1);
+  assert.equal(both.skipped.length, 1, 'someone already marked is skipped, and said so');
+  assert.equal((await attendanceExportData(adminReq, tuesday.code)).absent.length, 0);
+
+  // A filtered download: only the rows on screen, in that order, with the line saying how.
+  const tuesdayMarks = (await attendanceForAdmin(adminReq, tuesday.code)).session.marks;
+  const shownOnly = await attendanceExportData(adminReq, tuesday.code, { ids: [tuesdayMarks[1].id], note: 'Shown on screen: Marked · Guest' });
+  assert.deepEqual(shownOnly.marks.map((mark) => mark.name), ['Guest Regular']);
+  assert.equal(shownOnly.note, 'Shown on screen: Marked · Guest');
+  await expectPublicError(() => attendanceExportData(adminReq, tuesday.code, { ids: ['nobody'] }), 400);
+  const filteredBook = new ExcelJS.Workbook();
+  await filteredBook.xlsx.load(await buildAttendanceSpreadsheet(shownOnly));
+  assert.equal(filteredBook.getWorksheet('Attendance').rowCount, 4 + 1, 'title, summary, the filter line, header, one row');
+
+  // The list: flags counted, and the last classroom offered for the next session.
+  await attendanceSettings(adminReq, kinds.code, { locationRequired: true, locationRadiusMeters: 60, locationLatitude: 30.1, locationLongitude: 78.1 });
+  const listed = await listAttendance(adminReq);
+  // Asha back: she and Ben share a phone, and Dev's looks like hers.
+  assert.equal(listed.sessions.find((entry) => entry.code === strict.code).flaggedCount, 3);
+  assert.deepEqual(listed.lastVenue, { locationRadiusMeters: 60, locationLatitude: 30.1, locationLongitude: 78.1 }, 'the latest session with a distance check');
+
   // Another admin cannot see it.
   await expectPublicError(() => attendanceForAdmin({ portalUser: { email: `other-${identifier}@ddn.upes.ac.in`, role: 'admin' } }, session.code), 404);
 
@@ -222,7 +300,22 @@ try {
   assert.equal(sheet.getRow(sheet.rowCount).getCell(5).value, 'Guest');
   assert.equal(workbook.getWorksheet('Rounds').rowCount, 3);
 
-  console.log('Attendance check passed: fresh-QR pass, location check, one mark per account and SAP ID, shared-phone flag, guests only when allowed, close marks present, take again for latecomers, remove/restore, adding students by hand as college students or guests, searching registered users, repairing names saved as "Student", editing details, owner-only access, and the Excel export.');
+  // Many sessions as one register: only this teacher's, only those chosen, oldest first.
+  const everything = await attendanceRegisterData(adminReq, {});
+  assert.ok(everything.sessions.length >= 3 && everything.sessions.every((entry) => createdCodes.includes(entry.code)), 'all of theirs, nobody else\'s');
+  const chosen = await attendanceRegisterData(adminReq, { codes: `${kinds.code.toLowerCase()}, ${session.code}`, min: 60 });
+  assert.deepEqual(chosen.sessions.map((entry) => entry.code), [session.code, kinds.code]);
+  assert.equal(chosen.minShare, 0.6, 'the minimum the teacher chose');
+  assert.equal(everything.minShare, 0.75, '75% unless chosen');
+  await expectPublicError(() => attendanceRegisterData({ portalUser: { email: `other-${identifier}@ddn.upes.ac.in`, role: 'admin' } }, { codes: session.code }), 404);
+  const register = new ExcelJS.Workbook();
+  await register.xlsx.load(await buildAttendanceRegisterSpreadsheet(chosen));
+  const registerSheet = register.getWorksheet('Register');
+  assert.ok(String(registerSheet.getRow(4).getCell(6).value).startsWith(`${chosen.sessions[0].title}\n`));
+  const ashaRow = registerSheet.getRows(5, registerSheet.rowCount - 4).find((row) => row.getCell(2).value === 'Student asha');
+  assert.ok(ashaRow, 'a student who marked is on the register');
+
+  console.log('Attendance check passed: fresh-QR pass, one mark per scan, location check, one mark per account and SAP ID, shared-phone flag, one mark per phone, lookalike phones, bulk remove/restore, the class roster and marking absentees present, filtered downloads, guests only when allowed, close marks present, take again for latecomers, remove/restore, adding students by hand as college students or guests, searching registered users, repairing names saved as "Student", editing details, owner-only access, the Excel export, and many sessions as one register.');
 } finally {
   if (createdCodes.length) await attendanceSessions().deleteMany({ code: { $in: createdCodes } });
   await studentProfiles().deleteMany({ email: { $in: profileEmails } });

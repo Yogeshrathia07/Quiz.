@@ -6,8 +6,8 @@ const DashboardScreen = namedLazy(() => import('./DashboardScreen.jsx'), 'Dashbo
 const TestListScreen = namedLazy(() => import('./TestListScreen.jsx'), 'TestListScreen');
 const FacultyHome = namedLazy(() => import('./FacultyHome.jsx'), 'FacultyHome');
 const UsersScreen = namedLazy(() => import('./UsersScreen.jsx'), 'UsersScreen');
-const AttendanceListScreen = namedLazy(() => import('../attendance/AttendanceAdminScreens.jsx'), 'AttendanceListScreen');
-const AttendanceSessionScreen = namedLazy(() => import('../attendance/AttendanceAdminScreens.jsx'), 'AttendanceSessionScreen');
+const AttendanceListScreen = namedLazy(() => import('../attendance/AttendanceListScreen.jsx'), 'AttendanceListScreen');
+const AttendanceSessionScreen = namedLazy(() => import('../attendance/AttendanceSessionScreen.jsx'), 'AttendanceSessionScreen');
 
 /**
  * `code` is the admin route: 'portal' for the home page, 'tests' for the quiz

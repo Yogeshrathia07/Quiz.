@@ -11,7 +11,7 @@
   --text:#F7FAFC;--text-2:#AAB6BC;--text-3:#75848B;
   --ok:#27B66F;--bad:#EF5B5F;--warn:#F39A4A;
   /* The full stop after the name in the navigation bar, and the tail of the Q in the tab icon */
-  --brand-dot:#FFC53D;
+  --brand-dot:#1598D1;
   /* The older names every stylesheet already uses */
   --ink:var(--text);--muted:var(--text-2);--faint:var(--text-3);--line:var(--border);--surface:var(--bg-card);--wash:var(--bg-raised);
   --brand:var(--primary);--brand-dark:var(--primary-hover);--danger:var(--bad);--warning:var(--warn);--success:var(--ok);
@@ -45,6 +45,7 @@ strong,b{font-weight:650}
 .nav-links a{color:var(--text-3);font-weight:600;font-size:.9rem}
 .nav-links a:hover{color:var(--text)}
 .nav-links a.is-active{color:var(--text)}
+.nav-links a.is-active svg,.nav-panel nav a.is-active svg{color:var(--primary)}
 .nav-links a.is-active::after{left:50%;right:auto;width:22px;height:2px;border-radius:2px;background:var(--primary);transform:translateX(-50%)}
 .nav-account-button{background:var(--bg-raised);border-color:var(--border);color:var(--text)}
 .nav-account-button:hover,.nav-account-button[aria-expanded="true"]{background:var(--bg-input);border-color:#5A6066}
@@ -330,8 +331,7 @@ kbd{background:var(--bg-raised);border-color:var(--border);color:var(--text-2)}
 .exam-body{border-radius:var(--r-lg)}
 .q-prompt{color:var(--text);font-weight:600}
 .q-count{color:var(--text)}
-.q-hint,.q-state{color:var(--text-3)}
-.q-state.is-saved{color:var(--ok)}
+.q-hint{color:var(--text-3)}
 /* Round like the buttons: a one-line option is a pill (the radius is over half
    its height), a longer one keeps the same round ends. The letter sits in the
    middle of the left end. */
@@ -476,6 +476,8 @@ th.cell-num{text-align:right}
 .issue.is-warn{background:rgba(243,154,74,.14);color:var(--warn)}
 .issue.is-danger{background:rgba(239,91,95,.14);color:#FF7C7F}
 .issue.is-ok{background:rgba(39,182,111,.12);color:#3CCB82;padding:0 5px}
+.issue.is-neutral{background:rgba(255,255,255,.07);color:var(--text-2)}
+.issue.is-info{background:rgba(21,152,209,.14);color:#5CC3EE}
 .issue svg{flex:0 0 auto}
 
 /* Actions appear on hover, keyboard focus, or while the row is open (always, on touch screens) */
@@ -826,6 +828,8 @@ th.cell-num{text-align:right}
 [data-area] .pill.success,[data-area] .badge.is-success,[data-area] .issue.is-ok{background:#1BA566;color:#FFFFFF}
 [data-area] .pill.warn,[data-area] .badge.is-warn,[data-area] .issue.is-warn{background:#F39A4A;color:#1E2124}
 [data-area] .pill.danger,[data-area] .badge.is-danger,[data-area] .issue.is-danger{background:#C93443;color:#FFFFFF}
+[data-area] .issue.is-neutral{background:#474C52;color:#F7FAFC}
+[data-area] .issue.is-info{background:#1488BC;color:#FFFFFF}
 [data-area] .badge.is-info,[data-area] .badge.is-live{background:#1488BC;color:#FFFFFF}
 [data-area] .pill.muted,[data-area] .badge.is-neutral{background:#474C52;color:#F7FAFC}
 [data-area] .pill.paused{background:#1488BC;color:#FFFFFF}

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronDown, CircleCheck, ClipboardPaste, IdCard, Keyboard, Lock, MapPin, MapPinOff, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
+import { AlertTriangle, ChevronDown, CircleCheck, ClipboardPaste, IdCard, Keyboard, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
 import { durationLabel, shortDateTime } from '../../lib/format.js';
 import { StatusPill } from '../../components/StatusPill.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
@@ -138,8 +138,34 @@ function venueText(registration) {
   }[venueStatus(registration)];
 }
 
+const DEVICE_ICONS = { phone: Smartphone, tablet: Tablet, laptop: Laptop };
+const DEVICE_NAMES = { phone: 'Phone', tablet: 'Tablet', laptop: 'Laptop', unknown: 'Device not known' };
+const STAGE_WORDS = { join: 'on joining', begin: 'at Begin', paper: 'on the paper' };
+const deviceName = (entry) => `${DEVICE_NAMES[entry?.kind] || DEVICE_NAMES.unknown}${entry?.label ? ` · ${entry.label}` : ''}`;
+
+/**
+ * The device a student is on, as a small sign on their row: grey as a rule,
+ * blue once you allowed their device, amber when its signals disagree or they
+ * used more than one kind, red on a device the test does not allow.
+ */
+function deviceSign(test, registration) {
+  const device = registration.device;
+  if (!device) return null;
+  const kinds = [...new Set((registration.deviceLog || []).map((entry) => entry.kind))];
+  const wrong = !registration.deviceFits && !registration.deviceOverride;
+  const tone = wrong ? 'danger' : device.suspicious || kinds.length > 1 ? 'warn' : registration.deviceOverride ? 'info' : 'neutral';
+  const label = [
+    deviceName(device),
+    wrong ? `not allowed: this test is for ${test.devices === 'phone' ? 'phones' : 'laptops'} only` : '',
+    registration.deviceOverride ? 'device allowed by you' : '',
+    device.suspicious ? 'its signals disagree' : '',
+    kinds.length > 1 ? `used a ${kinds.map((kind) => (DEVICE_NAMES[kind] || kind).toLowerCase()).join(' and a ')}` : ''
+  ].filter(Boolean).join(' — ');
+  return <Issue key="device-kind" icon={DEVICE_ICONS[device.kind] || MonitorSmartphone} tone={tone} label={label}/>;
+}
+
 /** The admission decision: who is allowed to sit this test. */
-export function StudentRow({ test, registration, act, openSapId, isBusy, columns, open, onOpenChange }) {
+export function StudentRow({ test, registration, act, openSapId, openReopen, isBusy, columns, open, onOpenChange }) {
   const path = `registrations/${registration.id}`;
   const pending = registration.status === 'pending';
   const guest = isGuest(registration);
@@ -153,7 +179,14 @@ export function StudentRow({ test, registration, act, openSapId, isBusy, columns
   const integrity = integrityText(registration);
   const serious = registration.overLimit || registration.isLocked;
 
+  const device = registration.device;
+  const deviceWrong = device && !registration.deviceFits && !registration.deviceOverride;
+  const began = registration.deviceBegan;
+  const beganElsewhere = began && device && (began.kind !== device.kind || began.label !== device.label);
+  const deviceRule = test.devices || 'any';
+
   const issues = [
+    deviceSign(test, registration),
     guest && <Issue key="guest" icon={UserRound} label="Guest account: identity not verified">Guest</Issue>,
     registration.deviceSwitches > 0 && (
       <Issue key="device" icon={Repeat2} label={`Moved their test to another browser or device ${registration.deviceSwitches}×`}>{registration.deviceSwitches}</Issue>
@@ -213,7 +246,7 @@ export function StudentRow({ test, registration, act, openSapId, isBusy, columns
         {registration.deviceSwitches > 0 && <Detail label="Switched browser">{registration.deviceSwitches}×</Detail>}
         {registration.attemptStatus && <Detail label={submitted ? 'Finished' : 'Started'}>{shortDateTime(submitted ? registration.submittedAt : registration.startedAt)}</Detail>}
         {writing && registration.isPaused && <Detail label="Paused since">{shortDateTime(registration.pausedAt)} — their time is stopped</Detail>}
-        {registration.extraMs > 0 && <Detail label="Time given back">{durationLabel(Math.round(registration.extraMs / 1000))} for pauses{registration.ownDeadlineAt && writing ? ` · their paper ends at ${shortDateTime(registration.ownDeadlineAt)}` : ''}</Detail>}
+        {registration.extraMs > 0 && <Detail label="Extra time">{durationLabel(Math.round(registration.extraMs / 1000))} after the test&apos;s end, for pauses or a reopened paper{registration.ownDeadlineAt && writing ? ` · their paper ends at ${shortDateTime(registration.ownDeadlineAt)}` : ''}</Detail>}
         {record && <Detail label="Leaving the test">{integrity}</Detail>}
         {registration.overLimit && (
           <Detail label="Over the limit">
@@ -224,6 +257,21 @@ export function StudentRow({ test, registration, act, openSapId, isBusy, columns
           </Detail>
         )}
         {registration.windowCheck && <Detail label="Browser window">{WINDOW_TEXT[registration.windowCheck] || registration.windowCheck}</Detail>}
+        {device && (
+          <Detail label="Device">
+            {deviceName(device)}
+            {registration.deviceOverride ? ' · allowed by you' : deviceWrong ? ' · not allowed on this test' : ''}
+            {device.at ? ` · seen ${STAGE_WORDS[device.stage] || ''} ${shortDateTime(device.at)}` : ''}
+          </Detail>
+        )}
+        {beganElsewhere && <Detail label="Began on">{deviceName(began)}</Detail>}
+        {device?.facts && <Detail label="Device signals">{device.facts}</Detail>}
+        {device?.notes?.length > 0 && <Detail label="Device notes">{device.notes.join(' ')}</Detail>}
+        {registration.deviceLog?.length > 1 && (
+          <Detail label="Devices seen">
+            {registration.deviceLog.map((entry) => `${deviceName(entry)} ${STAGE_WORDS[entry.stage] || ''} ${shortDateTime(entry.at)}`).join(' → ')}
+          </Detail>
+        )}
         {test.locationRequired && (
           <Detail label="Venue">{venueText(registration)}{registration.locationVerifiedAt ? ` · checked ${shortDateTime(registration.locationVerifiedAt)}` : ''}</Detail>
         )}
@@ -259,6 +307,13 @@ export function StudentRow({ test, registration, act, openSapId, isBusy, columns
               tone: registration.locationOverride ? 'warn' : 'info',
               onSelect: () => act(`${path}/location-override`, null, { enabled: !registration.locationOverride })
             },
+            // Phones only or laptops only: this student may use whatever they have.
+            (deviceRule !== 'any' || registration.deviceOverride) && {
+              label: registration.deviceOverride ? 'Remove device exception' : 'Allow any device',
+              icon: MonitorSmartphone,
+              tone: registration.deviceOverride ? 'warn' : 'info',
+              onSelect: () => act(`${path}/device-override`, null, { enabled: !registration.deviceOverride })
+            },
             // Green keeps or approves, blue adjusts, amber stops for now, red ends or wipes.
             writing && !registration.isPaused && {
               label: 'Pause (stop their time)', icon: Pause, tone: 'warn',
@@ -268,6 +323,10 @@ export function StudentRow({ test, registration, act, openSapId, isBusy, columns
             writing && {
               label: 'Submit paper now', icon: Send, danger: true,
               onSelect: () => act(`${path}/submit`, `Hand in ${registration.name}'s paper now, with the answers saved so far? They cannot carry on after this.`)
+            },
+            // Handed in: back to where they left off (a timer on each question makes every question final, so not there).
+            registration.attemptStatus === 'submitted' && !test.strictTiming && openReopen && {
+              label: 'Reopen paper', icon: Undo2, tone: 'info', onSelect: () => openReopen(registration)
             },
             registration.attemptStatus && { label: 'Restart attempt', icon: RotateCcw, danger: true, onSelect: () => act(`${path}/restart`, 'Restart this student’s attempt with a blank paper?') },
             registration.status === 'approved' && { label: 'Reject registration', icon: UserX, danger: true, onSelect: () => act(`${path}/reject`) }

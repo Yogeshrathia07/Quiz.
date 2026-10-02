@@ -13,10 +13,11 @@ import {
 } from 'lucide-react';
 import { StudentRow } from './StudentRow.jsx';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
-import { RESULT_FILTERS, STUDENT_FILTERS, VENUE_FILTERS, awaitingMarking, studentFilters } from './student-filters.js';
+import { RESULT_FILTERS, awaitingMarking, studentFilters } from './student-filters.js';
 import { ResponseRow } from './ResponseRow.jsx';
 import { QrModal } from './modals/QrModal.jsx';
 import { SapIdModal } from './modals/SapIdModal.jsx';
+import { ReopenPaperModal } from './modals/ReopenPaperModal.jsx';
 import { StudentAnalysisModal } from './modals/StudentAnalysisModal.jsx';
 import { TestSetupModal } from './modals/TestSetupModal.jsx';
 import { RestartQuizModal } from './modals/RestartQuizModal.jsx';
@@ -93,7 +94,7 @@ function sortNote(sorts, sort) {
   const way = field?.directions.find((option) => option.id === wayId);
   return field && way ? ` · ${field.label}: ${way.label}` : '';
 }
-const STUDENT_FILTER_IDS = new Set([...STUDENT_FILTERS, VENUE_FILTERS].flatMap((group) => group.options.map((option) => option.id)));
+const STUDENT_FILTER_IDS = new Set(studentFilters({ locationRequired: true }).flatMap((group) => group.options.map((option) => option.id)));
 const RESULT_FILTER_IDS = new Set(RESULT_FILTERS.flatMap((group) => group.options.map((option) => option.id)));
 const fromAddress = (key) => new URLSearchParams(window.location.search).get(key) || '';
 const filtersFromAddress = (key, known) => [...new Set(fromAddress(key).split(',').filter((id) => known.has(id)))];
@@ -165,7 +166,7 @@ function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0 }) {
     tone = `is-live${ticking && secondsLeft <= 300 ? ' is-ending' : ''}`;
     title = test.untimed ? 'Live · no end time'
       : ticking ? `Ends automatically in ${countdown(secondsLeft)}`
-        : owed ? `Time is up — waiting for ${owed} paused student${owed === 1 ? '' : 's'}` : 'Time is up — submitting every paper…';
+        : owed ? `Time is up — waiting for ${owed} student${owed === 1 ? '' : 's'} with extra time` : 'Time is up — submitting every paper…';
     detail = test.untimed
       ? 'Close the test when everyone is done; that submits every paper.'
       : owed && !ticking
@@ -385,7 +386,7 @@ function PageControls({ pagination, onPage }) {
   );
 }
 
-function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, act, onOpenSapId }) {
+function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, act, onOpenSapId, onOpenReopen }) {
   const [openRegistrationId, setOpenRegistrationId] = useState(null);
   return (
     <section className="card students-card is-compact">
@@ -418,6 +419,7 @@ function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, s
                 act={act}
                 isBusy={isBusy}
                 openSapId={onOpenSapId}
+                openReopen={onOpenReopen}
                 columns={4}
                 open={openRegistrationId === registration.id}
                 onOpenChange={(nextOpen) => setOpenRegistrationId(nextOpen ? registration.id : null)}
@@ -774,6 +776,7 @@ export function DashboardScreen({ code, go, showToast }) {
           isBusy={isBusy}
           act={act}
           onOpenSapId={(row) => { if (!isBusy) setModal({ type: 'sap', registration: row }); }}
+          onOpenReopen={(row) => { if (!isBusy) setModal({ type: 'reopen', registration: row }); }}
         />
       )}
 
@@ -796,6 +799,7 @@ export function DashboardScreen({ code, go, showToast }) {
       {modal === 'setup' && <TestSetupModal code={code} test={test} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal === 'restart' && <RestartQuizModal code={code} test={test} counts={counts} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal?.type === 'sap' && <SapIdModal code={code} registration={modal.registration} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
+      {modal?.type === 'reopen' && <ReopenPaperModal code={code} test={test} registration={modal.registration} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal?.type === 'analysis' && <StudentAnalysisModal code={code} registration={modal.registration} onClose={closeModal} onSaved={load} showToast={showToast} showIntegrity={false}/>}
     </>
   );

@@ -6,7 +6,9 @@ import { dateMs, iso, now } from '../lib/time.js';
 import { publicTest, responseDetails, scoreSummary, timeTakenSeconds } from '../domain/presenters.js';
 import { isGuestAccount } from '../auth/portal-auth.js';
 import { questionType } from '../domain/question-bank.js';
-import { END_GRACE_MS, attemptDeadlineMs, endModeOf, isTimeOver, isUntimed } from '../domain/attempt-rules.js';
+import { END_GRACE_MS, attemptDeadlineMs, endModeOf, isTimeOver, isUntimed, testDeadlineMs } from '../domain/attempt-rules.js';
+import { isStrict } from '../domain/strict-timing.js';
+import { DEVICE_KINDS, DEVICE_NOTES, deviceFactLine, deviceFits, deviceRuleOf, kindWord } from '../domain/device.js';
 import {
   MAX_EVENTS, describeEvent, integrityCells, integrityHeaders, integrityRecord, integritySummary, locksOnViolation, violationActionOf
 } from '../domain/integrity.js';
@@ -137,7 +139,8 @@ const DASHBOARD_REGISTRATION_PROJECTION = {
   id: 1, fullName: 1, collegeEmail: 1, sapId: 1, accountType: 1, status: 1,
   requestedAt: 1, decidedAt: 1, exitedAt: 1, deviceSwitches: 1,
   locationVerifiedAt: 1, locationDistanceMeters: 1, locationOverride: 1,
-  'attempt.id': 1, 'attempt.status': 1, 'attempt.windowCheck': 1,
+  device: 1, deviceLog: 1, deviceOverride: 1,
+  'attempt.id': 1, 'attempt.status': 1, 'attempt.windowCheck': 1, 'attempt.device': 1,
   'attempt.startedAt': 1, 'attempt.submittedAt': 1, 'attempt.submittedBy': 1,
   'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1,
   'attempt.questions.questionId': 1, 'attempt.locationChecks': 1,
@@ -162,6 +165,30 @@ const dashboardStatusRank = {
 const rankRegistration = (status) => (status === 'pending' ? 0 : status === 'approved' ? 1 : 2);
 const dashboardManualQuestionIds = (test) => (test.questions || []).filter((question) => question.manualGrading).map((question) => question.id);
 
+/**
+ * The device a student reported last (domain/device.js), what they began on,
+ * every change of device, and whether it fits the test's rule - for the
+ * teacher to check by eye as well as for the rule.
+ */
+function dashboardDevice(test, registration) {
+  const device = registration.device;
+  return {
+    device: device ? {
+      kind: DEVICE_KINDS.includes(device.kind) ? device.kind : 'unknown',
+      label: device.label || '',
+      stage: device.stage || null,
+      at: iso(device.at),
+      facts: deviceFactLine(device.facts),
+      notes: (device.notes || []).map((note) => DEVICE_NOTES[note]).filter(Boolean),
+      suspicious: Boolean(device.suspicious)
+    } : null,
+    deviceBegan: registration.attempt?.device ? { kind: registration.attempt.device.kind, label: registration.attempt.device.label || '' } : null,
+    deviceLog: (registration.deviceLog || []).map((entry) => ({ kind: entry.kind, label: entry.label || '', stage: entry.stage || null, at: iso(entry.at) })),
+    deviceOverride: Boolean(registration.deviceOverride),
+    deviceFits: deviceFits(deviceRuleOf(test), device?.kind ?? 'unknown')
+  };
+}
+
 function dashboardRegistration(test, registration, manualQuestionIds) {
   const attempt = registration.attempt;
   const answers = attempt?.answers || [];
@@ -181,6 +208,7 @@ function dashboardRegistration(test, registration, manualQuestionIds) {
     attemptId: attempt?.id || null,
     attemptStatus: attempt?.status || null,
     windowCheck: attempt?.windowCheck || null,
+    ...dashboardDevice(test, registration),
     startedAt: iso(attempt?.startedAt),
     submittedAt: iso(attempt?.submittedAt),
     // 'student', 'time' or 'admin': how the paper was handed in.
@@ -286,6 +314,8 @@ const FILTER_GROUPS = {
   'paper:not_started': 'paper', 'paper:in_progress': 'paper', 'paper:paused': 'paper', 'paper:locked': 'paper', 'paper:submitted': 'paper',
   verified: 'account', guest: 'account',
   'venue:in_range': 'venue', 'venue:out_of_range': 'venue', 'venue:exception': 'venue', 'venue:not_checked': 'venue',
+  'device:phone': 'device', 'device:tablet': 'device', 'device:laptop': 'device', 'device:unknown': 'device',
+  'devicecheck:ok': 'devicecheck', 'devicecheck:disagree': 'devicecheck', 'devicecheck:exception': 'devicecheck',
   'marking:awaiting': 'marking', 'marking:done': 'marking',
   'finish:student': 'finish', 'finish:time': 'finish', 'finish:admin': 'finish', 'finish:teacher': 'finish', 'finish:unknown': 'finish'
 };
@@ -407,6 +437,12 @@ function dashboardMongoFilter(id, manualQuestionIds) {
   if (id === 'venue:in_range') return joinMongoAnd([notOverride, { locationVerifiedAt: { $exists: true, $ne: null } }]);
   if (id === 'venue:out_of_range') return joinMongoAnd([notOverride, { locationVerifiedAt: null }, { locationDistanceMeters: { $exists: true, $ne: null } }]);
   if (id === 'venue:not_checked') return joinMongoAnd([notOverride, { locationVerifiedAt: null }, { locationDistanceMeters: null }]);
+  if (id === 'device:unknown') return { 'device.kind': { $nin: DEVICE_KINDS } };
+  if (id.startsWith('device:')) return { 'device.kind': id.slice(7) };
+  // One per student: a device exception first, then signals that disagree.
+  if (id === 'devicecheck:exception') return { deviceOverride: true };
+  if (id === 'devicecheck:disagree') return joinMongoAnd([{ deviceOverride: { $ne: true } }, { 'device.suspicious': true }]);
+  if (id === 'devicecheck:ok') return joinMongoAnd([{ deviceOverride: { $ne: true } }, { 'device.suspicious': { $ne: true } }]);
   if (id === 'marking:awaiting' || id === 'marking:done') {
     const manual = manualAnswerExpressions(manualQuestionIds);
     return { $expr: id === 'marking:awaiting' ? { $gt: [manual.total, manual.graded] } : { $lte: [manual.total, manual.graded] } };
@@ -448,6 +484,11 @@ function dashboardFilterExpression(id) {
   if (id === 'venue:in_range') return joinExpressionAnd([isNotTrue('locationOverride'), isPresent('locationVerifiedAt')]);
   if (id === 'venue:out_of_range') return joinExpressionAnd([isNotTrue('locationOverride'), isMissing('locationVerifiedAt'), isPresent('locationDistanceMeters')]);
   if (id === 'venue:not_checked') return joinExpressionAnd([isNotTrue('locationOverride'), isMissing('locationVerifiedAt'), isMissing('locationDistanceMeters')]);
+  if (id === 'device:unknown') return { $not: [{ $in: [{ $ifNull: [field('device.kind'), ''] }, DEVICE_KINDS] }] };
+  if (id.startsWith('device:')) return equals('device.kind', id.slice(7));
+  if (id === 'devicecheck:exception') return isTrue('deviceOverride');
+  if (id === 'devicecheck:disagree') return joinExpressionAnd([isNotTrue('deviceOverride'), isTrue('device.suspicious')]);
+  if (id === 'devicecheck:ok') return joinExpressionAnd([isNotTrue('deviceOverride'), isNotTrue('device.suspicious')]);
   if (id === 'marking:awaiting') return { $gt: [field('__manualTotal'), field('__manualGraded')] };
   if (id === 'marking:done') return { $lte: [field('__manualTotal'), field('__manualGraded')] };
   if (id.startsWith('finish:')) {
@@ -587,6 +628,10 @@ function dashboardFilter(row, id) {
   if (id === 'venue:in_range') return !row.locationOverride && Boolean(row.locationVerifiedAt);
   if (id === 'venue:out_of_range') return !row.locationOverride && !row.locationVerifiedAt && row.locationDistanceMeters !== null && row.locationDistanceMeters !== undefined;
   if (id === 'venue:not_checked') return !row.locationOverride && !row.locationVerifiedAt && (row.locationDistanceMeters === null || row.locationDistanceMeters === undefined);
+  if (id.startsWith('device:')) return (row.device?.kind || 'unknown') === id.slice(7);
+  if (id === 'devicecheck:exception') return row.deviceOverride;
+  if (id === 'devicecheck:disagree') return !row.deviceOverride && Boolean(row.device?.suspicious);
+  if (id === 'devicecheck:ok') return !row.deviceOverride && !row.device?.suspicious;
   if (id === 'marking:awaiting') return row.manualTotal > row.manualGraded;
   if (id === 'marking:done') return row.manualTotal <= row.manualGraded;
   if (id.startsWith('finish:')) {
@@ -712,6 +757,7 @@ export function csvForAdmin(dashboard) {
     'Time outside fullscreen (seconds)', 'Over the allowance', 'Venue check', 'Distance from venue (m)',
     'Location checks in range', 'Location checks out of range', 'Location checks inconclusive',
     'Times left the venue', 'Time outside the venue (seconds)', 'Location when submitted', 'Attempt locked', 'Lock reason',
+    'Device', 'Began on', 'Device signals', 'Device notes', 'Device exception', 'Devices seen',
     ...integrityHeaders
   ]];
   dashboard.registrations.forEach((entry) => rows.push([
@@ -729,6 +775,10 @@ export function csvForAdmin(dashboard) {
       ? `${entry.locationChecks.submit.status === 'inRange' ? 'At the venue' : entry.locationChecks.submit.status === 'outOfRange' ? 'Away from the venue' : 'Could not tell'}${entry.locationChecks.submit.distanceMeters === null || entry.locationChecks.submit.distanceMeters === undefined ? '' : ` (${Math.round(entry.locationChecks.submit.distanceMeters)} m)`}`
       : '',
     entry.isLocked ? 'yes' : 'no', entry.lockReason || '',
+    entry.device ? `${kindWord(entry.device.kind)} (${entry.device.label})` : '',
+    entry.deviceBegan ? `${kindWord(entry.deviceBegan.kind)} (${entry.deviceBegan.label})` : '',
+    entry.device?.facts || '', (entry.device?.notes || []).join(' '), entry.deviceOverride ? 'yes' : 'no',
+    (entry.deviceLog || []).map((seen) => `${kindWord(seen.kind)} (${seen.label})`).join(' → '),
     ...integrityCells(entry.integrity)
   ]));
   return rows.map((row) => row.map(quote).join(',')).join('\r\n');
@@ -845,6 +895,17 @@ export async function updateStudentSapId(req, code, registrationId, raw, options
     }
     await updateRegistrationFields(test.code, registration.id, { sapId });
   });
+  return registrationActionResult(req, code, test, registrationId, options.compact);
+}
+
+/**
+ * Lets one student sit a phones-only or laptops-only test on the device they
+ * have (or takes that back): for a device the check gets wrong, or a student
+ * whose own device has failed. Given before or during the test.
+ */
+export async function setDeviceOverride(req, code, registrationId, raw, options = {}) {
+  const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+  await updateRegistrationFields(test.code, registration.id, { deviceOverride: raw?.enabled !== false });
   return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
@@ -971,6 +1032,81 @@ export async function submitStudentPaper(req, code, registrationId, options = {}
   await finalizeAttempt(test, registration, attempt, { by: 'teacher' });
   await updateAttemptWhere(test.code, registration.id, { id: attempt.id }, { $push: teacherEvent('teacher_submitted', now()) });
   return registrationActionResult(req, code, test, registrationId, options.compact);
+}
+
+/** A reopened paper needs at least this long left to write. */
+const REOPEN_MIN_LEFT_MS = 60_000;
+
+/**
+ * Gives one student back a paper they have handed in: the same questions and
+ * answers, carrying on where they left off. Marks are cleared, as on any open
+ * paper, and worked out again when it is handed in.
+ *
+ * On a timed test the student needs time left. `addMinutes` gives it to them
+ * alone - their own end moves later (`extraMs`, as a pause's time is given
+ * back); nobody else's does - counted from their end or from now, whichever
+ * is later. With under a minute left and none added, it is refused.
+ *
+ * A timer on each question makes every question final once it has passed, so
+ * those papers cannot be reopened. A test that closed because its time ran
+ * out opens again for this student: nobody new can begin (its time is over),
+ * and it closes itself again once they are done (finishTest waits for time a
+ * student is owed). One the teacher closed is resumed with Resume test first.
+ */
+export async function reopenStudentPaper(req, code, registrationId, raw = {}, options = {}) {
+  const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+  const attempt = registration.attempt;
+  if (!attempt) throw new PublicTestError(404, 'This student has not started yet.');
+  if (attempt.status !== 'submitted') throw new PublicTestError(409, 'This paper is still open.');
+  if (isStrict(test)) {
+    throw new PublicTestError(409, 'Papers with a timer on each question cannot be reopened: every question is final once it has passed.');
+  }
+  if (test.isClosed && !test.closedAutomatically) {
+    throw new PublicTestError(409, 'You closed this test. Use More → Resume test to open it again, then reopen this paper.', 'TEST_CLOSED');
+  }
+  const asked = raw.addMinutes;
+  const minutes = asked === undefined || asked === null || asked === '' || Number(asked) === 0 ? 0 : asInteger(asked, 1, 24 * 60);
+  if (minutes === null) throw new PublicTestError(400, 'Add between 1 and 1440 minutes.');
+
+  const at = now();
+  const shared = testDeadlineMs(test);
+  let extraMs = Number(attempt.extraMs) || 0;
+  if (Number.isFinite(shared)) {
+    const ownEnd = shared + extraMs;
+    const newEnd = minutes ? Math.max(ownEnd, at.getTime()) + minutes * 60_000 : ownEnd;
+    if (newEnd - at.getTime() < REOPEN_MIN_LEFT_MS) {
+      throw new PublicTestError(409, `${registration.fullName} has no time left. Add minutes for them to reopen the paper.`, 'NEEDS_TIME');
+    }
+    extraMs = newEnd - shared;
+  }
+
+  // Closed because its time ran out: open again, for this student.
+  if (test.isClosed) {
+    await serializeTestWrite(test.code, () => tests().updateOne(
+      { code: test.code, isClosed: true },
+      { $set: { isClosed: false, closedAt: null, closedAutomatically: false } }
+    ));
+    await invalidateTestCache(test.code);
+  }
+  // Only while still handed in: a double click reopens it once.
+  await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'submitted' }, {
+    $set: {
+      status: 'in_progress',
+      submittedAt: null,
+      submittedBy: null,
+      reopenedAt: at,
+      // Heard from now: the time handed in is not the student leaving.
+      lastSeenAt: at,
+      awaySince: null,
+      awayTyping: null,
+      pausedAt: null,
+      extraMs,
+      answers: (attempt.answers || []).map((answer) => ({ ...answer, isCorrect: null }))
+    },
+    $push: teacherEvent('teacher_reopened', at, minutes ? minutes * 60_000 : null)
+  });
+  const current = await requireOwnedTest(req, code, { withStudents: false });
+  return registrationActionResult(req, code, current, registrationId, options.compact);
 }
 
 async function reviveAttempt(test, registration) {

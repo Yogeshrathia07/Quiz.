@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { detectWindowKind } from '../../lib/private-mode.js';
 import { PrivateWindowRequired } from './PrivateWindowRequired.jsx';
+import { DeviceNotAllowed } from './DeviceNotAllowed.jsx';
+import { deviceRefused, useDeviceCheck } from '../../lib/device.js';
 import { api } from '../../lib/api.js';
 import { liveEventsFromPayload, useLiveUpdate } from '../../lib/live-updates.js';
 import { AttemptScreen } from './AttemptScreen.jsx';
@@ -30,6 +32,20 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   const [windowKind, setWindowKind] = useState(undefined);
   useEffect(() => { detectWindowKind().then((result) => setWindowKind(result)); }, []);
 
+  // Phones only or laptops only: whether this device may sit it, asked of the
+  // server (lib/device.js) - again when the rule changes, once they have
+  // registered (so their teacher sees the device), and when the teacher allows
+  // this device. On any test, a registered student's device is reported too.
+  const [deviceRefresh, setDeviceRefresh] = useState(0);
+  const [registerAnyway, setRegisterAnyway] = useState(false);
+  const deviceRule = data?.test?.devices || 'any';
+  const registered = Boolean(data?.registration);
+  const deviceCheck = useDeviceCheck(code, {
+    stage: 'join',
+    enabled: Boolean(data) && !data?.attemptId && !startedAttempt && (deviceRule !== 'any' || registered),
+    refreshKey: `${deviceRule}:${registered}:${deviceRefresh}`
+  });
+
   // Waiting to be let in, or for Start: the screen stays on, so the student
   // sees the test open. The paper keeps it on from there (AttemptScreen).
   useKeepAwake(Boolean(data?.registration && data.registration.status !== 'rejected' && !data.attemptId && !data.test?.isClosed));
@@ -49,6 +65,7 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
     // the exact state. Normal approval/Start messages update this small
     // waiting view in place and avoid a 5,000-student reload burst.
     const needsReload = events.some((event) => !event?.test && !event?.registration);
+    if (events.some((event) => event?.kind === 'device_override')) setDeviceRefresh((value) => value + 1);
     setData((current) => {
       if (!current) return current;
       return events.reduce((next, event) => {
@@ -103,6 +120,18 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
     if (windowKind === undefined) return <div className="empty card">Checking your browser…</div>;
     if (windowKind === 'normal') return <PrivateWindowRequired test={test} showToast={showToast} onDeclare={() => setWindowKind('declared')}/>;
   }
+  // A device that does not fit is told so before signing in - a guest's seat
+  // cannot follow them to another device - unless they say the check is wrong.
+  const deviceBlocked = deviceRule !== 'any' && deviceRefused(deviceCheck);
+  const deviceCard = (stage) => (
+    <DeviceNotAllowed test={test} rule={deviceRule} check={deviceCheck} stage={stage} guest={Boolean(auth.user?.isGuest)}
+      showToast={showToast} onRegisterAnyway={() => setRegisterAnyway(true)}/>
+  );
+  if (!registration && deviceRule !== 'any' && !test.isOwner && !registerAnyway) {
+    if (deviceCheck === null) return <div className="empty card">Checking your device…</div>;
+    if (deviceBlocked) return deviceCard('join');
+  }
+  const withDeviceCard = (screen) => (deviceBlocked ? <div className="join-stack">{deviceCard('waiting')}{screen}</div> : screen);
   if (!auth.user) {
     return (
       <SignInScreen test={test} code={code} auth={auth} onSignedIn={onSignedIn} showToast={showToast}/>
@@ -110,14 +139,18 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   }
   if (auth.user.isGuest && !test.allowGuests) return <GuestsNotAllowed test={test}/>;
   if (!registration) return <RegistrationForm test={test} user={auth.user} code={code} reload={reload} showToast={showToast}/>;
-  if (registration.status === 'pending') return <RegistrationPending test={test} registration={registration} reload={reload}/>;
+  if (registration.status === 'pending') return withDeviceCard(<RegistrationPending test={test} registration={registration} reload={reload}/>);
   if (registration.status === 'rejected') return <RegistrationRejected test={test}/>;
-  if (!test.isStarted) return <WaitingForStart test={test} serverTime={data.serverTime} reload={reload}/>;
+  if (!test.isStarted) return withDeviceCard(<WaitingForStart test={test} serverTime={data.serverTime} reload={reload}/>);
   // Nobody may pick up a fresh paper once the time is up; say so rather than
   // offering a Begin button that the server will refuse.
   if (!attemptId && !startedAttempt && !test.untimed && Date.parse(test.endsAt) <= Date.now()) return <TestTimeOver test={test} reload={reload}/>;
   if (!attemptId && !startedAttempt) {
-    return <TestLaunch test={test} code={code} reload={reload} onStarted={setStartedAttempt} showToast={showToast} windowKind={windowKind}/>;
+    return (
+      <TestLaunch test={test} code={code} reload={reload} onStarted={setStartedAttempt} showToast={showToast} windowKind={windowKind}
+        deviceBlock={deviceBlocked ? deviceCard('launch') : null} deviceChecking={deviceRule !== 'any' && deviceCheck === null}
+        onDeviceRefused={() => setDeviceRefresh((value) => value + 1)}/>
+    );
   }
   return (
     <AttemptScreen

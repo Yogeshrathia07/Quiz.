@@ -1,4 +1,5 @@
 import { describeEvent } from './integrity.js';
+import { kindWord } from './device.js';
 
 /**
  * Every answer a student saves is appended to `attempt.answerLog`, capped so
@@ -48,7 +49,8 @@ const EVENT_KIND = {
   venue_left: 'exit', venue_returned: 'return',
   fullscreen_exit: 'exit', fullscreen_return: 'return', integrity_flag: 'flag',
   attempt_locked: 'lock', attempt_warned: 'flag', attempt_resumed: 'lock', attempt_restarted: 'restart',
-  teacher_paused: 'lock', teacher_continued: 'lock', teacher_submitted: 'restart'
+  teacher_paused: 'lock', teacher_continued: 'lock', teacher_submitted: 'restart', teacher_reopened: 'restart',
+  device_kind_changed: 'flag'
 };
 
 /** One student's whole test, oldest first. */
@@ -62,7 +64,7 @@ export function activityLog(test, registration) {
     add(registration.decidedAt, 'join', registration.status === 'rejected' ? 'Registration rejected' : 'Registration approved');
   }
   if (attempt) {
-    add(attempt.startedAt, 'start', 'Started the test');
+    add(attempt.startedAt, 'start', 'Started the test', attempt.device ? `On a ${kindWord(attempt.device.kind)} (${attempt.device.label})` : '');
     entries.push(...answerEntries(test, attempt));
     for (const event of attempt.events || []) {
       const described = describeEvent(event);

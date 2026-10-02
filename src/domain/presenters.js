@@ -5,6 +5,7 @@ import { activityLog } from './activity.js';
 import { activeQuestions, questionPoolCounts, questionType } from './question-bank.js';
 import { attemptDeadlineMs, endModeOf, isAnswered, isAttemptTimeOver, isTimeOver, isUntimed, startModeOf } from './attempt-rules.js';
 import { DEFAULT_TYPE_SECONDS, allowsNext, isStrict, openQuestionEndsAt, questionSeconds, strictPaper } from './strict-timing.js';
+import { DEVICE_NOTES, deviceRuleOf, kindWord } from './device.js';
 
 const lockWaitMs = () => (Number(config.lockWaitSeconds) || 0) * 1000;
 
@@ -39,6 +40,8 @@ export function publicTest(doc) {
     shuffleQuestions: Boolean(doc.shuffleQuestions),
     allowGuests: Boolean(doc.allowGuests),
     requirePrivateWindow: Boolean(doc.requirePrivateWindow),
+    // 'any', 'phone' (and tablets) or 'laptop' (and desktops): see domain/device.js.
+    devices: deviceRuleOf(doc),
     questionLayout: doc.questionLayout === 'all' ? 'all' : 'one',
     strictTiming: isStrict(doc),
     strictNext: allowsNext(doc),
@@ -178,6 +181,9 @@ export function attemptView(test, attempt, atMs = currentMs(), { venue = null } 
     violationAction: violationActionOf(test),
     // Read on every poll, so turning it on during the test reaches open papers.
     requirePrivateWindow: Boolean(test.requirePrivateWindow),
+    // Phones only or laptops only, read on every poll too: a change reaches the
+    // paper, which asks again whether this device may sit it.
+    devices: deviceRuleOf(test),
     // With Lock on: warnings given so far, and how many come before the lock.
     violationCount: attempt.violationCount || 0,
     warningsBeforeLock: warningsBeforeLockOf(test),
@@ -294,6 +300,13 @@ export function studentResponseData(test, registration) {
     } : null,
     activity: activityLog(test, registration),
     location: attempt?.locationChecks || null,
+    // The device the paper was begun on and the one last seen (domain/device.js).
+    device: registration.device ? {
+      last: `${kindWord(registration.device.kind)} (${registration.device.label || 'unknown browser'})`,
+      began: attempt?.device ? `${kindWord(attempt.device.kind)} (${attempt.device.label || 'unknown browser'})` : null,
+      notes: (registration.device.notes || []).map((note) => DEVICE_NOTES[note]).filter(Boolean),
+      exception: Boolean(registration.deviceOverride)
+    } : null,
     answers,
     summary: {
       total: answers.length,

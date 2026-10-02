@@ -521,7 +521,7 @@ function recordSection(sheet, rowNumber, title, rows) {
  * again after marking brings them in.
  */
 export async function buildStudentResponseSpreadsheet(data, { audit = false } = {}) {
-  const { test, student, registration = {}, attempt, integrity, activity = [], location, answers, summary } = data;
+  const { test, student, registration = {}, attempt, integrity, activity = [], location, device = null, answers, summary } = data;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Quiz';
   workbook.created = new Date();
@@ -608,7 +608,11 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
   ]);
   next = recordSection(record, next, 'Your attempt', [
     ['Status', sentence(attempt.status)], ['Started', asDate(attempt.startedAt), true], ['Submitted', asDate(attempt.submittedAt), true],
-    ['How it ended', howItEnded(attempt.submittedBy)], ['Time taken', timeTaken]
+    ['How it ended', howItEnded(attempt.submittedBy)], ['Time taken', timeTaken],
+    ...(audit && device ? [
+      ['Began on', device.began || '—'], ['Device last seen', device.last],
+      ['Device notes', device.notes.join(' ') || 'None'], ['Device exception given', device.exception ? 'Yes' : 'No']
+    ] : [])
   ]);
   if (integrity) {
     recordSection(record, next, 'Leaving the test', [

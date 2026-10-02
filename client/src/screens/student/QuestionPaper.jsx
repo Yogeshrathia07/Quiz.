@@ -33,35 +33,49 @@ function revealBox(box) {
   if (hidden > 0) area.scrollBy({ top: Math.min(hidden, boxRect.top - areaRect.top - 8), behavior: 'smooth' });
 }
 
-// An answer still on its way to the server is already kept on this device and
-// queued, so it reads "Saved" at once: a "Saving…" flickering on every tap told
-// the student nothing. Only real trouble (stuck, or offline) is shown, by the
-// strip above the paper.
 /**
- * On the right of the question's header: where this answer stands, in colour. "Saved"
- * means on the server - an answer still waiting on this device says so, and
- * why (sending, stuck, offline, the server unreachable). Before an answer:
- * that it saves by itself.
+ * On the right of the question's header: a small dot in the colour of where
+ * this answer stands - green saved (on the server), blue saving, amber
+ * waiting on this device (offline, the server unreachable, or sending that
+ * is taking long), grey not answered yet. Hovered, tapped or focused, it
+ * says so in words.
  *
  *   connection: 'online' | 'stuck' (sending for a while) | 'offline' | 'server'
  */
 const SAVE_STATES = {
-  saved: ['is-saved', 'Saved'],
-  online: ['is-sending', 'Saving…'],
-  stuck: ['is-waiting', 'Still sending… keep this page open'],
-  offline: ['is-waiting', 'Saved on this device · sends when you are back online'],
-  server: ['is-waiting', 'Saved on this device · sends when the server is back'],
-  empty: ['is-empty', 'Saves automatically when you answer'],
-  emptyOffline: ['is-waiting', 'Offline · your answers are kept on this device']
+  saved: ['is-saved', 'Saved', 'Your answer is saved on the server.'],
+  online: ['is-sending', 'Saving…', 'Your answer is being sent to the server.'],
+  stuck: ['is-waiting', 'Still sending…', 'It is taking a while. Your answer is kept on this device - keep this page open.'],
+  offline: ['is-waiting', 'Saved on this device', 'You are offline. It sends as soon as you are back online.'],
+  server: ['is-waiting', 'Saved on this device', 'The server cannot be reached right now. It sends as soon as it is back.'],
+  empty: ['is-empty', 'Not answered yet', 'Your answer saves by itself as soon as you choose or type it.'],
+  emptyOffline: ['is-waiting', 'You are offline', 'Your answers are kept on this device and send when you are back online.'],
+  final: ['is-final', 'Final', 'This answer is final: the paper has moved on.']
 };
 function SaveState({ question, connection = 'online' }) {
-  if (question.locked) return <span className="q-state is-final">Final</span>;
+  const [open, setOpen] = useState(false);
+  const box = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    // A tap anywhere else puts the details away (a tap on the dot toggles them itself).
+    const close = (event) => { if (!box.current?.contains(event.target)) setOpen(false); };
+    const timer = window.setTimeout(() => document.addEventListener('pointerdown', close, true), 0);
+    return () => { window.clearTimeout(timer); document.removeEventListener('pointerdown', close, true); };
+  }, [open]);
   const away = connection === 'offline' || connection === 'server';
-  const key = question.unsent ? connection
-    : question.answered ? 'saved'
-      : away ? 'emptyOffline' : 'empty';
-  const [tone, text] = SAVE_STATES[key];
-  return <span className={`q-state ${tone}`}>{text}</span>;
+  const key = question.locked ? 'final'
+    : question.unsent ? connection
+      : question.answered ? 'saved'
+        : away ? 'emptyOffline' : 'empty';
+  const [tone, title, detail] = SAVE_STATES[key];
+  return (
+    <span className={`q-save ${tone}${open ? ' is-open' : ''}`} ref={box}>
+      <button type="button" className="q-save-dot" aria-expanded={open} aria-label={`${title}. ${detail}`} onClick={() => setOpen((value) => !value)}>
+        <span aria-hidden="true"/>
+      </button>
+      <span className="q-save-tip" role="tooltip"><strong>{title}</strong>{detail}</span>
+    </span>
+  );
 }
 
 /**

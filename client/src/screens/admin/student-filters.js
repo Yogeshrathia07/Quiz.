@@ -52,7 +52,34 @@ export const VENUE_FILTERS = { id: 'venue', title: 'Venue', options: [
   option('venue:not_checked', 'Not checked yet', (row) => venueStatus(row) === 'not_checked')
 ] };
 
-export const studentFilters = (test) => (test.locationRequired ? [...STUDENT_FILTERS, VENUE_FILTERS] : STUDENT_FILTERS);
+/** The device a student last reported (src/domain/device.js); 'unknown' before any report. */
+export const deviceKind = (registration) => (['phone', 'tablet', 'laptop'].includes(registration.device?.kind) ? registration.device.kind : 'unknown');
+
+/** One per student, like the venue: an exception first, then signals that disagree. */
+export function deviceCheckStatus(registration) {
+  if (registration.deviceOverride) return 'exception';
+  return registration.device?.suspicious ? 'disagree' : 'ok';
+}
+
+export const DEVICE_FILTERS = { id: 'device', title: 'Device', options: [
+  option('device:phone', 'Phone', (row) => deviceKind(row) === 'phone'),
+  option('device:tablet', 'Tablet', (row) => deviceKind(row) === 'tablet', { rare: true }),
+  option('device:laptop', 'Laptop', (row) => deviceKind(row) === 'laptop'),
+  option('device:unknown', 'Not known yet', (row) => deviceKind(row) === 'unknown', { rare: true })
+] };
+
+export const DEVICE_CHECK_FILTERS = { id: 'devicecheck', title: 'Device check', options: [
+  option('devicecheck:ok', 'Nothing unusual', (row) => deviceCheckStatus(row) === 'ok'),
+  option('devicecheck:disagree', 'Signals disagree', (row) => deviceCheckStatus(row) === 'disagree', { rare: true }),
+  option('devicecheck:exception', 'Device allowed by you', (row) => deviceCheckStatus(row) === 'exception', { rare: true })
+] };
+
+export const studentFilters = (test) => [
+  ...STUDENT_FILTERS,
+  ...(test.locationRequired ? [VENUE_FILTERS] : []),
+  DEVICE_FILTERS,
+  DEVICE_CHECK_FILTERS
+];
 
 /** Short answers still to mark. */
 export const awaitingMarking = (row) => row.manualTotal > row.manualGraded;

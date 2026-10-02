@@ -206,9 +206,14 @@ try {
   // Like a real paper, every student's page checks in every 10-15 s from the
   // moment it opens until it is submitted - also while they wait for the rest.
   polling = BACKGROUND_POLLING;
+  let stopPolling = () => {};
+  const pollingStopped = new Promise((resolve) => { stopPolling = resolve; });
   const pollers = BACKGROUND_POLLING ? students.map((student) => (async () => {
     while (polling) {
-      await pause(10_000 + Math.random() * 5_000);
+      // Let the harness stop sleepers immediately. Without this, a request
+      // already in flight when cleanup killed the child server was counted as
+      // a false network failure after an otherwise successful exam run.
+      await Promise.race([pause(10_000 + Math.random() * 5_000), pollingStopped]);
       if (polling && !student.submitted) await call('background poll', student.cookies, 'GET', `/api/tests/${code}/attempt`).catch(() => {});
     }
   })()) : [];
@@ -250,6 +255,10 @@ try {
   }));
   const submitWallMs = performance.now() - submitStarted;
   polling = false;
+  stopPolling();
+  // Finish only real in-flight polls before moving on or shutting down the
+  // test server. Dormant pollers have already been released above.
+  await Promise.allSettled(pollers);
   await mapConcurrent(students.filter((student) => student.submitted), RESULT_CONCURRENCY, (student) => call('result', student.cookies, 'GET', `/api/test-attempts/${student.attempt.id}/result`));
   const wallMs = performance.now() - wall;
   const answerBurstFailed = answerBurstOutcomes.filter((outcome) => outcome.status === 'rejected').length;

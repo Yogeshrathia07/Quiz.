@@ -49,7 +49,9 @@ export function FacultyHome({ user, go }) {
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
 
-  const firstName = String(user?.name || '').trim().split(/\s+/)[0];
+  // "Welcome, Asha" - but a name that opens with a title keeps it whole: "Welcome, Dr. Asha Verma", never "Welcome, Dr.".
+  const names = String(user?.name || '').trim().split(/\s+/).filter(Boolean);
+  const firstName = /^(dr|prof|professor|mr|mrs|ms|miss|er)\.?$/i.test(names[0] || '') && names.length > 1 ? names.join(' ') : names[0];
   const today = new Date().toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long' });
   const loading = summary === undefined;
   const s = summary || null;

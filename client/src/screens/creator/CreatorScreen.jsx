@@ -14,7 +14,7 @@ import { nowValue } from '../../components/DateTimeField.jsx';
 import { QuestionEditor } from './QuestionEditor.jsx';
 import { VenueFields } from '../../components/VenueFields.jsx';
 import {
-  ChoiceCards, FormGroupTitle, IntegrityFields, LAYOUT_OPTIONS, MARKS_OPTIONS, SwitchRow
+  ChoiceCards, DEVICE_OPTIONS, FormGroupTitle, IntegrityFields, LAYOUT_OPTIONS, MARKS_OPTIONS, SwitchRow
 } from '../../components/FormControls.jsx';
 import { normalizeImport } from './import-quiz.js';
 
@@ -41,6 +41,7 @@ export function initialDetails() {
     shuffleQuestions: true,
     allowGuests: false,
     requirePrivateWindow: false,
+    devices: 'any',
     locationRequired: false,
     locationRadiusMeters: 250,
     locationLatitude: '',
@@ -92,6 +93,7 @@ function detailsFromTest(test) {
     shuffleQuestions: test.shuffleQuestions,
     allowGuests: test.allowGuests,
     requirePrivateWindow: test.requirePrivateWindow,
+    devices: test.devices || 'any',
     locationRequired: test.locationRequired,
     locationRadiusMeters: test.locationRadiusMeters || 250,
     locationLatitude: test.locationLatitude ?? '',
@@ -342,6 +344,19 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
                 title="Private (Incognito) window only"
                 description="Browser extensions are off there."
               />
+            </div>
+            <div className="form-wide">
+              <ChoiceCards
+                label="Devices"
+                idPrefix="create-devices"
+                value={details.devices}
+                onChange={(value) => detail('devices', value)}
+                options={DEVICE_OPTIONS}
+              />
+              <p className="help">
+                Try any phone or laptop on the <a href="/?page=window-check" target="_blank" rel="noreferrer">browser check page</a>:
+                it shows what the check decides there, and why.
+              </p>
             </div>
             <div className="form-wide">
               <SwitchRow

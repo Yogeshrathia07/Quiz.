@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, LogOut, KeyRound, Menu, X } from 'lucide-react';
+import { ChartColumn, ChevronDown, ClipboardList, House, KeyRound, LogOut, Menu, UserCheck, Users, X } from 'lucide-react';
 import { BRAND } from '../brand.js';
 
 const initials = (name) => String(name || '?')
@@ -51,11 +51,11 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
   const isAdmin = user?.role === 'admin' && !user.isGuest;
 
   const links = [
-    { id: 'home', url: '/', label: 'Home' },
-    isAdmin && { id: 'tests', url: '/?admin=tests', label: 'Tests' },
-    isAdmin && { id: 'attendance', url: '/?admin=attendance', label: 'Attendance' },
-    isAdmin && { id: 'results', url: '/?page=results', label: 'Results' },
-    user?.canManageUsers && { id: 'users', url: '/?admin=users', label: 'Users' }
+    { id: 'home', url: '/', label: 'Home', icon: House },
+    isAdmin && { id: 'tests', url: '/?admin=tests', label: 'Tests', icon: ClipboardList },
+    isAdmin && { id: 'attendance', url: '/?admin=attendance', label: 'Attendance', icon: UserCheck },
+    isAdmin && { id: 'results', url: '/?page=results', label: 'Results', icon: ChartColumn },
+    user?.canManageUsers && { id: 'users', url: '/?admin=users', label: 'Users', icon: Users }
   ].filter(Boolean);
   const active = activeLink(route);
   // A guest's password is not theirs to change, and a test page keeps the student on the test.
@@ -73,6 +73,7 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
   return (
     <header className={`site-header nav-bar${menuOpen ? ' is-menu-open' : ''}`} ref={headerRef}>
       <a className="nav-brand" href="/" onClick={open('/')} aria-label={`${BRAND.name} home`}>
+        <img className="nav-brand-logo" src="/logo.svg" alt="" width="30" height="30"/>
         <span className="nav-brand-name">{BRAND.wordmark}<span className="nav-brand-dot">.</span></span>
         {BRAND.org && <span className="nav-brand-org">{BRAND.org}</span>}
       </a>
@@ -81,14 +82,15 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
         <nav className="nav-links" aria-label="Primary navigation">
           {links.map((link) => (
             <a key={link.id} href={link.url} onClick={open(link.url)} className={active === link.id ? 'is-active' : undefined}
-              aria-current={active === link.id ? 'page' : undefined}>{link.label}</a>
+              aria-current={active === link.id ? 'page' : undefined}><link.icon size={16} strokeWidth={2.2} aria-hidden="true"/>{link.label}</a>
           ))}
         </nav>
       )}
 
       {user && (
         <div className="nav-account" ref={accountRef}>
-          <button className="nav-account-button" type="button" aria-haspopup="menu" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}>
+          <button className="nav-account-button" type="button" aria-haspopup="menu" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}
+            aria-label={`${user.name.replace(/^Guest:\s*/, '')}, account menu`}>
             <span className="nav-avatar" aria-hidden="true">{initials(user.name)}</span>
             <span className="nav-account-name">{user.name.replace(/^Guest:\s*/, '')}</span>
             <ChevronDown className="nav-caret" size={15} strokeWidth={2.5} aria-hidden="true"/>
@@ -119,7 +121,7 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
           <nav aria-label="Menu">
             {links.map((link) => (
               <a key={link.id} href={link.url} onClick={open(link.url)} className={active === link.id ? 'is-active' : undefined}
-                aria-current={active === link.id ? 'page' : undefined}>{link.label}</a>
+                aria-current={active === link.id ? 'page' : undefined}><link.icon size={19} strokeWidth={2.1} aria-hidden="true"/>{link.label}</a>
             ))}
           </nav>
           <div className="nav-panel-account">

@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <clipPath id="disc"><circle cx="256" cy="256" r="256"/></clipPath>
+    <linearGradient id="shade" gradientUnits="userSpaceOnUse" x1="250" y1="200" x2="470" y2="470">
+      <stop offset="0" stop-color="#303030"/>
+      <stop offset="1" stop-color="#0A0A0A"/>
+    </linearGradient>
+  </defs>
+  <circle cx="256" cy="256" r="256" fill="#1689C1"/>
+  <g clip-path="url(#disc)">
+    <!-- The long shadow, cast down and to the right from the Q. -->
+    <path d="M348 136L566 336L356 566L168 334L256 236Z" fill="url(#shade)"/>
+  </g>
+  <path d="M246 163H263A60 60 0 0 1 323 223V250A60 60 0 0 1 263 310H246A60 60 0 0 1 186 250V223A60 60 0 0 1 246 163Z" fill="url(#shade)"/>
+  <!-- The Q: a rounded ring with a slanted tail; its hole shows the shadow. -->
+  <path d="M230 103H282A105 105 0 0 1 387 208V263A105 105 0 0 1 282 368H230A105 105 0 0 1 125 263V208A105 105 0 0 1 230 103Z M246 163H263A60 60 0 0 1 323 223V250A60 60 0 0 1 263 310H246A60 60 0 0 1 186 250V223A60 60 0 0 1 246 163Z" fill="#FFFFFF" fill-rule="evenodd"/>
+  <path d="M282 361L338 333L388 406H313Z" fill="#FFFFFF"/>
+</svg>

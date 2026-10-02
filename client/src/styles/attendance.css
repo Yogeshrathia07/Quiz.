@@ -28,7 +28,8 @@
 /* Create */
 .att-create{background:#2A2D31;color:var(--ink)}
 .att-create .text-input{margin-bottom:6px}
-.att-create-options{display:grid;grid-template-columns:1fr 1fr;gap:4px 24px;margin-top:10px}
+.att-create .att-create-help{margin:0 0 6px;font-size:.8rem}
+.att-create-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:4px 24px;margin-top:10px}
 .att-create .location-settings{margin-top:10px;padding-top:12px;border-top:1px solid var(--line)}
 
 /* Live session */
@@ -37,7 +38,19 @@
 .att-board-side{display:flex;flex-direction:column;gap:16px;min-width:0}
 .att-qr{display:grid;justify-items:center;align-content:center;gap:10px;padding:24px;border-radius:16px;background:#2A2D31;color:var(--ink);text-align:center}
 .att-qr-button{padding:0;border:0;background:none;cursor:zoom-in;line-height:0}
-.att-qr img{width:min(100%,340px);height:auto;border-radius:4%}
+.att-qr-button:disabled{cursor:default}
+.att-qr-code{display:block;width:min(100%,340px);height:auto;border-radius:10px}
+.att-qr-wait{display:grid;place-items:center;width:min(100%,340px);aspect-ratio:1;padding:16px;border-radius:12px;background:var(--bg-raised);color:var(--muted);font-size:.9rem;line-height:1.4}
+/* Each new code fades in over the last: squares dark in both stay solid, the
+   rest cross over on one gentle curve, old and new in step - and the code is
+   crisp for most of each change (LiveQr.jsx: FADE_MS). The fill fades, not
+   the element: animating `opacity` draws every edge a fraction differently,
+   so the whole code twitched as each change began and ended. */
+.att-qr-enter,.att-qr-leave{animation:att-qr-enter .45s cubic-bezier(.45,0,.55,1) both}
+.att-qr-leave{animation-name:att-qr-leave}
+@keyframes att-qr-enter{from{fill-opacity:0}to{fill-opacity:1}}
+@keyframes att-qr-leave{from{fill-opacity:1}to{fill-opacity:0}}
+@media (prefers-reduced-motion:reduce){.att-qr-enter{animation:none}.att-qr-leave{display:none}}
 .att-qr p{margin:0;color:var(--muted);font-size:.85rem}
 .att-qr-closed{min-height:260px}
 .att-qr-closed strong{font-size:1.1rem}
@@ -47,11 +60,24 @@
 /* The build adds the -webkit- copy Safari needs; writing both by hand made it keep only that one. */
 @supports not (backdrop-filter:blur(1px)){.att-qr-full{background:rgba(14,15,17,.92)}}
 .att-qr-full h1{margin:0;font-size:clamp(1.3rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em}
-.att-qr-full img{width:min(90vw,76vh);height:auto;margin-top:14px;border-radius:4%}
+.att-qr-full-code{width:min(90vw,76vh);margin-top:14px;line-height:0}
+.att-qr-full .att-qr-code,.att-qr-full .att-qr-wait{width:100%;border-radius:14px}
 .att-qr-full p{margin:0;color:#AAB6BC;font-size:clamp(.95rem,1.6vw,1.2rem)}
-/* Over the list: search, filter, Add student */
-.att-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px 14px;border-bottom:1px solid #474C52}
+/* Over the list: search, filter, Excel, Add student */
+.att-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:67px;padding:12px 16px 14px;border-bottom:1px solid #474C52}
 .att-toolbar .button{display:inline-flex;align-items:center;gap:6px;flex:none}
+/* Marked / Absent: quiet tabs over the toolbar, underlined like the dashboard's */
+.att-tabs{display:flex;gap:4px;padding:6px 12px 0;border-bottom:1px solid #474C52}
+.att-tabs button{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:0 10px;border:0;background:none;color:var(--text-2);font:inherit;font-size:.86rem;font-weight:700;cursor:pointer}
+.att-tabs button:hover{color:var(--text)}
+.att-tabs button.is-on{color:var(--text)}
+.att-tabs button.is-on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--primary)}
+.att-tabs button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px;border-radius:8px}
+.att-tab-count{min-width:22px;padding:1px 7px;border-radius:999px;background:var(--bg-raised);color:var(--text-2);font-size:.72rem;font-variant-numeric:tabular-nums;text-align:center}
+.att-tabs button.is-on .att-tab-count{background:rgba(21,152,209,.2);color:var(--text)}
+[data-area] .att-toolbar>.att-selection{display:flex;flex:1 1 auto;flex-wrap:wrap;align-items:center;gap:8px}
+.att-selection strong{margin-right:4px;font-size:.9rem;font-variant-numeric:tabular-nums}
+.att-selection .att-selection-clear{margin-left:auto}
 
 /* Add a student: registered user or guest */
 .student-analysis-sheet.att-add-dialog{position:relative;width:min(100%,520px)}
@@ -83,6 +109,13 @@
 .dot.is-present{background:#27B66F}
 .dot.is-pending{background:#1598D1}
 .dot.is-rejected{background:#3A3E43}
+.dot.is-absent{background:transparent;box-shadow:inset 0 0 0 1.5px var(--text-3)}
+/* Absent and phone flags open their list */
+.att-breakdown-link{display:flex;align-items:center;gap:8px;width:max-content;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.att-breakdown-link:hover{color:var(--primary)}
+.att-breakdown-link:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+.att-breakdown-link.is-flag{color:var(--warn)}
+.att-breakdown-link.is-flag svg{margin:0 -1px 0 -2px}
 .att-hint{margin:0;color:var(--muted);font-size:.8rem;text-align:center}
 
 .att-table{padding:4px 0;overflow-x:auto;background:#2A2D31;color:var(--ink)}
@@ -90,12 +123,31 @@
 .att-table th{padding:12px 16px;color:var(--muted);font-size:.7rem;font-weight:700;letter-spacing:.06em;text-align:left;text-transform:uppercase}
 .att-table td{padding:11px 16px;border-top:1px solid #474C52;vertical-align:middle}
 .att-table tr.is-removed td:not(.att-status-cell){opacity:.5}
-.att-num{width:36px;color:var(--faint)}
+/* The number, and over it the row's tick box: shown on hover, on focus,
+   while rows are chosen - and always on a touch screen. */
+.att-table .att-num{position:relative;width:44px;color:var(--faint);font-variant-numeric:tabular-nums}
+.att-pick{position:absolute;inset:0;z-index:1;display:flex;align-items:center;padding-left:16px;cursor:pointer;opacity:0}
+/* Faded, the number would stack over the box and take its clicks. */
+.att-index{pointer-events:none}
+.att-pick input{position:absolute;opacity:0;pointer-events:none}
+.att-pick-box{display:grid;place-items:center;width:18px;height:18px;border:1.5px solid #5A6066;border-radius:5px;background:var(--bg-card);color:#FFFFFF;transition:background .12s,border-color .12s}
+.att-pick.is-on .att-pick-box{border-color:var(--primary);background:var(--primary)}
+.att-pick input:focus-visible+.att-pick-box{box-shadow:0 0 0 3px rgba(21,152,209,.35)}
+.att-table tr:hover .att-pick,.att-pick:focus-within,.att-table.is-selecting .att-pick{opacity:1}
+.att-table tr:hover .att-index,.att-num:focus-within .att-index,.att-table.is-selecting .att-index{opacity:0}
+.att-table tr.is-picked td{background:rgba(21,152,209,.08)}
+@media (hover:none){.att-pick{opacity:1}.att-index{opacity:0}}
 .att-name{display:block;font-weight:700}
 .att-sub{display:block;color:var(--muted);font-size:.8rem}
 .att-flag{display:block;color:var(--danger);font-size:.78rem;font-weight:600}
+.att-flag.is-soft{color:var(--warn)}
 td .att-flag{display:inline}
-.att-sub+.att-flag{display:block}
+.att-who .att-flag{display:block}
+/* Absent: how often they come - red under the minimum */
+.att-share{font-weight:700;font-variant-numeric:tabular-nums}
+.att-share.is-short{color:var(--danger)}
+.att-of{margin-left:6px;color:var(--muted);font-size:.8rem;font-variant-numeric:tabular-nums}
+.att-share-cell,.att-seen-cell{white-space:nowrap}
 .att-time{white-space:nowrap;font-variant-numeric:tabular-nums}
 /* Status pills: green present, blue pending, red removed - white, with the
    colour in the border and the word (a shade darker, to read on white). */
@@ -110,7 +162,17 @@ td .att-flag{display:inline}
 .att-row-action{text-align:right;white-space:nowrap}
 .att-row-action .link-button{color:var(--muted);font-size:.82rem;text-decoration:none}
 .att-row-action .link-button:hover{color:var(--danger)}
-.att-empty{margin:0;padding:28px;color:var(--muted);text-align:center}
+.att-row-action .att-add-back{color:var(--primary);font-weight:700}
+.att-row-action .att-add-back:hover:not(:disabled){color:var(--primary-hover);text-decoration:underline}
+.att-row-action .att-add-back:disabled{color:var(--faint);cursor:not-allowed}
+.att-empty{display:grid;justify-items:center;gap:4px;margin:0;padding:28px;color:var(--muted);text-align:center}
+.att-empty p{margin:0}
+
+/* The list of sessions: its search and filter, then the sessions, in one card */
+.att-sessions{padding:0;overflow:hidden}
+.att-sessions .att-toolbar{min-height:0}
+.att-sessions .min-list{border-radius:0;background:transparent;box-shadow:none}
+.att-list-flag{display:inline-flex;align-items:center;gap:4px;color:var(--warn);font-weight:700;font-variant-numeric:tabular-nums}
 
 /* Student page */
 .att-student{width:min(100%,430px);margin:24px auto 0;padding:28px;background:#2A2D31;color:var(--ink)}
@@ -149,7 +211,7 @@ td .att-flag{display:inline}
 @media (max-width:620px){
   .att-board-side{grid-template-columns:minmax(0,1fr)}
   .att-create-options{grid-template-columns:1fr}
-  .min-list-side span:first-child{display:none}
+  .min-list-side .att-list-count{display:none}
   .att-student{margin-top:8px;padding:22px}
 }
 
@@ -169,6 +231,31 @@ td .att-flag{display:inline}
   .att-session:not(.is-editing) .att-board-side{min-height:0}
   .att-session:not(.is-editing) .att-qr{display:flex;flex-direction:column;justify-content:center;flex:1;min-height:0;padding:16px}
   .att-session:not(.is-editing) .att-qr-button{display:flex;align-items:center;justify-content:center;flex:1;min-height:0;width:100%}
-  .att-session:not(.is-editing) .att-qr-button img{width:auto;height:auto;max-width:100%;max-height:100%}
+  /* The SVG fills the room left and keeps the code square in the middle of it. */
+  .att-session:not(.is-editing) .att-qr-button .att-qr-code{width:100%;height:100%;max-width:none;border-radius:0}
+  .att-session:not(.is-editing) .att-qr-button .att-qr-wait{width:auto;height:100%;max-width:100%}
   .att-session:not(.is-editing) .att-side{flex:none;gap:10px;padding:18px}
+  /* Two columns of counts: the height they save goes to the QR. */
+  .att-session:not(.is-editing) .att-breakdown{grid-template-columns:repeat(2,minmax(0,max-content));gap:6px 22px}
+}
+
+/* Download attendance (AttendanceExportModal): several sessions as one register. */
+.min-head-actions{display:flex;flex-wrap:wrap;gap:8px}
+.att-export-classes{display:grid;gap:8px;max-height:220px;margin:0;padding:0;overflow-y:auto;border:0}
+.att-export-classes .check-row span{flex:1;min-width:0;overflow-wrap:anywhere}
+.att-export-classes .check-row small{color:var(--text-3);font-size:.78rem;white-space:nowrap}
+.att-export-dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.att-export-dates label{display:grid;gap:4px}
+.dialog .att-export-summary{color:var(--text-3)}
+.att-export-min{display:grid;gap:4px}
+.att-export-min .input-with-unit{width:140px}
+.att-export-min .help{font-size:.8rem}
+
+/* Absent rows on a phone: attendance and last seen under the name, Mark present at the right. */
+@media (max-width:640px){
+  .att-table td.att-share-cell{grid-column:2;grid-row:2;color:var(--text-2);font-size:.82rem}
+  .att-table td.att-seen-cell{grid-column:2;grid-row:3;color:var(--text-2);font-size:.82rem}
+  .att-table td.att-seen-cell::before{content:"Last here "}
+  .att-table .att-pick{inset:-2px auto auto -4px;padding:0;width:24px;height:24px}
+  .att-table th.att-num,.att-table td.att-num{width:auto}
 }

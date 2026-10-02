@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import { closeDatabase, initializeDatabase, serverState, registrations, studentProfiles, tests } from '../src/db/index.js';
-import { testDocByCode } from '../src/data/test-repository.js';
+import { invalidateTestCache, testDocByCode } from '../src/data/test-repository.js';
 import { compensateForOutage } from '../src/services/outage.js';
 import { PublicTestError } from '../src/lib/errors.js';
 import { createTest, updateTestSettings } from '../src/services/test-service.js';
@@ -18,8 +18,8 @@ import { STRICT_GRACE_MS } from '../src/domain/strict-timing.js';
 import { activityLog } from '../src/domain/activity.js';
 import {
   adminDashboard, adminExportData, adminTests, archiveTest, bulkDecision, closeTest, decideRegistration, duplicateTest, gradeManualAnswer, releaseResults,
-  continueAttempt, pauseAttempt, reopenTest, resetTest, restartAllAttempts, submitStudentPaper, restartAttempt, restartQuiz, resumeAttempt, setLocationOverride, setTestEndTime,
-  startTest, updateStudentSapId
+  continueAttempt, pauseAttempt, reopenStudentPaper, reopenTest, setDeviceOverride, resetTest, restartAllAttempts, submitStudentPaper, restartAttempt, restartQuiz, resumeAttempt, setLocationOverride, setTestEndTime,
+  startTest, updateStudentSapId, csvForAdmin, paginateDashboard
 } from '../src/services/admin-service.js';
 import { buildStudentResponseSpreadsheet, buildTestSpreadsheet } from '../src/export/spreadsheet.js';
 import { saveTestPaper, testForEditing } from '../src/services/paper-service.js';
@@ -27,6 +27,7 @@ import { userDetail, userResponseData } from '../src/services/user-service.js';
 import { config } from '../src/config.js';
 import { END_GRACE_MS } from '../src/domain/attempt-rules.js';
 import { runScheduleOnce } from '../src/services/scheduler.js';
+import { checkTestDevice } from '../src/services/device-service.js';
 
 // These checks cover the lock rules, which are off by default (LOCK_ON_EXIT).
 config.lockOnExit = true;
@@ -1009,6 +1010,176 @@ try {
   await presence({ type: 'return', durationMs: 1_000, detail: 'fullscreen' });
   await closeTest(adminReq, keyboardCode);
 
+  /* --------------------------- REOPEN ONE STUDENT'S HANDED-IN PAPER ---- */
+  const reopenDocTest = await createTest(adminReq, {
+    ...objectivePayload(`Reopen ${identifier}`, { questionMix: { mcq: 2, msq: 0, short: 0 },
+      schedule: { endMode: 'at', endsAt: new Date(Date.now() + 30 * 60_000).toISOString() } }),
+    violationAction: 'record'
+  });
+  const reopenCode = reopenDocTest.test.code;
+  createdCodes.push(reopenCode);
+  const writer = { portalUser: { email: `regression-reopen-${identifier}@stu.upes.ac.in`, displayName: 'Reopen Student', role: 'student' } };
+  const writerSeat = await seatStudent(reopenCode, writer, String(100_000_000 + ((Date.now() + 7_000_003) % 890_000_000)));
+  await startTest(adminReq, reopenCode);
+  const writerPaper = await startAttempt(writerSeat.studentRequest, reopenCode);
+  const [firstQ, secondQ] = writerPaper.questions;
+  await saveAnswer(writerSeat.studentRequest, writerPaper.id, { questionId: firstQ.id, selectedOptions: [firstQ.options[0].id] });
+  await submitAttemptForStudent(writerSeat.studentRequest, writerPaper.id);
+  const writerRow = async () => (await registrations().findOne({ testCode: reopenCode, id: writerSeat.registration.id })).attempt;
+  assert.ok((await writerRow()).answers.some((answer) => answer.isCorrect !== null), 'marked when handed in');
+  // Time still left: it reopens as it is, answers kept, marks cleared until handed in again.
+  await reopenStudentPaper(adminReq, reopenCode, writerSeat.registration.id, {});
+  let reopenedPaper = await writerRow();
+  assert.equal(reopenedPaper.status, 'in_progress');
+  assert.equal(reopenedPaper.answers.find((answer) => answer.questionId === firstQ.id).selectedOptions.length, 1, 'answers kept');
+  assert.ok(reopenedPaper.answers.every((answer) => answer.isCorrect === null), 'marks cleared until it is handed in again');
+  assert.equal(reopenedPaper.events.at(-1).type, 'teacher_reopened');
+  assert.equal((await getAttempt(writerSeat.studentRequest, reopenCode)).status, 'in_progress', 'the student is back on the paper');
+  await saveAnswer(writerSeat.studentRequest, writerPaper.id, { questionId: secondQ.id, selectedOptions: [secondQ.options[0].id] });
+  await submitAttemptForStudent(writerSeat.studentRequest, writerPaper.id);
+  assert.equal((await writerRow()).answers.filter((answer) => answer.answeredAt).length, 2, 'answered on, then handed in again');
+  await expectPublicError(() => reopenStudentPaper(adminReq, reopenCode, writerSeat.registration.id, { addMinutes: 99_999 }), 400);
+  // The test's time is over (not closed yet): refused without minutes; with ten, only this student gets them.
+  // Past its end and the grace after it, so the scheduler acts on it.
+  await tests().updateOne({ code: reopenCode }, { $set: { endsAt: new Date(Date.now() - END_GRACE_MS - 60_000) } });
+  await invalidateTestCache(reopenCode);
+  await assert.rejects(() => reopenStudentPaper(adminReq, reopenCode, writerSeat.registration.id, {}), (error) => error.code === 'NEEDS_TIME');
+  await reopenStudentPaper(adminReq, reopenCode, writerSeat.registration.id, { addMinutes: 10 });
+  reopenedPaper = await writerRow();
+  const testEnd = Date.parse((await testDocByCode(reopenCode)).endsAt);
+  assert.ok(Math.abs(testEnd + reopenedPaper.extraMs - (Date.now() + 10 * 60_000)) < 5_000, 'their own end is ten minutes from now');
+  const ownEndView = await getAttempt(writerSeat.studentRequest, reopenCode);
+  assert.ok(Math.abs(Date.parse(ownEndView.deadlineAt) - (Date.now() + 10 * 60_000)) < 5_000, "and the student sees their own end");
+  await saveAnswer(writerSeat.studentRequest, writerPaper.id, { questionId: secondQ.id, selectedOptions: [secondQ.options[1].id] });
+  // The automatic end waits for the time this student was given...
+  await runScheduleOnce();
+  assert.equal((await testDocByCode(reopenCode)).isClosed, false, 'the test stays open for the time this student was given');
+  // ...and closes the test once it is up.
+  await registrations().updateOne({ testCode: reopenCode, id: writerSeat.registration.id }, { $set: { 'attempt.extraMs': 0 } });
+  await runScheduleOnce();
+  let reopenState = await testDocByCode(reopenCode);
+  assert.equal(reopenState.isClosed, true);
+  assert.equal(reopenState.closedAutomatically, true);
+  assert.equal((await writerRow()).submittedBy, 'time');
+  // Closed by its time: a paper can still be reopened, with minutes - the test opens for this student only.
+  await reopenStudentPaper(adminReq, reopenCode, writerSeat.registration.id, { addMinutes: 5 });
+  reopenState = await testDocByCode(reopenCode);
+  assert.equal(reopenState.isClosed, false, 'a test closed by its time opens again for this student');
+  assert.equal((await writerRow()).status, 'in_progress');
+  const newcomer = { portalUser: { email: `regression-newcomer-${identifier}@stu.upes.ac.in`, displayName: 'Late Newcomer', role: 'student' } };
+  await assert.rejects(async () => {
+    const seat = await seatStudent(reopenCode, newcomer, String(100_000_000 + ((Date.now() + 9_000_011) % 890_000_000)));
+    await startAttempt(seat.studentRequest, reopenCode);
+  }, 'nobody new can begin: its time is over');
+  // Closed by the teacher: Resume test comes first.
+  await closeTest(adminReq, reopenCode);
+  await assert.rejects(() => reopenStudentPaper(adminReq, reopenCode, writerSeat.registration.id, { addMinutes: 5 }), (error) => error.code === 'TEST_CLOSED');
+  // A timer on each question: its questions are final once passed, so never.
+  const perQuestion = await createTest(adminReq, {
+    ...objectivePayload(`Reopen strict ${identifier}`, { questionMix: { mcq: 2, msq: 0, short: 0 } }),
+    shuffleQuestions: false, strictTiming: true, strictNext: false, violationAction: 'record',
+    questions: [
+      { prompt: 'Strict one?', type: 'mcq', options: ['A', 'B'], correctOptions: ['0'], timeSeconds: 60 },
+      { prompt: 'Strict two?', type: 'mcq', options: ['A', 'B'], correctOptions: ['0'], timeSeconds: 60 }
+    ]
+  });
+  createdCodes.push(perQuestion.test.code);
+  const timedSeat = await seatStudent(perQuestion.test.code, writer, (await registrations().findOne({ testCode: reopenCode, id: writerSeat.registration.id })).sapId);
+  await startTest(adminReq, perQuestion.test.code);
+  const timedPaper = await startAttempt(timedSeat.studentRequest, perQuestion.test.code);
+  await expectPublicError(() => reopenStudentPaper(adminReq, perQuestion.test.code, timedSeat.registration.id, {}), 409);
+  await submitAttemptForStudent(timedSeat.studentRequest, timedPaper.id);
+  await assert.rejects(() => reopenStudentPaper(adminReq, perQuestion.test.code, timedSeat.registration.id, { addMinutes: 5 }),
+    (error) => error.status === 409 && /timer on each question/.test(error.message));
+  await closeTest(adminReq, perQuestion.test.code);
+
+  /* ------------------------------------ PHONES ONLY, LAPTOPS ONLY: DEVICES ---- */
+  {
+    const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1';
+    const WINDOWS_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+    const phoneSignals = { ua: IPHONE_UA, platform: 'iPhone', pointer: 'coarse', anyFine: false, hover: false, touchPoints: 5, screenW: 390, screenH: 844, dpr: 3 };
+    const laptopSignals = { ua: WINDOWS_UA, platform: 'Win32', chPlatform: 'Windows', chMobile: false, pointer: 'fine', anyFine: true, hover: true, touchPoints: 0, screenW: 1536, screenH: 864, dpr: 1.25 };
+    const onDevice = (request, ua) => ({ ...request, headers: { 'user-agent': ua } });
+    const laptopTest = await createTest(adminReq, { ...objectivePayload(`Laptops only ${identifier}`), devices: 'laptop', violationAction: 'record' });
+    const laptopCode = laptopTest.test.code;
+    createdCodes.push(laptopCode);
+    assert.equal(laptopTest.test.devices, 'laptop');
+    assert.equal((await getTest(studentReq, laptopCode)).test.devices, 'laptop', 'students see the rule');
+    const onPhone = { portalUser: { email: `regression-phone-${identifier}@stu.upes.ac.in`, displayName: 'Phone Student', role: 'student' } };
+    const phoneSeat = await seatStudent(laptopCode, onPhone, String(100_000_000 + ((Date.now() + 11_000_007) % 890_000_000)));
+    await startTest(adminReq, laptopCode);
+    // Before Begin, the page asks - and the answer is kept for the teacher.
+    const asked = await checkTestDevice(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, { stage: 'join', device: phoneSignals });
+    assert.deepEqual([asked.rule, asked.allowed, asked.device.kind, asked.device.label], ['laptop', false, 'phone', 'iPhone · Safari']);
+    assert.equal(asked.device.notes, undefined, 'the student is never told what gave them away');
+    const phoneRow = async () => registrations().findOne({ testCode: laptopCode, id: phoneSeat.registration.id });
+    assert.equal((await phoneRow()).device.kind, 'phone');
+    const firstSeen = (await phoneRow()).device.at;
+    await checkTestDevice(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, { stage: 'join', device: phoneSignals });
+    assert.equal(String((await phoneRow()).device.at), String(firstSeen), 'the same report again writes nothing');
+    // Begin refuses the phone, whatever the page did - and keeps what it saw.
+    await assert.rejects(() => startAttempt(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, { device: phoneSignals }),
+      (error) => error.status === 403 && error.code === 'DEVICE_NOT_ALLOWED' && /laptop or desktop computer/.test(error.message));
+    assert.equal((await phoneRow()).device.stage, 'begin');
+    // A page that sends nothing (an old one): the browser's name decides.
+    await assert.rejects(() => startAttempt(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, {}), (error) => error.code === 'DEVICE_NOT_ALLOWED');
+    // On a laptop they begin; the paper keeps what they began on.
+    const laptopPaper = await startAttempt(onDevice(phoneSeat.studentRequest, WINDOWS_UA), laptopCode, { device: laptopSignals });
+    assert.equal(laptopPaper.devices, 'laptop', 'the paper is told the rule, so a change reaches it');
+    assert.deepEqual((await phoneRow()).attempt.device, { kind: 'laptop', label: 'Windows · Chrome' });
+    // The paper opened on the phone mid-test: refused there, and noted in the activity.
+    const midTest = await checkTestDevice(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, { stage: 'paper', device: phoneSignals });
+    assert.equal(midTest.allowed, false);
+    const switchedRow = await phoneRow();
+    assert.equal(switchedRow.attempt.events.at(-1).type, 'device_kind_changed');
+    assert.ok(activityLog(await testDocByCode(laptopCode), switchedRow).some((entry) => entry.label === 'Opened the paper on a phone (began on a laptop)'));
+    assert.deepEqual(switchedRow.deviceLog.map((entry) => [entry.kind, entry.stage]), [['phone', 'join'], ['laptop', 'begin'], ['phone', 'paper']]);
+    // A laptop pretending to be an iPhone passes for a phone, and the teacher is told.
+    const pretender = { ...phoneSignals, platform: 'Win32', chPlatform: 'Windows', touchPoints: 1 };
+    await checkTestDevice(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, { stage: 'paper', device: pretender });
+    // The teacher sees it all: the device, what it began on, the signals, the notes; the filters find it.
+    let deviceRows = (await adminDashboard(adminReq, laptopCode)).registrations;
+    const shown = deviceRows.find((row) => row.id === phoneSeat.registration.id);
+    assert.equal(shown.device.kind, 'phone');
+    assert.equal(shown.device.suspicious, true);
+    assert.ok(shown.device.notes.some((note) => /system underneath is a computer/.test(note)));
+    assert.match(shown.device.facts, /screen 390×844 at ×3 · touch screen · 1 touch point · system Win32 \/ Windows/);
+    assert.deepEqual(shown.deviceBegan, { kind: 'laptop', label: 'Windows · Chrome' });
+    assert.equal(shown.deviceFits, false);
+    // Both ways a list is filtered: in the database (a page of the table), and in memory.
+    const filtered = async (filters) => {
+      const paged = (await adminDashboard(adminReq, laptopCode, { section: 'students', filters, pageSize: 25 })).registrations.map((row) => row.id);
+      const inMemory = paginateDashboard(await adminDashboard(adminReq, laptopCode), { section: 'students', filters }).registrations.map((row) => row.id);
+      assert.deepEqual(inMemory, paged, filters);
+      return paged;
+    };
+    assert.deepEqual(await filtered('device:phone'), [phoneSeat.registration.id]);
+    assert.deepEqual(await filtered('device:laptop'), []);
+    assert.deepEqual(await filtered('devicecheck:disagree'), [phoneSeat.registration.id]);
+    // An exception: that student may use what they have, from Begin to the paper.
+    const other = { portalUser: { email: `regression-exception-${identifier}@stu.upes.ac.in`, displayName: 'Excepted Student', role: 'student' } };
+    const otherSeat = await seatStudent(laptopCode, other, String(100_000_000 + ((Date.now() + 13_000_019) % 890_000_000)));
+    await expectPublicError(() => startAttempt(onDevice(otherSeat.studentRequest, IPHONE_UA), laptopCode, { device: phoneSignals }), 403);
+    await setDeviceOverride(adminReq, laptopCode, otherSeat.registration.id, { enabled: true });
+    const exceptedSeat = onDevice(otherSeat.studentRequest, IPHONE_UA);
+    assert.equal((await checkTestDevice(exceptedSeat, laptopCode, { stage: 'join', device: phoneSignals })).allowed, true);
+    await startAttempt(exceptedSeat, laptopCode, { device: phoneSignals });
+    assert.deepEqual(await filtered('devicecheck:exception'), [otherSeat.registration.id]);
+    deviceRows = (await adminDashboard(adminReq, laptopCode)).registrations;
+    assert.equal(deviceRows.find((row) => row.id === otherSeat.registration.id).deviceOverride, true);
+    // The spreadsheet carries it too.
+    const csvRows = csvForAdmin(await adminDashboard(adminReq, laptopCode)).split('\r\n');
+    assert.ok(csvRows[0].includes('"Device","Began on","Device signals","Device notes","Device exception","Devices seen"'));
+    assert.ok(csvRows.some((line) => line.includes('"phone (iPhone · Safari)","laptop (Windows · Chrome)"')));
+    // Switched to phones only, mid-test: the rule reaches the students.
+    await updateTestSettings(adminReq, laptopCode, { devices: 'phone' });
+    assert.equal((await checkTestDevice(onDevice(phoneSeat.studentRequest, IPHONE_UA), laptopCode, { stage: 'paper', device: phoneSignals })).allowed, true);
+    // The test's creator may preview on anything.
+    const ownerLook = await checkTestDevice({ ...adminReq, headers: { 'user-agent': WINDOWS_UA } }, laptopCode, { stage: 'join', device: phoneSignals });
+    assert.equal(ownerLook.allowed, true);
+    await closeTest(adminReq, laptopCode);
+  }
+
   /* ------------------------------------------ LEAST-OVERLAP QUESTION DRAW ---- */
   const drawBank = Array.from({ length: 6 }, (_unused, index) => ({
     prompt: `Draw question ${index + 1}?`, type: 'mcq', options: ['A', 'B'], correctOptions: ['0']
@@ -1249,7 +1420,7 @@ try {
     'free navigation across the paper, the shared end time for late starters, time up (grace, lock, extension)',
     'and automatic submission by the scheduler, scheduled starts, durations from the real start,',
     'strict per-question timing (forward only, server-side timeouts, auto-submit on the last question),',
-    'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
+    'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, reopening one handed-in paper (with minutes for that student alone), phones-only and laptops-only tests (Begin refused, the paper covered, exceptions, what the teacher sees), rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
     'close, manual marking, analysis, Excel export, restart/reset, all result-release modes, and the quiz list (scores, duplicate, archive).'
   ].join(' '));
 } finally {

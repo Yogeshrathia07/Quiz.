@@ -1,4 +1,5 @@
 import { tidyLines } from './rich-text.js';
+import { DEVICE_RULES } from './device.js';
 import { PublicTestError } from '../lib/errors.js';
 import { asInteger } from '../lib/crypto.js';
 import { dateMs } from '../lib/time.js';
@@ -137,6 +138,9 @@ export function buildTest(raw) {
   // Students must use a private (Incognito) window, where browser extensions
   // are off. Off unless the admin turns it on, like the venue check.
   const requirePrivateWindow = raw.requirePrivateWindow === true;
+  // Which devices may sit it: any, phones (and tablets) only, or laptops (and
+  // desktops) only - see domain/device.js. Any, unless the admin chooses.
+  const devices = DEVICE_RULES.includes(raw.devices) ? raw.devices : 'any';
   // Strict timing: a time per question, one at a time, forward only.
   const strictTiming = raw.strictTiming === true;
   // Whether students may move on before a question's time runs out. Off, a
@@ -193,6 +197,7 @@ export function buildTest(raw) {
     shuffleQuestions,
     allowGuests,
     requirePrivateWindow,
+    devices,
     questionLayout,
     strictTiming,
     strictNext,

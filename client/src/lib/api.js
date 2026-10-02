@@ -54,8 +54,11 @@ export async function api(url, options = {}) {
 export const post = (url, body) => api(url, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
 
 /** Streams a file from the server straight to the browser's downloads. */
-export async function downloadFile(path, fallbackName) {
-  const response = await fetch(path, { credentials: 'same-origin' });
+export async function downloadFile(path, fallbackName, body) {
+  // With a body, it is posted as JSON - for a request too big for an address.
+  const response = await fetch(path, body === undefined ? { credentials: 'same-origin' } : {
+    method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+  });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     throw new Error(data.error || 'Could not download the spreadsheet.');

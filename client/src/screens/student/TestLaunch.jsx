@@ -4,10 +4,11 @@ import { post } from '../../lib/api.js';
 import { durationLabel } from '../../lib/format.js';
 import { LocationHelp, LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
 import { locationPermission } from '../../lib/geo.js';
+import { readDeviceSignals } from '../../lib/device.js';
 import { fullscreenSupported, markBegan, requestTestFullscreen } from '../../lib/useAwayMonitor.js';
 import { EndLine, TestHeader } from './StatusScreens.jsx';
 
-export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast, windowKind }) {
+export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast, windowKind, deviceBlock = null, deviceChecking = false, onDeviceRefused }) {
   const [busy, setBusy] = useState(false);
   // The venue check is its own step above Begin (components/LocationCheck).
   // What the server says about the reading - too vague to place them - is kept
@@ -47,7 +48,9 @@ export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast
         try { point = await location.request(); } catch (error) { locationError = error; }
       }
       try {
-        const started = await post(`/api/tests/${encodeURIComponent(code)}/start`, { ...(point || {}), window: windowKind });
+        // What this device is, for tests that allow only phones or only laptops:
+        // the server decides here, whatever this page showed (domain/device.js).
+        const started = await post(`/api/tests/${encodeURIComponent(code)}/start`, { ...(point || {}), window: windowKind, device: readDeviceSignals() });
         // Start already returns the full authorised paper. Reusing it avoids a
         // second request per student right when the class presses Begin.
         if (started?.attempt) {
@@ -58,11 +61,22 @@ export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast
         // The venue step above now says what went wrong and how to fix it.
         if (error.code === 'LOCATION_NEEDED' && locationError) { setBusy(false); showVenue(); return; }
         if (error.code === 'LOCATION_IMPRECISE') { setServerProblem(error.message); setBusy(false); showVenue(); return; }
+        // Not this device: out of fullscreen, and the page says why (asked again).
+        if (error.code === 'DEVICE_NOT_ALLOWED') {
+          if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+          showToast(error.message);
+          setBusy(false);
+          onDeviceRefused?.();
+          return;
+        }
         throw error;
       }
       await reload();
     } catch (error) { showToast(error.message); setBusy(false); }
   };
+
+  // Phones only or laptops only, and this is not one: no Begin here.
+  if (deviceBlock) return deviceBlock;
 
   return (
     <section className="join-card card">
@@ -112,8 +126,8 @@ export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast
       </div>
 
       {canFullscreen ? (
-        <button className="button button-success button-wide launch-begin" disabled={busy} onClick={begin}>
-          Enter fullscreen &amp; begin
+        <button className="button button-success button-wide launch-begin" disabled={busy || deviceChecking} onClick={begin}>
+          {deviceChecking ? 'Checking your device…' : <>Enter fullscreen &amp; begin</>}
         </button>
       ) : (
         <>
@@ -124,8 +138,8 @@ export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast
               so stay on this tab until you submit.
             </p>
           </div>
-          <button className="button button-success button-wide launch-begin" disabled={busy} onClick={begin}>
-            Begin test
+          <button className="button button-success button-wide launch-begin" disabled={busy || deviceChecking} onClick={begin}>
+            {deviceChecking ? 'Checking your device…' : 'Begin test'}
           </button>
         </>
       )}
