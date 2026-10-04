@@ -11,6 +11,7 @@ import { usePageTitle } from '../../brand.js';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import {
   ABSENT_FILTERS, MIN_SHARE, PHONE_FLAG_IDS, absentees, attendanceFilters, sortAbsent, sortMarks
 } from './attendance-filters.js';
@@ -436,8 +437,10 @@ export function AttendanceSessionScreen({ code, go, showToast }) {
         <aside className="att-board-side">
           {session.isOpen && session.qr ? <LiveQr session={session}/> : (
             <div className="att-qr att-qr-closed">
-              <strong>Attendance closed</strong>
-              <p>Someone came late? Take it again: a new QR opens and everyone already present stays present.</p>
+              <strong className="page-heading">
+                Attendance closed
+                <InfoTip label="Someone came late?">Take attendance again: a new QR opens, and everyone already present stays present.</InfoTip>
+              </strong>
             </div>
           )}
           <div className="att-side">

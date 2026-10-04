@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, post } from '../../../lib/api.js';
 import { dateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
+import { InfoTip } from '../../../components/InfoTip.jsx';
 import { RichText } from '../../../components/RichText.jsx';
 
-const markValue = (answer) => (answer.isCorrect === null ? '' : answer.isCorrect ? '1' : '0');
+const markValue = (answer) => (answer.marks === null || answer.marks === undefined ? '' : String(answer.marks));
 
 function AnswerCard({ answer, mark, onMark, readOnly }) {
   return (
@@ -15,17 +16,22 @@ function AnswerCard({ answer, mark, onMark, readOnly }) {
           <RichText className="analysis-prompt" text={answer.prompt}/>
         </div>
         {answer.manualGrading && !readOnly ? (
-          <label className="analysis-mark-input">
-            Mark
-            <select className="select" value={mark ?? ''} onChange={(event) => onMark(event.target.value)}>
-              <option value="">Not marked</option>
-              <option value="1">Correct (1)</option>
-              <option value="0">Incorrect (0)</option>
-            </select>
-          </label>
+          // Any mark from 0 to what the question is worth; 0 and full marks one tap away.
+          <div className="analysis-mark-input">
+            <label>
+              <span>Marks</span>
+              <input className="text-input" type="number" min="0" max={answer.maxMarks} step="any" inputMode="decimal" placeholder="—"
+                value={mark ?? ''} onChange={(event) => onMark(event.target.value)} aria-label={`Marks out of ${answer.maxMarks}`}/>
+              <span className="analysis-mark-of">/ {answer.maxMarks}</span>
+            </label>
+            <div className="analysis-mark-quick">
+              <button type="button" className={mark === '0' ? 'is-on' : undefined} onClick={() => onMark('0')}>0</button>
+              <button type="button" className={mark === String(answer.maxMarks) ? 'is-on' : undefined} onClick={() => onMark(String(answer.maxMarks))}>Full</button>
+            </div>
+          </div>
         ) : (
-          <span className={`analysis-mark ${answer.isCorrect ? 'success' : answer.isCorrect === null ? 'warn' : 'danger'}`}>
-            {answer.isCorrect === null ? (answer.manualGrading ? 'Not marked' : 'Not answered') : answer.isCorrect ? '1 / 1' : '0 / 1'}
+          <span className={`analysis-mark ${answer.isCorrect ? 'success' : answer.partial ? 'warn' : answer.isCorrect === null ? 'warn' : 'danger'}`}>
+            {answer.isCorrect === null ? (answer.manualGrading ? 'Not marked' : 'Not answered') : `${answer.marks} / ${answer.maxMarks}`}
           </span>
         )}
       </div>
@@ -33,6 +39,15 @@ function AnswerCard({ answer, mark, onMark, readOnly }) {
         <div><span>Student answer</span><p>{answer.selectedAnswer || 'No answer submitted.'}</p></div>
         <div><span>Answer key</span><p>{answer.manualGrading ? 'Manual review required' : answer.correctAnswer}</p></div>
       </div>
+      {answer.late && (
+        <p className="analysis-answer-burst analysis-answer-late">
+          <span>Arrived late — made {clock(answer.late.madeAt)}, received {clock(answer.late.arrivedAt)}</span>
+          <InfoTip label="About late answers">
+            Made on the student's device before its time ran out (by the device's clock) and held there by a lost connection,
+            then sent once it was back. Check it against the offline periods in the activity log.
+          </InfoTip>
+        </p>
+      )}
       {answer.textBursts?.length > 0 && (
         <p className="analysis-answer-burst">
           Text appeared all at once: {answer.textBursts.map((chars) => `${chars} characters`).join(', ')} — pasted (a phone keyboard's clipboard) or voice typing.
@@ -49,22 +64,30 @@ function AnswerCard({ answer, mark, onMark, readOnly }) {
 }
 
 const seconds = (ms) => `${Math.round((Number(ms) || 0) / 1000)}s`;
+const duration = (ms) => {
+  const total = Math.round((Number(ms) || 0) / 1000);
+  return total >= 60 ? `${Math.floor(total / 60)}m ${total % 60}s` : `${total}s`;
+};
 
 const clock = (value) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
-const KIND_LABEL = { join: 'Joined', start: 'Start', answer: 'Answer', exit: 'Left', return: 'Back', flag: 'Blocked', lock: 'Lock', restart: 'Restart', submit: 'Submit', other: '' };
+const KIND_LABEL = {
+  join: 'Joined', start: 'Start', answer: 'Answer', exit: 'Left', return: 'Back', flag: 'Blocked', lock: 'Lock', restart: 'Restart', submit: 'Submit',
+  offline: 'Offline', late: 'Late', other: ''
+};
 
 /** The student's whole test in order: joining, every answer and change, every exit and return, submitting. */
 function ActivityLog({ entries }) {
   const [filter, setFilter] = useState('all');
   if (!entries.length) return <p className="help">No activity recorded yet.</p>;
   const shown = filter === 'all' ? entries
-    : filter === 'answers' ? entries.filter((entry) => entry.kind === 'answer')
-      : entries.filter((entry) => ['exit', 'return', 'flag', 'lock'].includes(entry.kind));
+    : filter === 'answers' ? entries.filter((entry) => entry.kind === 'answer' || entry.kind === 'late')
+      : filter === 'offline' ? entries.filter((entry) => entry.kind === 'offline' || entry.kind === 'late')
+        : entries.filter((entry) => ['exit', 'return', 'flag', 'lock'].includes(entry.kind));
   return (
     <details className="activity-log" open>
       <summary>Activity log ({entries.length} events)</summary>
       <div className="activity-filter" role="group" aria-label="Show">
-        {[['all', 'Everything'], ['answers', 'Answers'], ['integrity', 'Exits & blocked']].map(([id, label]) => (
+        {[['all', 'Everything'], ['answers', 'Answers'], ['integrity', 'Exits & blocked'], ['offline', 'Offline & late']].map(([id, label]) => (
           <button key={id} type="button" className={filter === id ? 'is-on' : ''} onClick={() => setFilter(id)}>{label}</button>
         ))}
       </div>
@@ -75,7 +98,9 @@ function ActivityLog({ entries }) {
             <span className="activity-kind">{KIND_LABEL[entry.kind] ?? ''}</span>
             <span className="activity-text">
               {entry.label}
-              {entry.durationMs !== null && entry.durationMs !== undefined ? ` · ${seconds(entry.durationMs)} away` : ''}
+              {/* An offline period says its length in its own words. */}
+              {entry.kind !== 'offline' && entry.durationMs !== null && entry.durationMs !== undefined ? ` · ${seconds(entry.durationMs)} away` : ''}
+              {entry.late ? ` · received ${clock(entry.late.arrivedAt)}` : ''}
               {entry.detail ? <small>{entry.detail}</small> : null}
             </span>
           </li>
@@ -101,7 +126,8 @@ function IntegrityReport({ integrity, location }) {
         <div><span>Left fullscreen</span><strong>{leaves.fullscreen}</strong></div>
         <div><span>Switched app / tab</span><strong>{leaves.tab_switch}</strong></div>
         <div><span>Other window or pop-up</span><strong>{leaves.focus_lost}</strong></div>
-        <div><span>Went offline</span><strong>{leaves.offline}</strong></div>
+        <div><span>Went offline (not counted)</span><strong>{integrity.offline ? `${integrity.offline.count}×${integrity.offline.ms ? ` · ${duration(integrity.offline.ms)}` : ''}` : leaves.offline}</strong></div>
+        <div><span>Answers arrived late</span><strong>{integrity.lateAnswers || 0}</strong></div>
         <div><span>Split screen</span><strong>{leaves.split_screen}</strong></div>
         <div><span>Copy / paste / drag tries</span><strong>{(integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)}</strong></div>
         <div><span>Text all at once</span><strong>{integrity.flags?.text_burst || 0}</strong></div>
@@ -153,11 +179,16 @@ export function StudentAnalysisModal({ code, registration, onClose, onSaved, sho
     event.preventDefault();
     const entries = Object.entries(marks).filter(([, value]) => value !== '');
     if (!entries.length) return showToast('Choose at least one short-answer mark.');
+    // Checked here first, so a save is all of the marks or none of them.
+    const byId = new Map((data?.answers || []).map((answer) => [answer.questionId, answer]));
+    const outOfRange = entries.map(([questionId, value]) => ({ answer: byId.get(Number(questionId)), value: Number(value) }))
+      .find(({ answer, value }) => answer && !(Number.isFinite(value) && value >= 0 && value <= answer.maxMarks));
+    if (outOfRange) return showToast(`Question ${outOfRange.answer.questionNumber}: give a mark from 0 to ${outOfRange.answer.maxMarks}.`);
     setSaving(true);
     try {
       await Promise.all(entries.map(([questionId, value]) => post(`${basePath}/manual-grade`, {
         questionId: Number(questionId),
-        isCorrect: Number(value)
+        marks: Number(value)
       })));
       showToast('Short-answer marks saved.');
       onSaved();
@@ -188,20 +219,22 @@ export function StudentAnalysisModal({ code, registration, onClose, onSaved, sho
       <div className="analysis-summary">
         <div><span>Attempt</span><strong>{{ submitted: 'Submitted', in_progress: 'In progress' }[data.attempt?.status] || 'Not started'}</strong></div>
         <div><span>Score</span><strong>{data.attempt ? `${data.attempt.score} / ${data.attempt.total}` : '—'}</strong></div>
-        <div><span>Answered</span><strong>{data.attempt ? `${data.attempt.answered} / ${data.attempt.total}` : '—'}</strong></div>
+        <div><span>Answered</span><strong>{data.attempt ? `${data.attempt.answered} / ${data.attempt.questions ?? data.attempt.total}` : '—'}</strong></div>
       </div>
 
       {showIntegrity && <IntegrityReport integrity={data.integrity} location={data.location}/>}
 
       {showIntegrity && data.location && (
         <section className="integrity-report">
-          <h2>Location checks</h2>
+          <h2>
+            Location checks{' '}
+            <InfoTip label="About location checks">Uncertain GPS readings are recorded separately and are not treated as outside the venue.</InfoTip>
+          </h2>
           <div className="analysis-summary">
             <div><span>In range</span><strong>{data.location.inRange || 0}</strong></div>
             <div><span>Out of range</span><strong>{data.location.outOfRange || 0}</strong></div>
             <div><span>Inconclusive</span><strong>{data.location.inconclusive || 0}</strong></div>
           </div>
-          <p className="help">Uncertain GPS readings are recorded separately and are not treated as outside the venue.</p>
         </section>
       )}
 

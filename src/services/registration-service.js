@@ -273,11 +273,12 @@ async function moveSeatHere(res, test, registration) {
 
 /**
  * Every test this account has registered for, newest first, with the marks
- * wherever that test's release policy allows them to be shown.
+ * wherever that test's release policy allows them to be shown. A test its
+ * teacher has archived is left out, whatever stage it reached.
  */
 export async function myResults(req) {
   const email = normalizeEmail(req.portalUser?.email);
-  const docs = await testsForEmail(email);
+  const docs = (await testsForEmail(email)).filter((test) => !test.archivedAt);
   return {
     results: docs.flatMap((test) => (test.registrations || []).map((registration) => {
       const attempt = registration.attempt;
@@ -285,8 +286,12 @@ export async function myResults(req) {
       return {
         code: test.code,
         title: test.title,
+        // A teacher who sat their own test: theirs opens on its manage page.
+        isOwner: test.ownerEmail === email,
         registrationStatus: registration.status,
         attemptStatus: attempt?.status || null,
+        // Ended with no paper begun: missed, not "not started".
+        testClosed: Boolean(test.isClosed),
         startedAt: iso(attempt?.startedAt),
         submittedAt: iso(attempt?.submittedAt),
         timeTakenSeconds: timeTakenSeconds(attempt),
@@ -294,6 +299,8 @@ export async function myResults(req) {
         totalQuestions: attempt?.questions?.length || 0,
         released: Boolean(summary?.released),
         score: summary?.released ? summary.score : null,
+        // Out of the paper's full marks, which can differ from its number of questions.
+        totalMarks: summary?.released ? summary.totalMarks : null,
         message: summary && !summary.released ? summary.message : '',
         // Why the marks are not shown yet: 'admin' (waiting for release),
         // 'after_quiz' (shown when the test ends) or 'manual' (being marked).

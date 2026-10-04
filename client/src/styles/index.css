@@ -14,3 +14,5 @@
 @import "./craft.css";
 /* theme.css is the dark theme, over everything above (every page). */
 @import "./theme.css";
+/* review.css styles the Results tab list and the result review, after the theme so its phone layout wins. */
+@import "./review.css";

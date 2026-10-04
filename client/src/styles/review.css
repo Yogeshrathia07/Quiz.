@@ -1,0 +1,112 @@
+/* ---------------------------------------------------------- Results tab
+   One line per paper - who, answered, marks, finished, Review - and a small
+   card per paper on a phone. Freezing sits with the other actions. */
+.results-frozen-note{display:flex;align-items:center;gap:8px;margin:0 16px 10px;padding:10px 12px;border-radius:var(--r-md,10px);background:rgba(21,152,209,.1);color:var(--primary);font-size:.86rem;font-weight:600}
+.freeze-toggle.is-frozen{border-color:var(--primary);background:rgba(21,152,209,.14);color:var(--primary)}
+.review-table tr.result-row{cursor:pointer}
+.review-table .result-score{white-space:nowrap}
+.review-table .result-to-mark{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding:2px 7px;border-radius:999px;background:rgba(243,154,74,.16);color:var(--warn);font-size:.72rem;font-weight:700;vertical-align:middle}
+.review-table .result-action{text-align:right;white-space:nowrap}
+@media (max-width:760px){
+  .live-table.review-table thead{display:none}
+  .live-table.review-table tr.result-row{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"who marks" "when action";align-items:center;gap:6px 12px;margin-bottom:8px;padding:12px 14px}
+  .live-table.review-table tr.result-row td{display:block;width:auto;margin:0;padding:0;border:0}
+  .live-table.review-table tr.result-row td::before{display:none}
+  .live-table.review-table tr.result-row td[data-label="Student"]{grid-area:who;min-width:0}
+  .live-table.review-table tr.result-row td[data-label="Marks"]{grid-area:marks;text-align:right}
+  .live-table.review-table tr.result-row td[data-label="Answered"]{display:none}
+  .live-table.review-table tr.result-row td[data-label="Finished"]{grid-area:when;font-size:.8rem}
+  .live-table.review-table tr.result-row td[data-label="Actions"]{grid-area:action}
+}
+
+/* ------------------------------------------------------- Review results
+   The whole screen: what to review and where each answer stands in a bar at
+   the top, one answer in the middle (the only part that scrolls), Previous
+   and Next in a bar at the bottom. On a wide screen the content keeps to a
+   readable column. */
+.qr-preview-overlay .student-analysis-sheet.review-sheet{position:fixed;inset:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:auto;max-width:none;height:auto;max-height:none;padding:0;border-radius:0;box-shadow:none;overflow:hidden;--review-gutter:24px}
+.review-column{width:min(100%,1280px);margin:0 auto}
+.review-bar{padding:18px var(--review-gutter) 12px;border-bottom:1px solid var(--border);background:var(--bg-card)}
+.review-bar .review-column{display:grid;gap:12px}
+.review-body{overflow-y:auto;overscroll-behavior:contain;padding:20px var(--review-gutter) 28px}
+/* The close button keeps to the column's right edge, beside the mode switch. */
+.review-sheet>.modal-close{top:22px;right:calc(var(--review-gutter) + max(0px, (100% - 2 * var(--review-gutter) - 1280px) / 2))}
+.review-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding-right:52px}
+.review-head h1{font-size:1.35rem}
+.review-modes{flex:none}
+.review-nav{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center}
+.review-nav .select{min-width:0;width:100%;min-height:42px}
+.review-step{display:grid;place-items:center;width:42px;height:42px;padding:0;border:1px solid var(--border);border-radius:50%;background:transparent;color:var(--text);cursor:pointer;transition:border-color .15s,background .15s}
+.review-step:hover:not(:disabled){border-color:var(--primary);background:rgba(21,152,209,.1)}
+.review-step:disabled{opacity:.35;cursor:default}
+.review-strip-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 12px;color:var(--text-2);font-size:.86rem}
+.review-strip-head strong{color:var(--text);font-size:1rem}
+.review-only{margin:0;font-size:.86rem}
+.review-strip{display:flex;gap:6px;overflow-x:auto;padding:2px 2px 6px;scrollbar-width:thin}
+.review-dot{flex:none;display:grid;place-items:center;min-width:34px;height:34px;padding:0 6px;border:1.5px solid transparent;border-radius:10px;background:var(--bg-raised);color:var(--text-2);font:inherit;font-size:.78rem;font-weight:700;cursor:pointer;transition:transform .12s,border-color .12s}
+.review-dot:hover{transform:translateY(-1px)}
+.review-dot.is-full{background:rgba(39,182,111,.18);color:var(--ok)}
+.review-dot.is-part{background:rgba(163,201,64,.2);color:#A9CF52}
+.review-dot.is-zero{background:rgba(239,91,95,.16);color:#F0707C}
+.review-dot.is-pending{background:rgba(243,154,74,.2);color:var(--warn)}
+.review-dot.is-blank{background:var(--bg-raised);color:var(--text-3)}
+.review-dot.is-changed{box-shadow:inset 0 -3px 0 var(--primary)}
+.review-dot.is-current{border-color:var(--text);transform:none}
+.review-card{display:grid;gap:14px;padding:18px;border:1px solid var(--border);border-radius:var(--r-lg,16px);background:var(--bg-raised)}
+.review-card.is-pending{border-color:rgba(243,154,74,.55)}
+.review-card-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:8px 12px}
+.review-card-head strong{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:1.02rem}
+.review-card-head strong span{color:var(--text-2);font-weight:500;font-size:.88rem}
+.review-card-meta{display:block;margin-top:2px;color:var(--text-3);font-size:.8rem}
+.review-who .person-avatar{width:30px;height:30px;font-size:.72rem}
+.review-state{padding:4px 10px;border-radius:999px;background:var(--bg-input);color:var(--text-2);font-size:.75rem;font-weight:700;white-space:nowrap}
+.review-state.is-full{background:rgba(39,182,111,.18);color:var(--ok)}
+.review-state.is-part{background:rgba(163,201,64,.2);color:#A9CF52}
+.review-state.is-zero{background:rgba(239,91,95,.16);color:#F0707C}
+.review-state.is-pending{background:rgba(243,154,74,.2);color:var(--warn)}
+.review-prompt{color:var(--text);font-size:.98rem;line-height:1.55}
+.review-options{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.review-options li{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-md,10px);color:var(--text-2)}
+.review-options li.is-right{border-color:rgba(39,182,111,.6);background:rgba(39,182,111,.12);color:var(--text)}
+.review-options li.is-wrong{border-color:rgba(239,91,95,.6);background:rgba(239,91,95,.1);color:var(--text)}
+.review-options li.is-key{border-style:dashed;border-color:rgba(39,182,111,.6)}
+.review-option-mark{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:var(--bg-input)}
+.is-right .review-option-mark,.is-key .review-option-mark{background:rgba(39,182,111,.25);color:var(--ok)}
+.is-wrong .review-option-mark{background:rgba(239,91,95,.22);color:#F0707C}
+.review-option-tag{color:var(--text-3);font-size:.74rem;font-weight:700;white-space:nowrap}
+.review-written{max-height:min(38vh,320px);overflow:auto;padding:12px 14px;border-radius:var(--r-md,10px);background:var(--bg-input);color:var(--text);line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.review-none{color:var(--text-3);font-style:italic}
+.review-mark{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding-top:12px;border-top:1px solid var(--border)}
+.review-mark-box{display:flex;align-items:center;gap:8px;margin:0;color:var(--text-2);font-weight:600}
+.review-mark-box .text-input{width:92px;min-height:42px;height:42px;text-align:center;font-size:1.05rem;font-weight:700}
+.review-mark-of{white-space:nowrap}
+.review-mark-quick{display:flex;gap:6px}
+.review-mark-quick button{min-height:36px;padding:0 14px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text-2);font:inherit;font-size:.84rem;font-weight:700;cursor:pointer}
+.review-mark-quick button:hover:not(:disabled){border-color:var(--primary);color:var(--text)}
+.review-mark-quick button.is-on{border-color:transparent;background:var(--primary);color:#FFFFFF}
+.review-mark-source{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;flex-basis:100%;margin:0;color:var(--text-3);font-size:.82rem}
+.review-mark-source.is-changed{color:var(--primary)}
+.review-mark-source .link-button{display:inline-flex;align-items:center;gap:4px}
+.review-mark-saving{margin:0;color:var(--text-3);font-size:.8rem}
+.review-mark.is-frozen{justify-content:space-between}
+.review-mark.is-frozen strong{font-size:1.2rem}
+.review-mark.is-frozen strong span{color:var(--text-2);font-weight:500}
+.review-mark.is-frozen p{display:flex;align-items:center;gap:6px;margin:0;color:var(--primary);font-size:.84rem}
+.review-foot{padding:12px var(--review-gutter) calc(12px + env(safe-area-inset-bottom));border-top:1px solid var(--border);background:var(--bg-card)}
+.review-foot .review-column{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px}
+.review-count{color:var(--text-2);font-size:.86rem;text-align:center}
+.review-empty{padding:24px 0;text-align:center}
+@media (max-width:760px){
+  .qr-preview-overlay .student-analysis-sheet.review-sheet{--review-gutter:16px}
+  .review-bar{padding-top:14px;padding-bottom:10px}
+  .review-bar .review-column{gap:10px}
+  .review-body{padding-top:14px;padding-bottom:20px}
+  .review-sheet>.modal-close{top:16px}
+  .review-head{padding-right:46px}
+  .review-head h1{font-size:1.2rem}
+  .review-modes{flex-basis:100%;display:flex}
+  .review-modes button{flex:1}
+  .review-card{padding:14px}
+  .review-foot .button{min-height:46px}
+  .review-count-noun{display:none}
+}

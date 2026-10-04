@@ -28,7 +28,6 @@
 /* Create */
 .att-create{background:#2A2D31;color:var(--ink)}
 .att-create .text-input{margin-bottom:6px}
-.att-create .att-create-help{margin:0 0 6px;font-size:.8rem}
 .att-create-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:4px 24px;margin-top:10px}
 .att-create .location-settings{margin-top:10px;padding-top:12px;border-top:1px solid var(--line)}
 
@@ -82,7 +81,6 @@
 /* Add a student: registered user or guest */
 .student-analysis-sheet.att-add-dialog{position:relative;width:min(100%,520px)}
 .att-add-dialog h1{margin:0 48px 4px 0;font-size:1.4rem;font-weight:700;letter-spacing:-.03em}
-.att-add-intro{margin:0 0 16px;color:var(--muted);font-size:.9rem}
 .att-add-dialog .segmented{margin-bottom:16px}
 .att-add-body{height:min(300px,52vh)}
 .att-add-registered{display:grid;grid-template-rows:auto minmax(0,1fr);align-content:start;gap:10px;height:100%}
@@ -163,7 +161,7 @@ td .att-flag{display:inline}
 .att-row-action .link-button{color:var(--muted);font-size:.82rem;text-decoration:none}
 .att-row-action .link-button:hover{color:var(--danger)}
 .att-row-action .att-add-back{color:var(--primary);font-weight:700}
-.att-row-action .att-add-back:hover:not(:disabled){color:var(--primary-hover);text-decoration:underline}
+.att-row-action .att-add-back:hover:not(:disabled){color:var(--primary-hover)}
 .att-row-action .att-add-back:disabled{color:var(--faint);cursor:not-allowed}
 .att-empty{display:grid;justify-items:center;gap:4px;margin:0;padding:28px;color:var(--muted);text-align:center}
 .att-empty p{margin:0}

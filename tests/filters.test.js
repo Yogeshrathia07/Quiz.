@@ -6,6 +6,9 @@ import {
   ABSENT_FILTERS, ATTENDANCE_FILTERS, absentees, attendanceFilters, sessionFilters, sortMarks, sortSessions, whenOf
 } from '../client/src/screens/attendance/attendance-filters.js';
 import { USER_FILTERS } from '../client/src/screens/admin/user-filters.js';
+import {
+  ARCHIVED, TEST_FILTERS, marksReleased, marksState, papersToMark, quizFacts, sortTests, statusOf, testFiltersFrom, unlessArchivedTicked
+} from '../client/src/screens/admin/test-filters.js';
 
 /** Every combination of every field the filters look at. */
 function product(fields) {
@@ -95,13 +98,37 @@ const ACCOUNTS = product({
   signin: [{ hasPassword: true }, { hasPassword: false }]
 });
 
+const QUIZZES = product({
+  state: [
+    { isStarted: false, isClosed: false, startMode: 'manual', archivedAt: null },
+    { isStarted: false, isClosed: false, startMode: 'scheduled', archivedAt: null },
+    { isStarted: true, isClosed: false, archivedAt: null },
+    { isStarted: true, isClosed: true, archivedAt: null },
+    // Archived while live, and once finished: archived is what shows.
+    { isStarted: true, isClosed: false, archivedAt: '2026-09-30T10:00:00Z' },
+    { isStarted: true, isClosed: true, archivedAt: '2026-09-30T10:00:00Z' }
+  ],
+  release: [
+    { resultReleaseMode: 'instant', resultsReleasedAt: null },
+    { resultReleaseMode: 'after_quiz', resultsReleasedAt: null },
+    { resultReleaseMode: 'admin', resultsReleasedAt: null },
+    { resultReleaseMode: 'admin', resultsReleasedAt: '2026-09-30T12:00:00Z' },
+    // From before release modes: released only by hand, as on the server.
+    { resultReleaseMode: undefined, resultsReleasedAt: null }
+  ],
+  requests: [{ pendingCount: 0 }, { pendingCount: 3 }],
+  marking: [{ toMarkCount: 0 }, { toMarkCount: 2 }],
+  created: [{ createdAt: new Date().toISOString() }, { createdAt: '2025-01-15T09:00:00Z' }]
+});
+
 const LISTS = [
   ['students', studentFilters({ locationRequired: true }), STUDENTS],
   ['results', RESULT_FILTERS, RESULTS],
   ['attendance', ATTENDANCE_FILTERS, MARKS],
   ['absent', ABSENT_FILTERS, ABSENT],
   ['sessions', sessionFilters(SESSIONS, NOW), SESSIONS],
-  ['users', USER_FILTERS, ACCOUNTS]
+  ['users', USER_FILTERS, ACCOUNTS],
+  ['quizzes', TEST_FILTERS, QUIZZES]
 ];
 
 for (const [name, groups, rows] of LISTS) {
@@ -258,4 +285,99 @@ test('sessions: a Class group only once there are two classes; sorting newest fi
   assert.deepEqual(sortSessions(sessions, 'date-desc').map((session) => session.title), ['DBMS', 'Networks']);
   assert.deepEqual(sortSessions(sessions, 'title-asc').map((session) => session.title), ['DBMS', 'Networks']);
   assert.deepEqual(sortSessions(sessions, 'present-desc').map((session) => session.presentCount), [30, 12]);
+});
+
+test('quizzes: archived ones stay out of the list until Archived is ticked, whatever stage they reached', () => {
+  const archived = QUIZZES.filter((quiz) => quiz.archivedAt);
+  assert.ok(archived.length > 0);
+  assert.ok(archived.every((quiz) => statusOf(quiz).id === 'archived'), 'archived beats live and completed');
+  assert.equal(unlessArchivedTicked(QUIZZES, []).length, QUIZZES.length - archived.length);
+  // Ticking anything else - requests waiting, marks not released - still leaves them out.
+  const pool = unlessArchivedTicked(QUIZZES, ['requests:waiting', 'marks:held']);
+  assert.ok(applyFilters(pool, TEST_FILTERS, ['requests:waiting', 'marks:held']).every((quiz) => !quiz.archivedAt));
+  assert.deepEqual(applyFilters(unlessArchivedTicked(QUIZZES, [ARCHIVED]), TEST_FILTERS, [ARCHIVED]), archived);
+});
+
+test('quizzes: marks are released as the server decides, by the test\'s release mode', () => {
+  assert.equal(marksReleased({ resultReleaseMode: 'instant' }), true);
+  assert.equal(marksReleased({ resultReleaseMode: 'after_quiz', isClosed: false }), false);
+  assert.equal(marksReleased({ resultReleaseMode: 'after_quiz', isClosed: true }), true);
+  assert.equal(marksReleased({ resultReleaseMode: 'admin', resultsReleasedAt: null }), false);
+  assert.equal(marksReleased({ resultReleaseMode: 'admin', resultsReleasedAt: '2026-09-30T12:00:00Z' }), true);
+});
+
+test('quizzes: sorting by created, title, average score (none last, either way) and registrations', () => {
+  const quizzes = [
+    { title: 'networks', createdAt: '2026-09-02T04:00:00Z', averageScore: null, registrationCount: 40 },
+    { title: 'DBMS', createdAt: '2026-09-03T04:00:00Z', averageScore: 62, registrationCount: 12 },
+    { title: 'Algorithms', createdAt: '2026-09-01T04:00:00Z', averageScore: 81, registrationCount: 0 }
+  ];
+  const titles = (sort) => sortTests(quizzes, sort).map((quiz) => quiz.title);
+  assert.deepEqual(titles('created-desc'), ['DBMS', 'networks', 'Algorithms']);
+  assert.deepEqual(titles('created-asc'), ['Algorithms', 'networks', 'DBMS']);
+  assert.deepEqual(titles('title-asc'), ['Algorithms', 'DBMS', 'networks'], 'case does not matter');
+  assert.deepEqual(titles('score-desc'), ['Algorithms', 'DBMS', 'networks']);
+  assert.deepEqual(titles('score-asc'), ['DBMS', 'Algorithms', 'networks'], 'no average yet goes last');
+  assert.deepEqual(titles('registered-desc'), ['networks', 'DBMS', 'Algorithms']);
+});
+
+test('quizzes: a filter named in the address is kept, an unknown or repeated one dropped', () => {
+  assert.deepEqual(testFiltersFrom('marking:due'), ['marking:due']);
+  assert.deepEqual(testFiltersFrom('requests:waiting,status:live,requests:waiting'), ['requests:waiting', 'status:live']);
+  assert.deepEqual(testFiltersFrom('marking:due,<script>,status:nope'), ['marking:due']);
+  assert.deepEqual(testFiltersFrom(null), []);
+  assert.deepEqual(testFiltersFrom(''), []);
+});
+
+test('quizzes: a card says when, who missed it, what waits on the teacher, how it went and where marks stand', () => {
+  const when = (value) => `<${value}>`;
+  const ids = (facts) => facts.map((fact) => fact.id);
+  const ended = {
+    isStarted: true, isClosed: true, closedAt: 'closed', resultReleaseMode: 'admin', resultsReleasedAt: null,
+    notStartedCount: 4, pendingCount: 0, toMarkCount: 36, submittedCount: 39, averageScore: 62, questionMix: { short: 2 }
+  };
+  // Minimal first - when, and what waits on the teacher; the rest, shown on hover, after.
+  const facts = quizFacts(ended, when);
+  assert.deepEqual(ids(facts), ['when', 'marking', 'marks', 'absent', 'average']);
+  assert.deepEqual(facts.map((fact) => fact.more), [false, false, false, true, true]);
+  assert.equal(facts[0].text, 'Ended <closed>');
+  assert.deepEqual(facts[1], { id: 'marking', text: '36 papers to mark', tone: 'warn', more: false });
+  assert.deepEqual(facts[2], { id: 'marks', text: 'Marks not released', tone: 'warn', more: false });
+  assert.equal(facts[3].text, '4 students missed it');
+  assert.equal(facts[4].text, 'Average 62% so far', 'unmarked answers count nothing yet');
+  assert.equal(quizFacts({ ...ended, toMarkCount: 0 }, when).find((fact) => fact.id === 'average').text, 'Average 62%');
+
+  // Live: the end, requests waiting; who has not begun and the policy on hover; nothing to mark with no paper in.
+  const live = quizFacts({ isStarted: true, isClosed: false, endsAt: 'end', notStartedCount: 1, pendingCount: 2, toMarkCount: 0, submittedCount: 0, averageScore: null, resultReleaseMode: 'instant' }, when);
+  assert.deepEqual(live.map((fact) => fact.text), ['Ends <end>', '2 requests waiting', '1 not started yet', 'Marks on submission']);
+  // Not started: when it was made, nothing else to say.
+  assert.deepEqual(quizFacts({ isStarted: false, isClosed: false, createdAt: 'made' }, when).map((fact) => fact.text), ['Created <made>']);
+  assert.equal(quizFacts({ isStarted: false, startMode: 'scheduled', opensAt: 'soon' }, when)[0].text, 'Starts <soon>');
+  // Every short answer marked: said so.
+  assert.deepEqual(quizFacts({ ...ended, toMarkCount: 0 }, when).find((fact) => fact.id === 'marking'), { id: 'marking', text: 'All marked', tone: 'ok', more: true });
+});
+
+test('quizzes: where marks stand once a test has ended', () => {
+  const closed = { isClosed: true, resultReleaseMode: 'admin', resultsReleasedAt: '2026-09-30T12:00:00Z' };
+  assert.equal(marksState(closed).text, 'Marks released');
+  assert.equal(marksState({ ...closed, toMarkCount: 3 }).text, 'Marks held for marking', 'papers with unmarked answers still wait');
+  assert.equal(marksState({ ...closed, toMarkCount: 3, releaseUnmarked: true }).text, 'Marks out, 3 unmarked', 'released anyway');
+  assert.equal(marksState({ ...closed, resultsReleasedAt: null }).text, 'Marks not released');
+  assert.equal(marksState({ isClosed: false, resultReleaseMode: 'after_quiz' }).text, 'Marks when it ends');
+});
+
+test('quizzes: marks released anyway take their papers off the to-mark list; Hold puts them back', () => {
+  const quiz = {
+    isStarted: true, isClosed: true, closedAt: 'closed', resultReleaseMode: 'instant',
+    toMarkCount: 36, submittedCount: 39, questionMix: { short: 2 }, releaseUnmarked: true
+  };
+  assert.equal(papersToMark(quiz), 0);
+  assert.equal(applyFilters([quiz], TEST_FILTERS, ['marking:due']).length, 0, 'not under Papers to mark');
+  assert.equal(applyFilters([quiz], TEST_FILTERS, ['marking:done']).length, 1);
+  const facts = quizFacts(quiz, String);
+  assert.equal(facts.some((fact) => fact.id === 'marking'), false, 'no "to mark", and no "All marked" either');
+  assert.deepEqual(facts.find((fact) => fact.id === 'marks'), { id: 'marks', text: 'Marks out, 36 unmarked', tone: 'info', more: true });
+  const held = { ...quiz, releaseUnmarked: false };
+  assert.equal(papersToMark(held), 36, 'held for marking again: back on the list');
+  assert.equal(applyFilters([held], TEST_FILTERS, ['marking:due']).length, 1);
 });

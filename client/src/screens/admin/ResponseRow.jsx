@@ -1,36 +1,40 @@
 import { PenLine } from 'lucide-react';
-import { durationLabel, shortDateTime } from '../../lib/format.js';
-import { Detail, ExpandableRow, Issue, StudentIdentity } from './StudentRow.jsx';
+import { shortDateTime } from '../../lib/format.js';
+import { initialsOf } from './review.js';
+import { isGuest } from './student-filters.js';
 
-/** One submitted result: marks and answer review only; live controls belong under Students. */
-export function ResponseRow({ registration, openAnalysis, isBusy, columns }) {
-  const awaiting = registration.manualTotal > registration.manualGraded;
+const isFaculty = (registration) => registration.accountType === 'faculty';
 
+/**
+ * One handed-in paper in the Results list: who, how much they answered, their
+ * marks (and how many short answers still wait), when they finished. The whole
+ * row opens the review at their paper (modals/ResultReviewModal.jsx).
+ */
+export function ResponseRow({ registration, onReview, isBusy, frozen = false }) {
+  const toMark = Math.max(0, (registration.manualTotal || 0) - (registration.manualGraded || 0));
+  const open = () => { if (!isBusy) onReview(registration); };
   return (
-    <ExpandableRow
-      columns={columns}
-      label={registration.name}
-      cells={<>
-        <td data-label="Student"><StudentIdentity registration={registration}/></td>
-        <td data-label="Answered" className="cell-num col-answered">{registration.answeredCount}/{registration.totalQuestions}</td>
-        <td data-label="Score" className="cell-num">
-          <div className="cell-row">
-            <strong>{registration.score ?? '—'}</strong>
-            {awaiting && <Issue icon={PenLine} label={`${registration.manualTotal - registration.manualGraded} short answer(s) to mark`}>{registration.manualTotal - registration.manualGraded}</Issue>}
+    <tr className="result-row" tabIndex={0} aria-label={`${registration.name}: review`}
+      onClick={(event) => { if (!event.target.closest('button, a')) open(); }}
+      onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); open(); } }}>
+      <td data-label="Student">
+        <div className="person">
+          <span className={`person-avatar${isGuest(registration) ? ' is-guest' : ''}`} aria-hidden="true">{initialsOf(registration.name)}</span>
+          <div className="person-detail">
+            <strong>{registration.name}</strong>
+            <span className="table-subtext">{isFaculty(registration) ? 'Faculty' : registration.sapId}</span>
           </div>
-        </td>
-        <td data-label="Finished" className="cell-muted">{shortDateTime(registration.submittedAt)}</td>
-      </>}
-      details={<>
-        <Detail label="Email">{registration.email}</Detail>
-        <Detail label="Finished">{shortDateTime(registration.submittedAt)}</Detail>
-        {registration.timeTakenSeconds !== null && registration.timeTakenSeconds !== undefined && <Detail label="Time taken">{durationLabel(registration.timeTakenSeconds)}</Detail>}
-        <Detail label="Score">{registration.score ?? 'Awaiting marking'} / {registration.totalQuestions}</Detail>
-        {registration.manualTotal > 0 && <Detail label="Short answers">{awaiting ? `${registration.manualTotal - registration.manualGraded} to mark` : 'All marked'}</Detail>}
-      </>}
-      actions={<>
-        <button className="button button-secondary button-small" disabled={isBusy} onClick={() => openAnalysis(registration)}>{awaiting ? 'Review & mark' : 'View result'}</button>
-      </>}
-    />
+        </div>
+      </td>
+      <td data-label="Answered" className="cell-num col-answered">{registration.answeredCount}/{registration.totalQuestions}</td>
+      <td data-label="Marks" className="cell-num">
+        <span className="result-score"><strong>{registration.score ?? '—'}</strong>{registration.totalMarks ? <span className="cell-of">/{registration.totalMarks}</span> : null}</span>
+        {toMark > 0 && !frozen && <span className="result-to-mark" title={`${toMark} short answer${toMark === 1 ? '' : 's'} to mark`}><PenLine size={12} aria-hidden="true"/>{toMark}</span>}
+      </td>
+      <td data-label="Finished" className="cell-muted">{shortDateTime(registration.submittedAt)}</td>
+      <td data-label="Actions" className="result-action">
+        <button className="button button-secondary button-small" type="button" disabled={isBusy} onClick={open}>{toMark > 0 && !frozen ? 'Mark' : 'Review'}</button>
+      </td>
+    </tr>
   );
 }

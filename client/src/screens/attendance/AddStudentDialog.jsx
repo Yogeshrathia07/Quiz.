@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Search } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
 import { Modal } from '../../components/Modal.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { apiPath } from './attendance-paths.js';
 
 const sapDigits = (value) => value.replace(/\D/g, '').slice(0, 9);
@@ -68,8 +69,10 @@ export function AddStudentDialog({ code, onAdded, onClose, showToast }) {
 
   return (
     <Modal label="Add a student" onClose={onClose} className="att-add-dialog">
-      <h1>Add a student</h1>
-      <p className="att-add-intro">They are marked present straight away.</p>
+      <div className="page-heading">
+        <h1>Add a student</h1>
+        <InfoTip label="About adding a student">For someone whose phone would not scan, or who has none. They are marked present straight away.</InfoTip>
+      </div>
       <div className="segmented" role="group" aria-label="Add a">
         {ADD_KINDS.map(([id, label]) => (
           <button key={id} type="button" className={kind === id ? 'is-on' : ''} aria-pressed={kind === id} onClick={() => setKind(id)}>{label}</button>

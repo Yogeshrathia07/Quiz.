@@ -1,69 +1,78 @@
 /*
- * The faculty home page (screens/admin/FacultyHome.jsx): a greeting, a row of
- * what needs the teacher now, then one card per part of the portal. The
- * cards go two by two, or one a row on a phone - nothing else - chosen by
- * the page's own width (a container query), not the window's.
- * Colours come from theme.css; each card's accent says which part it is.
+ * The faculty home page (screens/admin/FacultyHome.jsx): a greeting, the date
+ * across from it - a small green tick beside it when nothing needs the teacher,
+ * a chip each under them when something does - then one card per part of the
+ * portal: its icon, its name, its
+ * key numbers and its usual action. Three across where there is room, two, or
+ * one a row on a phone, chosen by the page's own width (a container query),
+ * not the window's. Colours come from theme.css; each card's accent says which
+ * part it is.
  */
-.faculty-home{display:grid;gap:18px;width:100%;padding-top:6px;container-type:inline-size}
+.faculty-home{display:grid;gap:24px;width:100%;padding-top:6px;container-type:inline-size}
 
+/* The greeting on the left, the date on the right - large, with a green tick
+   when nothing needs you; under the greeting when narrow */
+.faculty-home-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 24px}
 .faculty-home-head h1{margin:0;font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em}
-.faculty-home-head p{margin:4px 0 0;color:var(--text-2,#AAB6BC);font-size:.92rem}
+.faculty-home-date{display:flex;align-items:center;gap:8px;margin:0;color:var(--text-2,#AAB6BC);font-size:clamp(1.05rem,1.8vw,1.35rem);font-weight:600;letter-spacing:-.01em}
+.home-all-clear{display:inline-grid;place-items:center;color:#43CF88}
 
 /* What needs the teacher now: one tap each into its section */
-.home-attention{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:36px}
-.home-attention-note{display:inline-flex;align-items:center;gap:8px;color:var(--text-2,#AAB6BC);font-size:.9rem}
-.home-attention.is-clear .home-attention-note{color:#43CF88}
+.home-attention{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:-8px}
 .home-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:0 12px 0 11px;border-radius:999px;font-size:.86rem;font-weight:700;text-decoration:none;transition:filter .15s}
 .home-chip:hover{filter:brightness(1.15)}
 .home-chip:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:2px}
 .home-chip.is-warn{background:rgba(243,154,74,.16);color:#F5A45C}
 .home-chip.is-ok{background:rgba(39,182,111,.16);color:#43CF88}
 
-/* One card per section: two by two at every size ... */
-.home-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
-/* ... except a phone, one a row. */
+/* One card per section: two across ... */
+.home-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+/* ... three where there is room for them, so none sits alone on a row - and
+   where there is not, the third takes the whole row under the other two ... */
+@container (min-width: 940px){
+  .home-cards.has-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+}
+@container (min-width: 561px) and (max-width: 939px){
+  .home-cards.has-3>.home-card:last-child{grid-column:1/-1}
+}
+/* ... and one a row on a phone. */
 @container (max-width: 560px){
   .home-cards{grid-template-columns:1fr;gap:10px}
   .home-card-main{padding:16px 16px 12px}
   .home-card-icon{width:40px;height:40px;border-radius:11px}
-  .home-card-foot{padding:10px 16px 14px}
+  .home-card-foot{min-height:66px;padding:12px 16px 14px}
+  .home-figures dd{font-size:1.4rem}
 }
 
-.home-card{--accent:#3DB3E6;--accent-bg:rgba(21,152,209,.16);display:flex;flex-direction:column;min-width:0;border:1px solid var(--border,#474C52);border-radius:var(--r-lg,16px);background:var(--bg-card,#2A2D31);overflow:hidden;transition:border-color .15s}
-.home-card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border,#474C52))}
-/* Cards side by side share their rows: the descriptions end, and the numbers
-   start, on the same line across the row, however long each description is. */
-@supports (grid-template-rows:subgrid){
-  .home-card{display:grid;grid-row:span 2;grid-template-rows:subgrid;row-gap:0}
-  /* The shared row places the footer; pushing it down would undo the line-up. */
-  .home-card>.home-card-foot{margin-top:0}
-}
+.home-card{--accent:#3DB3E6;--accent-bg:rgba(21,152,209,.16);display:flex;flex-direction:column;min-width:0;border:1px solid var(--border,#474C52);border-radius:var(--r-lg,16px);background:var(--bg-card,#2A2D31);overflow:hidden;transition:border-color .15s,background .15s}
+.home-card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border,#474C52));background:#2E3135}
 .home-card.is-ok{--accent:#43CF88;--accent-bg:rgba(39,182,111,.16)}
 .home-card.is-warn{--accent:#F5A45C;--accent-bg:rgba(243,154,74,.16)}
 .home-card.is-muted{--accent:#AAB6BC;--accent-bg:var(--bg-input,#3A3E43)}
 
-.home-card-main{display:flex;align-items:flex-start;gap:14px;padding:20px 20px 14px;color:var(--text,#F7FAFC);text-decoration:none}
+/* Its icon and name; the whole band opens the section */
+.home-card-main{display:flex;align-items:center;gap:14px;padding:20px 22px 16px;color:var(--text,#F7FAFC);text-decoration:none}
 .home-card-main:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:-2px;border-radius:var(--r-lg,16px)}
 .home-card-icon{display:grid;place-items:center;flex:none;width:46px;height:46px;border-radius:13px;background:var(--accent-bg);color:var(--accent)}
-.home-card-text{display:grid;gap:4px;flex:1;min-width:0}
-.home-card-text strong{font-size:1.12rem;font-weight:700}
-.home-card-text span{color:var(--text-2,#AAB6BC);font-size:.88rem;line-height:1.4}
-.home-card-go{flex:none;align-self:center;color:var(--text-3,#75848B);transition:transform .15s,color .15s}
+.home-card-title{flex:1;min-width:0;font-size:1.15rem;font-weight:700;letter-spacing:-.01em}
+.home-card-go{flex:none;color:var(--text-3,#75848B);transition:transform .15s,color .15s}
 .home-card-main:hover .home-card-go{color:var(--accent);transform:translateX(3px)}
 
-/* Key numbers on the left, the section's usual action on the right. The same
-   height whether the numbers have arrived or not, so nothing jumps. */
-.home-card-foot{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;min-height:66px;margin-top:auto;padding:12px 20px 16px;border-top:1px solid var(--border,#474C52)}
-.home-figures{display:flex;gap:24px;margin:0}
-.home-figures div{display:flex;flex-direction:column-reverse;gap:1px;min-width:0}
+/* Key numbers on the left - coloured when one waits on you - and the section's
+   usual action on the right. The same height whether the numbers have arrived
+   or not, so nothing jumps. */
+.home-card-foot{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;min-height:80px;margin-top:auto;padding:14px 22px 18px;border-top:1px solid var(--border,#474C52)}
+.home-figures{display:flex;gap:28px;margin:0}
+.home-figures div{display:flex;flex-direction:column-reverse;gap:2px;min-width:0}
 .home-figures dt{color:var(--text-3,#75848B);font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
-.home-figures dd{margin:0;color:var(--text,#F7FAFC);font-size:1.35rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+.home-figures dd{margin:0;color:var(--text,#F7FAFC);font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+.home-figures .is-warn dd{color:#F5A45C}
+.home-figures .is-ok dd{color:#43CF88}
 .home-card-action{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto;text-decoration:none}
 
 /* While the numbers load: quiet grey bars, never a dash or dots. */
-.home-figures-loading{display:flex;gap:24px}
-.home-figures-loading i{display:block;width:46px;height:34px;border-radius:7px;background:linear-gradient(90deg,var(--bg-input,#3A3E43) 0%,#474C52 50%,var(--bg-input,#3A3E43) 100%);background-size:200% 100%;animation:home-shimmer 1.2s linear infinite}
+.home-figures-loading{display:flex;gap:28px}
+.home-figures-loading i{display:block;width:46px;height:38px;border-radius:7px;background:linear-gradient(90deg,var(--bg-input,#3A3E43) 0%,#474C52 50%,var(--bg-input,#3A3E43) 100%);background-size:200% 100%;animation:home-shimmer 1.2s linear infinite}
 @keyframes home-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
 @media (prefers-reduced-motion:reduce){.home-figures-loading i{animation:none}}
 

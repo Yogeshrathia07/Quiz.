@@ -77,9 +77,19 @@ export const config = {
   locationCheckSeconds: Number(process.env.LOCATION_CHECK_SECONDS || 60),
   locationStrikes: Number(process.env.LOCATION_STRIKES || 2),
   locationGraceSeconds: Number(process.env.LOCATION_GRACE_SECONDS || 180),
-  // A paper that has not been heard from for this long counts as having left
-  // the test (one exit, the whole gap as time away).
+  // A paper that has not been heard from for this long is noted as offline for
+  // the teacher, with when and for how long. It never counts as leaving the
+  // test and never locks it.
   offlineSeconds: Number(process.env.OFFLINE_SECONDS || 60),
+  // A question's clock (and, on each-student's-own-time tests, the paper's)
+  // starts when the student's device says it is on screen - but no later than
+  // this many seconds after the server sent it, so a slow connection does not
+  // eat into the time and a tampered page can gain at most this much.
+  shownGraceSeconds: Number(process.env.SHOWN_GRACE_SECONDS ?? 10),
+  // An answer made on the device before its time ran out, but held there by a
+  // lost connection, is still taken this many minutes after that time - and
+  // marked "arrived late" for the teacher to check. 0 turns this off.
+  lateAnswerMinutes: Number(process.env.LATE_ANSWER_MINUTES ?? 30),
   // Going past a test's switch or time-away allowance locks the attempt. The
   // lock waits for the admin's Revive: LOCK_WAIT_SECONDS=0 means no automatic
   // unlock, and LOCK_ON_EXIT=false switches locking off altogether.

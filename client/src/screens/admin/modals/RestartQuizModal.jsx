@@ -29,6 +29,7 @@ export function RestartQuizModal({ code, test, counts, onClose, onSaved, showToa
   };
 
   const timing = test.untimed ? 'It runs until you close it.'
+    : test.endMode === 'each' ? `Each student gets ${durationLabel((test.durationMinutes || 0) * 60)} from their own Begin; it stays open until you close it.`
     : test.endMode === 'duration' ? `It runs for ${durationLabel((test.durationMinutes || 0) * 60)} from now.`
       : keepEnd ? `It ends at ${dateTime(test.endsAt)}, as set.` : `It runs for ${durationLabel(Number(minutes) * 60)} from now.`;
 

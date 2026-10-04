@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLiveUpdate } from '../../lib/live-updates.js';
 import { api, downloadSpreadsheet, post } from '../../lib/api.js';
-import { countdown, durationLabel, shortDateTime } from '../../lib/format.js';
+import { clockTime, countdown, durationLabel, shortDateTime } from '../../lib/format.js';
 import { useCountdown } from '../../lib/useCountdown.js';
 import { Skeleton } from '../../components/Skeleton.jsx';
 import { usePageTitle } from '../../brand.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import {
-  ArrowDownAZ, BadgeCheck, CheckCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, FileCheck2, FileCog, FileSpreadsheet, LayoutDashboard,
+  ArrowDownAZ, BadgeCheck, CheckCheck, ClipboardCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, EyeOff, FileCheck2, FileCog, FileSpreadsheet, FileUp, LayoutDashboard,
   LocateOff, Lock, LockOpen, MapPin, MapPinOff, MoreHorizontal, Pause, Pencil, PenLine, Play, RotateCcw, Search, Send, ShieldCheck, TimerOff, Undo2, UserCheck,
   UserCog, UserRound, UserX, Users
 } from 'lucide-react';
@@ -21,6 +21,9 @@ import { ReopenPaperModal } from './modals/ReopenPaperModal.jsx';
 import { StudentAnalysisModal } from './modals/StudentAnalysisModal.jsx';
 import { TestSetupModal } from './modals/TestSetupModal.jsx';
 import { RestartQuizModal } from './modals/RestartQuizModal.jsx';
+import { ReleaseMarksModal } from './modals/ReleaseMarksModal.jsx';
+import { UploadMarksModal } from './modals/UploadMarksModal.jsx';
+import { ResultReviewModal } from './modals/ResultReviewModal.jsx';
 
 /** Each filter option's icon, coloured by what it means (filters.css). */
 const FILTER_ICONS = {
@@ -112,6 +115,14 @@ function phaseDot(test) {
   return { tone: 'idle', label: test.startMode === 'scheduled' ? 'Scheduled' : 'Not started' };
 }
 
+/** What Close will do, said before it is done: on each student's own time, who still has time left. */
+function closeQuestion(test, counts) {
+  const writing = counts.writing || 0;
+  if (test.endMode !== 'each' || !writing) return 'Close the test? Every paper still open is submitted now.';
+  const until = counts.lastOwnEndAt ? ` - the last of them has until ${clockTime(counts.lastOwnEndAt)}` : '';
+  return `Close the test? ${writing} student${writing === 1 ? ' is' : 's are'} still writing on their own time${until}. Every paper still open is submitted now.`;
+}
+
 /** A Close pressed by mistake can be undone - if there was still time left when it was pressed. */
 const canResume = (test) => test.isClosed && !test.closedAutomatically
   && (test.untimed || !test.endsAt || Date.parse(test.endsAt) > Date.parse(test.closedAt));
@@ -124,7 +135,8 @@ function resumeQuestion(test, papers) {
   return [
     'Resume the test?',
     `${papers} paper${papers === 1 ? '' : 's'} handed in by Close reopen${papers === 1 ? 's' : ''} exactly where ${papers === 1 ? 'it was' : 'they were'}. Papers students submitted themselves stay submitted.`,
-    leftMs === null ? 'It runs until you close it.' : `Everyone gets back the ${durationLabel(Math.round(leftMs / 1000))} that was left: it now ends at ${endsAt}.`,
+    test.endMode === 'each' ? 'Each reopened paper gets back the time the test was closed, on top of its own time. It stays open until you close it.'
+      : leftMs === null ? 'It runs until you close it.' : `Everyone gets back the ${durationLabel(Math.round(leftMs / 1000))} that was left: it now ends at ${endsAt}.`,
     marksSeen ? 'Note: students may have seen their marks while it was closed.' : ''
   ].filter(Boolean).join('\n\n');
 }
@@ -133,6 +145,7 @@ const startsLabel = (test) => (test.startMode === 'scheduled' ? shortDateTime(te
 
 function endsLabel(test) {
   if (test.untimed) return 'When you close it';
+  if (test.endMode === 'each') return `${durationLabel((test.durationMinutes || 0) * 60)} each, from their own Begin`;
   if (test.endsAt) return shortDateTime(test.endsAt);
   return `${durationLabel((test.durationMinutes || 0) * 60)} after start`;
 }
@@ -142,8 +155,9 @@ function endsLabel(test) {
  * next by itself - the scheduled start, or the automatic submission - and the
  * buttons that change it.
  */
-function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0 }) {
-  const target = !test.isStarted ? (test.startMode === 'scheduled' ? test.opensAt : null) : test.isClosed ? null : test.endsAt;
+function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0, writing = 0, lastOwnEndAt = null }) {
+  const ownTime = test.endMode === 'each';
+  const target = !test.isStarted ? (test.startMode === 'scheduled' ? test.opensAt : null) : test.isClosed || ownTime ? null : test.endsAt;
   const { secondsLeft, known } = useCountdown(target, serverTime);
   const ticking = known && secondsLeft > 0;
   const extend = (minutes) => act('end-time', null, { addMinutes: minutes });
@@ -161,6 +175,22 @@ function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0 }) {
     } else {
       title = 'Starts when you press Start';
       detail = 'Approved students are waiting on a holding screen.';
+    }
+  } else if (ownTime) {
+    // Each student's own time: no end for the test - who is writing, and when the last of them runs out.
+    tone = 'is-live';
+    title = `Live · ${durationLabel((test.durationMinutes || 0) * 60)} each, from their own Begin`;
+    detail = writing
+      ? `${writing} writing now${lastOwnEndAt ? ` - the last one's time ends at ${clockTime(lastOwnEndAt)}` : ''}. Open until you close it: anyone approved can still begin.`
+      : 'Nobody is writing right now. Open until you close it: anyone approved can still begin.';
+    if (writing) {
+      extra = (
+        <div className="quick-picks banner-extend" title="More time for everyone still writing">
+          {[5, 10, 15].map((minutes) => (
+            <button key={minutes} type="button" disabled={isBusy} onClick={() => extend(minutes)}>+{minutes} min</button>
+          ))}
+        </div>
+      );
     }
   } else {
     tone = `is-live${ticking && secondsLeft <= 300 ? ' is-ending' : ''}`;
@@ -268,7 +298,15 @@ function TableToolbar({ title, summary, query, setQuery, filters, setFilters, gr
   );
 }
 
-function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpenQr, onOpenRestart, onEdit }) {
+function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpenQr, onOpenRestart, onEdit, onOpenMarking, onOpenRelease }) {
+  // Results frozen: marks final until unfrozen (domain/freeze.js).
+  const frozen = Boolean(test.resultsFrozenAt);
+  // Only a test with short answers can have papers to mark.
+  const marks = (test.questionMix?.short || 0) > 0 || counts.awaitingMarking > 0;
+  // Marks still to come out: waiting for Release marks, or held on papers with
+  // short answers to mark. With papers waiting, Release shows who first.
+  const heldForMarking = counts.awaitingMarking > 0 && !test.releaseUnmarked;
+  const unreleased = test.resultReleaseMode === 'admin' && !test.resultsReleasedAt;
   // Only the one action that matters right now stays a button; the rest live in
   // the menu, so this toolbar never grows past three controls.
   const primary = !test.isStarted && !test.isClosed
@@ -279,22 +317,25 @@ function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpe
       onSelect: () => act('start', test.startMode === 'scheduled' ? 'Start the test now, before its scheduled time?' : undefined)
     }
     : test.isStarted && !test.isClosed
-      ? { label: 'Close test', icon: CircleStop, tone: 'danger', onSelect: () => act('close', 'Close the test? Every paper still open is submitted now.') }
-      : test.isClosed && test.resultReleaseMode === 'admin' && !test.resultsReleasedAt
-        ? { label: 'Release marks', icon: Send, tone: 'primary', onSelect: () => act('results/release') }
+      ? { label: 'Close test', icon: CircleStop, tone: 'danger', onSelect: () => act('close', closeQuestion(test, counts)) }
+      : test.isClosed && (unreleased || heldForMarking)
+        ? { label: 'Release marks', icon: Send, tone: 'primary', onSelect: heldForMarking ? onOpenRelease : () => act('results/release') }
         : null;
 
   return (
     <div className="overview-grid">
       <section className="card overview-panel">
-        <ScheduleBanner test={test} serverTime={serverTime} isBusy={isBusy} act={act} owed={counts.owedTime} actions={<>
+        <ScheduleBanner test={test} serverTime={serverTime} isBusy={isBusy} act={act} owed={counts.owedTime}
+          writing={counts.writing} lastOwnEndAt={counts.lastOwnEndAt} actions={<>
           {/* Words drop away when the banner is narrow: each button is then its icon (theme.css). */}
           {primary && (
             <button className={`button button-${primary.tone}`} disabled={isBusy} onClick={primary.onSelect} aria-label={primary.label} title={primary.label}>
               <primary.icon size={16} aria-hidden="true"/><span className="toolbar-text">{primary.label}</span>
             </button>
           )}
-          <button className="button button-secondary" disabled={isBusy} onClick={onEdit} aria-label="Edit" title="Edit">
+          {/* Frozen results: the paper cannot be edited until they are unfrozen. */}
+          <button className="button button-secondary" disabled={isBusy || frozen} onClick={onEdit} aria-label="Edit"
+            title={frozen ? 'The results are frozen: unfreeze them (More) to edit the test' : 'Edit'}>
             <Pencil size={16} aria-hidden="true"/><span className="toolbar-text">Edit</span>
           </button>
           <ActionMenu
@@ -304,25 +345,43 @@ function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpe
             disabled={isBusy}
             items={[
               // Green keeps or approves, blue adjusts, amber starts over, red wipes.
-              canResume(test) && {
+              canResume(test) && !frozen && {
                 label: 'Resume test', icon: Play, tone: 'ok',
                 onSelect: () => act('reopen', resumeQuestion(test, counts.handedInByClose))
               },
-              test.isStarted && !test.isClosed && { label: test.untimed ? 'Set an end time' : 'Extend time', icon: Clock, tone: 'info', onSelect: onOpenSetup },
+              test.isStarted && !test.isClosed && {
+                label: test.endMode === 'each' ? 'Give more time' : test.untimed ? 'Set an end time' : 'Extend time', icon: Clock, tone: 'info', onSelect: onOpenSetup
+              },
               !test.isClosed && counts.pending > 0 && {
                 label: `Approve all ${counts.pending} pending`,
                 icon: CheckCheck,
                 tone: 'ok',
                 onSelect: () => act('registrations/bulk/approve', `Approve all ${counts.pending} pending registrations?`)
               },
-              (test.isStarted || test.isClosed) && { label: 'Restart quiz', icon: RotateCcw, tone: 'warn', onSelect: onOpenRestart },
+              // Released before marking was done (Release marks → Release anyway): undone here.
+              test.releaseUnmarked && {
+                label: 'Hold marks until marking is done',
+                icon: EyeOff,
+                tone: 'info',
+                onSelect: () => act('results/unmarked', 'Hide the marks again from students who still have short answers to mark? They see them once every answer is marked.', { show: false })
+              },
+              // Final marks: nothing changes them until they are unfrozen (domain/freeze.js).
+              test.isClosed && !frozen && {
+                label: 'Freeze results', icon: Lock, tone: 'info',
+                onSelect: () => act('results/freeze', freezeQuestion(counts), { frozen: true })
+              },
+              frozen && {
+                label: 'Unfreeze results', icon: LockOpen, tone: 'warn',
+                onSelect: () => act('results/freeze', 'Unfreeze the results? Marks can be changed again.', { frozen: false })
+              },
+              (test.isStarted || test.isClosed) && !frozen && { label: 'Restart quiz', icon: RotateCcw, tone: 'warn', onSelect: onOpenRestart },
               !test.isClosed && counts.started > 0 && {
                 label: `Blank papers for all ${counts.started} (timer unchanged)`,
                 icon: Eraser,
                 danger: true,
                 onSelect: () => act('attempts/restart', `Give all ${counts.started} students a blank paper? Their answers are cleared; the end time does not change.`)
               },
-              {
+              !frozen && {
                 label: 'Reset to not started',
                 icon: Undo2,
                 danger: true,
@@ -332,11 +391,22 @@ function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpe
           />
         </>}/>
 
-        <div className="dash-stats">
+        <div className={`dash-stats${marks ? ' has-5' : ''}`}>
           <div><strong>{counts.total}</strong><span>Registered</span></div>
-          <div className={counts.pending ? 'is-attention' : undefined}><strong>{counts.pending}</strong><span>Waiting for you</span></div>
+          <div className={counts.pending ? 'is-attention' : undefined}><strong>{counts.pending}</strong><span>Requests waiting</span></div>
           <div><strong>{counts.started}</strong><span>Started</span></div>
           <div><strong>{counts.submitted}</strong><span>Submitted</span></div>
+          {/* Papers with short answers still unmarked: one tap to that list on the Results tab.
+              Released anyway, they no longer wait on you - still listed, no longer orange. */}
+          {marks && (
+            <div className={counts.awaitingMarking ? `is-link${test.releaseUnmarked || frozen ? '' : ' is-attention'}` : undefined}>
+              {counts.awaitingMarking > 0 ? (
+                <button className="dash-stat-link" type="button" onClick={onOpenMarking} title="Open the papers with short answers not marked yet">
+                  <strong>{counts.awaitingMarking}</strong><span>{frozen ? 'Unmarked, frozen' : test.releaseUnmarked ? 'Unmarked, released' : 'To mark'}</span>
+                </button>
+              ) : <><strong>0</strong><span>To mark</span></>}
+            </div>
+          )}
         </div>
       </section>
 
@@ -468,12 +538,26 @@ function BulkAttemptMenu({ test, rows, isBusy, act }) {
   );
 }
 
-function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, showToast, onOpenAnalysis }) {
+/** What freezing the results does, said before it is done (domain/freeze.js). */
+function freezeQuestion(counts) {
+  return [
+    'Freeze the results? Their marks become final: no marking, no Excel upload, no editing the questions, and no restart, reset, resume or reopening a paper - until you unfreeze them. Releasing marks and exporting still work.',
+    counts.awaitingMarking > 0 ? `${counts.awaitingMarking} paper${counts.awaitingMarking === 1 ? ' still has' : 's still have'} short answers to mark: they stay unmarked.` : ''
+  ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * The Results tab: every handed-in paper, and what to do with them - review
+ * them one by one (modals/ResultReviewModal.jsx), take them to Excel and back,
+ * and freeze them once the marks are final (or unfreeze them to change again).
+ */
+function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, showToast, onReview, onUploadMarks, onFreeze }) {
+  const frozen = Boolean(test.resultsFrozenAt);
   return (
-    <section className="card students-card is-compact">
+    <section className="card students-card is-compact results-section">
       <TableToolbar
         title="Results"
-        summary={`${counts.submitted} submitted · ${counts.awaitingMarking} awaiting marking${sortNote(RESULT_SORTS, sort)}`}
+        summary={`${counts.submitted} submitted · ${frozen ? 'results frozen' : `${counts.awaitingMarking} awaiting marking`}${sortNote(RESULT_SORTS, sort)}`}
         query={query} setQuery={setQuery} filters={filters} setFilters={setFilters}
         groups={RESULT_FILTERS} pool={pool} filterCounts={filterCounts} pagination={pagination} filterTitle="Sort & filter results" allLabel="All submitted"
         sorts={RESULT_SORTS} sort={sort} onSort={setSort}
@@ -481,28 +565,45 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
           ? `${counts.awaitingMarking} of ${counts.submitted} papers still have answers to mark. Until they are marked, a score counts only what has been marked${rows.length > 1 && rows.every((row) => row.score === rows[0].score) ? ' - so for now every score is the same, and the order is by hand-in time' : ''}.`
           : null}
       >
-        <button className="button button-secondary" disabled={isBusy} aria-label="Export Excel" title="Export Excel"
-          onClick={() => downloadSpreadsheet(test.code).catch((error) => showToast(error.message))}>
-          <FileSpreadsheet size={16} aria-hidden="true"/><span className="toolbar-text">Export Excel</span>
+        <button className="button button-primary" type="button" disabled={isBusy || !counts.submitted} aria-label="Review results" title="Go through the papers one by one: by student or by question"
+          onClick={() => onReview(null)}>
+          <ClipboardCheck size={16} aria-hidden="true"/><span className="toolbar-text">Review</span>
+        </button>
+        <ActionMenu
+          label="Excel"
+          icon={FileSpreadsheet}
+          align="right"
+          disabled={isBusy}
+          items={[
+            { label: 'Export Excel', icon: FileSpreadsheet, onSelect: () => downloadSpreadsheet(test.code).catch((error) => showToast(error.message)) },
+            // Marks typed into the export's Marks sheet, sent back.
+            !frozen && { label: 'Upload marks', icon: FileUp, onSelect: onUploadMarks }
+          ]}
+        />
+        {/* Final marks: frozen once the test is closed, unfrozen to change them again. */}
+        <button className={`button button-secondary freeze-toggle${frozen ? ' is-frozen' : ''}`} type="button"
+          disabled={isBusy || (!frozen && !test.isClosed)} onClick={() => onFreeze(!frozen)}
+          aria-label={frozen ? 'Unfreeze results' : 'Freeze results'}
+          title={frozen ? 'The marks are final. Unfreeze them to change marks again'
+            : test.isClosed ? 'Make the marks final: nothing can change them until you unfreeze' : 'Close the test before freezing its results'}>
+          {frozen ? <LockOpen size={16} aria-hidden="true"/> : <Lock size={16} aria-hidden="true"/>}
+          <span className="toolbar-text">{frozen ? 'Unfreeze' : 'Freeze'}</span>
         </button>
       </TableToolbar>
+      {frozen && (
+        <p className="results-frozen-note"><Lock size={14} aria-hidden="true"/>Results frozen: the marks are final. Unfreeze them to change any.</p>
+      )}
       <div className="table-scroll">
-        <table className="live-table">
+        <table className="live-table review-table">
           <thead>
             <tr>
-              <th>Student</th><th className="cell-num col-answered">Answered</th><th className="cell-num">Score</th><th>Finished</th>
+              <th>Student</th><th className="cell-num col-answered">Answered</th><th className="cell-num">Marks</th><th>Finished</th>
               <th className="column-actions"><span className="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((registration) => (
-              <ResponseRow
-                key={registration.id}
-                registration={registration}
-                isBusy={isBusy}
-                openAnalysis={onOpenAnalysis}
-                columns={5}
-              />
+              <ResponseRow key={registration.id} registration={registration} isBusy={isBusy} frozen={frozen} onReview={(row) => onReview(row.id)}/>
             ))}
           </tbody>
         </table>
@@ -725,10 +826,15 @@ export function DashboardScreen({ code, go, showToast }) {
     awaitingMarking: all.filter((row) => row.attemptStatus === 'submitted' && awaitingMarking(row)).length,
     // Still writing on time a pause gave back (or still paused): the automatic end waits for them.
     owedTime: all.filter((row) => row.attemptStatus === 'in_progress' && (row.isPaused || row.extraMs > 0)).length,
+    writing: all.filter((row) => row.attemptStatus === 'in_progress').length,
+    lastOwnEndAt: null,
     // Papers the teacher's Close handed in: what Resume would reopen.
     handedInByClose: all.filter((row) => row.attemptStatus === 'submitted' && row.submittedBy === 'admin').length
   }), [all]);
   const counts = dashboard?.counts || localCounts;
+  // The To mark tile, and Release's "Mark them first": the review, question by
+  // question, on the first question with answers still to mark.
+  const openMarking = () => { setTab('responses'); setModal({ type: 'review', mode: 'question' }); };
 
   if (!dashboard) return <Skeleton rows={5} label="Loading the test"/>;
 
@@ -746,8 +852,14 @@ export function DashboardScreen({ code, go, showToast }) {
             {test.title}
           </h1>
           <span className="dash-code" title="Test code">{test.code}</span>
+          {test.resultsFrozenAt && (
+            <span className="pill frozen-pill" title="Marks are final until you unfreeze them (More → Unfreeze results)">
+              <Lock size={12} aria-hidden="true"/>Results frozen
+            </span>
+          )}
         </div>
-        <Tabs tab={tab} onSelect={setTab} counts={counts}/>
+        {/* Released anyway, or frozen: the Results tab no longer flags papers to mark. */}
+        <Tabs tab={tab} onSelect={setTab} counts={test.releaseUnmarked || test.resultsFrozenAt ? { ...counts, awaitingMarking: 0 } : counts}/>
       </header>
 
       {tab === 'test' && (
@@ -761,6 +873,8 @@ export function DashboardScreen({ code, go, showToast }) {
           onOpenRestart={() => setModal('restart')}
           onEdit={() => go(`/?admin=edit&code=${encodeURIComponent(code)}`)}
           onOpenQr={() => setModal('qr')}
+          onOpenMarking={openMarking}
+          onOpenRelease={() => setModal('release')}
         />
       )}
 
@@ -791,16 +905,25 @@ export function DashboardScreen({ code, go, showToast }) {
           filterCounts={dashboard.filterCounts} pagination={dashboard.pagination} onPage={setPage}
           isBusy={isBusy}
           showToast={showToast}
-          onOpenAnalysis={(row) => { if (!isBusy) setModal({ type: 'analysis', registration: row }); }}
+          onReview={(registrationId) => { if (!isBusy) setModal({ type: 'review', registrationId }); }}
+          onUploadMarks={() => { if (!isBusy) setModal('upload-marks'); }}
+          onFreeze={(freeze) => act('results/freeze', freeze ? freezeQuestion(counts) : 'Unfreeze the results? Marks can be changed again.', { frozen: freeze })}
         />
       )}
 
       {modal === 'qr' && <QrModal test={test} joinUrl={joinUrl} onClose={closeModal} showToast={showToast}/>}
       {modal === 'setup' && <TestSetupModal code={code} test={test} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
+      {modal?.type === 'review' && <ResultReviewModal code={code} startAt={modal.registrationId} startMode={modal.mode || 'student'} onClose={() => { closeModal(); void load(); }}
+        onChanged={scheduleReconcile} showToast={showToast}/>}
+      {modal === 'upload-marks' && <UploadMarksModal code={code} onClose={closeModal} onSaved={() => { void load(); }} showToast={showToast}/>}
+      {modal === 'release' && <ReleaseMarksModal code={code} waiting={counts.awaitingMarking} onClose={closeModal} onMarkFirst={openMarking}
+        onReleaseMarked={test.resultReleaseMode === 'admin' && !test.resultsReleasedAt ? () => act('results/release') : null}
+        onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal === 'restart' && <RestartQuizModal code={code} test={test} counts={counts} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal?.type === 'sap' && <SapIdModal code={code} registration={modal.registration} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal?.type === 'reopen' && <ReopenPaperModal code={code} test={test} registration={modal.registration} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
-      {modal?.type === 'analysis' && <StudentAnalysisModal code={code} registration={modal.registration} onClose={closeModal} onSaved={load} showToast={showToast} showIntegrity={false}/>}
+      {/* Frozen results: the paper is shown, not marked. */}
+      {modal?.type === 'analysis' && <StudentAnalysisModal code={code} registration={modal.registration} onClose={closeModal} onSaved={load} showToast={showToast} showIntegrity={false} readOnly={Boolean(test.resultsFrozenAt)}/>}
     </>
   );
 }

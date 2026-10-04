@@ -1,46 +1,58 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Archive, ArchiveRestore, BarChart3, ClipboardList, Copy, Download, MoreVertical, Plus, Search,
-  Settings2, SlidersHorizontal, Trash2, X
+  Archive, ArchiveRestore, ArrowDownAZ, BarChart3, CalendarClock, CalendarDays, CircleCheck, ClipboardList, Copy, Download,
+  Eye, EyeOff, Hourglass, Lock, MoreVertical, PenLine, Plus, Radio, Search, Settings2, Trash2, UserCheck, UserX, Users
 } from 'lucide-react';
 import { api, downloadSpreadsheet, post } from '../../lib/api.js';
+import { shortDateTime } from '../../lib/format.js';
+import { applyFilters, optionCounts } from '../../lib/filters.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
+import { FilterMenu } from '../../components/FilterMenu.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
+import {
+  ARCHIVED, TEST_FILTERS, USUAL_TEST_SORT, papersToMark, quizFacts, sortTests, statusOf, testFiltersFrom, unlessArchivedTicked
+} from './test-filters.js';
 
 /* ------------------------------------------------------------ helpers */
 
-/** Where a quiz stands, in the words and colours of its badge. */
-function statusOf(test) {
-  if (test.archivedAt) return { id: 'archived', label: 'Archived', tone: 'neutral' };
-  if (test.isClosed) return { id: 'completed', label: 'Completed', tone: 'success' };
-  if (test.isStarted) return { id: 'live', label: 'Live', tone: 'live' };
-  if (test.startMode === 'scheduled') return { id: 'scheduled', label: 'Scheduled', tone: 'info' };
-  return { id: 'waiting', label: 'Not started', tone: 'neutral' };
-}
-
-const STATUS_FILTERS = [
-  ['all', 'All statuses'], ['live', 'Live'], ['scheduled', 'Scheduled'], ['waiting', 'Not started'], ['completed', 'Completed'], ['archived', 'Archived']
+const SORTS = [
+  { id: 'created', label: 'Created', icon: CalendarDays, directions: [{ id: 'desc', label: 'Newest first' }, { id: 'asc', label: 'Oldest first' }] },
+  { id: 'title', label: 'Title', icon: ArrowDownAZ, directions: [{ id: 'asc', label: 'A–Z' }, { id: 'desc', label: 'Z–A' }] },
+  { id: 'score', label: 'Average score', icon: BarChart3, directions: [{ id: 'desc', label: 'Highest first' }, { id: 'asc', label: 'Lowest first' }] },
+  { id: 'registered', label: 'Registrations', icon: Users, directions: [{ id: 'desc', label: 'Most first' }, { id: 'asc', label: 'Fewest first' }] }
 ];
-const SORTS = [['newest', 'Newest first'], ['oldest', 'Oldest first'], ['title', 'Title A–Z'], ['score', 'Highest score']];
 
-function Select({ label, value, options, onChange }) {
-  return (
-    <label className="ql-select">
-      <span className="sr-only">{label}</span>
-      <select className="select" value={value} onChange={(event) => onChange(event.target.value)} aria-label={label}>
-        {options.map(([id, text]) => <option key={id} value={id}>{text}</option>)}
-      </select>
-    </label>
-  );
-}
+const ICONS = {
+  'status:live': { icon: Radio, tone: 'ok' },
+  'status:scheduled': { icon: CalendarClock, tone: 'info' },
+  'status:waiting': { icon: Hourglass, tone: 'muted' },
+  'status:completed': { icon: CircleCheck, tone: 'ok' },
+  [ARCHIVED]: { icon: Archive, tone: 'muted' },
+  'requests:waiting': { icon: UserCheck, tone: 'warn' },
+  'requests:none': { icon: UserCheck, tone: 'muted' },
+  'marking:due': { icon: PenLine, tone: 'warn' },
+  'marking:done': { icon: PenLine, tone: 'muted' },
+  'marks:released': { icon: Eye, tone: 'ok' },
+  'marks:held': { icon: EyeOff, tone: 'muted' },
+  'created:today': { icon: CalendarDays, tone: 'info' },
+  'created:week': { icon: CalendarDays, tone: 'info' },
+  'created:month': { icon: CalendarDays, tone: 'muted' },
+  'created:older': { icon: CalendarDays, tone: 'muted' }
+};
+
+const FACT_ICONS = { when: CalendarDays, absent: UserX, requests: UserCheck, marking: PenLine, average: BarChart3, marks: Eye, frozen: Lock };
+/** A fact's icon: a tick once every paper is marked, a closed eye while marks are held. */
+const factIcon = (fact) => (fact.id === 'marking' && fact.tone === 'ok' ? CircleCheck
+  : fact.id === 'marks' && fact.tone === 'warn' ? EyeOff : FACT_ICONS[fact.id]);
 
 /* ---------------------------------------------------------- the pieces */
 
 /** A number, or nothing: a missing value shows as a dash, never "undefined" or "NaN". */
 const known = (value) => typeof value === 'number' && Number.isFinite(value);
 
-function QuizCard({ test, onOpen, onResults, onExport, onDuplicate, onArchive, onDelete }) {
+function QuizCard({ test, onOpen, onResults, onMark, onExport, onDuplicate, onArchive, onDelete }) {
   const status = statusOf(test);
   const registered = known(test.registrationCount) ? test.registrationCount : 0;
   const submitted = known(test.submittedCount) ? test.submittedCount : null;
@@ -54,14 +66,28 @@ function QuizCard({ test, onOpen, onResults, onExport, onDuplicate, onArchive, o
       <div className="ql-card-title">
         <h2><a href={`/?admin=${encodeURIComponent(test.code)}`} onClick={(event) => { event.preventDefault(); onOpen(); }}>{test.title}</a></h2>
         <p>{meta.map((part, index) => <span key={part} className="ql-meta-part">{index > 0 && ' · '}{part}</span>)}</p>
+        {/* Minimal: when, and what waits on you. Who missed it, the average and the marks show on hover. */}
+        <ul className="ql-facts">
+          {quizFacts(test, shortDateTime).map((fact) => {
+            const Icon = factIcon(fact);
+            return <li key={fact.id} className={`is-${fact.tone}${fact.more ? ' is-more' : ''}`}><Icon size={13} aria-hidden="true"/>{fact.text}</li>;
+          })}
+        </ul>
       </div>
       <span className={`badge is-${status.tone}`}>{status.label}</span>
       <p className="ql-progress-text">
         <strong>{submitted === null ? '—' : submitted}</strong> / {registered} submitted
-        {test.pendingCount > 0 && <em>{test.pendingCount} waiting</em>}
       </p>
       <div className="ql-actions">
-        <button className="button button-tinted" type="button" onClick={onResults}><BarChart3 size={16} aria-hidden="true"/>Results</button>
+        {/* Papers waiting for a mark: straight to them; otherwise (marks released anyway too) to the results. */}
+        {papersToMark(test) > 0 ? (
+          <button className="button button-tinted" type="button" onClick={onMark}
+            title={`${papersToMark(test)} paper${papersToMark(test) === 1 ? ' has' : 's have'} short answers to mark`}>
+            <PenLine size={16} aria-hidden="true"/>Mark {papersToMark(test)}
+          </button>
+        ) : (
+          <button className="button button-tinted" type="button" onClick={onResults}><BarChart3 size={16} aria-hidden="true"/>Results</button>
+        )}
         <ActionMenu
           label={<MoreVertical size={18} aria-label={`More actions for ${test.title}`}/>}
           trigger="icon"
@@ -113,10 +139,18 @@ export function TestListScreen({ go, showToast }) {
   const [tests, setTests] = useState(null);
   const [failed, setFailed] = useState('');
   const [query, setQuery] = useState('');
-  const [status, setStatus] = useState('all');
-  const [sort, setSort] = useState('newest');
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // The home page links straight to a filter: ?admin=tests&filter=marking:due.
+  const [filters, setFilters] = useState(() => testFiltersFrom(new URLSearchParams(window.location.search).get('filter')));
+  const [sort, setSort] = useState(USUAL_TEST_SORT);
   const [deleting, setDeleting] = useState(null);
+
+  // Written back as it changes - replaced, not added, so Back still leaves the page - and a reload keeps it.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (filters.length) url.searchParams.set('filter', filters.join(','));
+    else url.searchParams.delete('filter');
+    if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url);
+  }, [filters]);
 
   const load = useCallback(async () => {
     try {
@@ -135,23 +169,18 @@ export function TestListScreen({ go, showToast }) {
     return () => window.clearInterval(timer);
   }, []);
 
-  const visible = useMemo(() => {
-    if (!tests) return [];
+  const { pool, visible, counts } = useMemo(() => {
+    if (!tests) return { pool: [], visible: [], counts: {} };
     const needle = query.trim().toLowerCase();
-    const rows = tests.filter((test) => {
-      const state = statusOf(test).id;
-      if (status === 'all' ? state === 'archived' : state !== status) return false;
-      if (needle && !`${test.title} ${test.code}`.toLowerCase().includes(needle)) return false;
-      return true;
-    });
-    const by = {
-      newest: (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
-      oldest: (a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0),
-      title: (a, b) => a.title.localeCompare(b.title),
-      score: (a, b) => (known(b.averageScore) ? b.averageScore : -1) - (known(a.averageScore) ? a.averageScore : -1)
-    }[sort];
-    return [...rows].sort(by);
-  }, [tests, query, status, sort]);
+    const searched = needle ? tests.filter((test) => `${test.title} ${test.code}`.toLowerCase().includes(needle)) : tests;
+    const pool = unlessArchivedTicked(searched, filters);
+    return {
+      pool,
+      visible: sortTests(applyFilters(pool, TEST_FILTERS, filters), sort),
+      // Archived counts what ticking it would bring back, even while it is not ticked.
+      counts: { ...optionCounts(pool, TEST_FILTERS), [ARCHIVED]: searched.filter((test) => test.archivedAt).length }
+    };
+  }, [tests, query, filters, sort]);
 
   const act = async (run, success) => {
     try { await run(); showToast(success, 'success'); await load(); } catch (error) { showToast(error.message, 'error'); }
@@ -167,15 +196,22 @@ export function TestListScreen({ go, showToast }) {
       load();
     } catch (error) { showToast(error.message, 'error'); }
   };
-  const clearFilters = () => { setQuery(''); setStatus('all'); };
-  const filtered = query || status !== 'all';
+  const clearFilters = () => { setQuery(''); setFilters([]); };
+  const filtered = query || filters.length > 0;
+  // Nothing left out by a search or filter, yet nothing shown: every quiz is archived.
+  const allArchived = !filtered && tests?.length > 0 && tests.every((test) => test.archivedAt);
 
   const header = (
     <header className="ql-head" id="my-quizzes">
       <div>
         <p className="page-kicker">Admin portal</p>
-        <h1>My quizzes</h1>
-        <p>Create, manage and view the performance of your quizzes.</p>
+        <div className="page-heading">
+          <h1>My quizzes</h1>
+          <InfoTip label="About My quizzes">
+            Every quiz you created. Open one to run it, follow its students, mark short answers and see its results;
+            the filter narrows to what needs you.
+          </InfoTip>
+        </div>
       </div>
       <button className="button button-primary" type="button" onClick={() => go('/?admin=create')}><Plus size={18} aria-hidden="true"/>Create quiz</button>
     </header>
@@ -200,18 +236,13 @@ export function TestListScreen({ go, showToast }) {
       {header}
 
       {tests.length > 0 && (
-        <div className={`ql-toolbar${filtersOpen ? ' is-open' : ''}`}>
+        <div className="ql-toolbar">
           <label className="ql-search">
             <Search size={17} aria-hidden="true"/>
-            <input className="text-input" type="search" placeholder="Search quizzes by name or code…" value={query} onChange={(event) => setQuery(event.target.value)}/>
+            <input className="text-input" type="search" aria-label="Search quizzes" placeholder="Search name or code…" value={query} onChange={(event) => setQuery(event.target.value)}/>
           </label>
-          <button className="button button-secondary ql-filter-toggle" type="button" aria-expanded={filtersOpen} onClick={() => setFiltersOpen((value) => !value)}>
-            {filtersOpen ? <X size={17} aria-hidden="true"/> : <SlidersHorizontal size={17} aria-hidden="true"/>}Filters
-          </button>
-          <div className="ql-filters">
-            <Select label="Status" value={status} options={STATUS_FILTERS} onChange={setStatus}/>
-            <Select label="Sort" value={sort} options={SORTS} onChange={setSort}/>
-          </div>
+          <FilterMenu groups={TEST_FILTERS} rows={pool} selected={filters} onChange={setFilters} icons={ICONS} counts={counts}
+            total={tests.length} title="Filter quizzes" allLabel="All quizzes" sorts={SORTS} sort={sort} onSort={setSort}/>
         </div>
       )}
 
@@ -222,11 +253,18 @@ export function TestListScreen({ go, showToast }) {
           <p>Create your first quiz, then show its QR code in class so students can register.</p>
           <button className="button button-primary" type="button" onClick={() => go('/?admin=create')}><Plus size={18} aria-hidden="true"/>Create quiz</button>
         </div>
+      ) : allArchived ? (
+        <div className="ql-empty">
+          <Archive size={26} aria-hidden="true"/>
+          <strong>Every quiz is archived</strong>
+          <p>Archived quizzes are kept, just out of the way.</p>
+          <button className="button button-secondary" type="button" onClick={() => setFilters([ARCHIVED])}>Show archived</button>
+        </div>
       ) : visible.length === 0 ? (
         <div className="ql-empty">
           <Search size={26} aria-hidden="true"/>
           <strong>No quizzes match</strong>
-          <p>{status === 'archived' ? 'Nothing is archived.' : 'Try another name or code, or clear the filters.'}</p>
+          <p>{filters.length === 1 && filters[0] === ARCHIVED && !query ? 'Nothing is archived.' : 'Try another name or code, or clear the filters.'}</p>
           {filtered && <button className="button button-secondary" type="button" onClick={clearFilters}>Clear filters</button>}
         </div>
       ) : (
@@ -237,9 +275,10 @@ export function TestListScreen({ go, showToast }) {
               test={test}
               onOpen={() => go(`/?admin=${encodeURIComponent(test.code)}`)}
               onResults={() => go(`/?admin=${encodeURIComponent(test.code)}&tab=responses`)}
+              onMark={() => go(`/?admin=${encodeURIComponent(test.code)}&tab=responses&results=marking:awaiting`)}
               onExport={() => downloadSpreadsheet(test.code).then(() => showToast('Excel download started.', 'success'), (error) => showToast(error.message, 'error'))}
               onDuplicate={() => act(() => post(path(test, '/duplicate')), `A copy of “${test.title}” was created.`)}
-              onArchive={() => act(() => post(path(test, '/archive'), { archived: !test.archivedAt }), test.archivedAt ? 'Restored from the archive.' : 'Archived. Find it under Status → Archived.')}
+              onArchive={() => act(() => post(path(test, '/archive'), { archived: !test.archivedAt }), test.archivedAt ? 'Restored from the archive.' : 'Archived. Find it under Filter → Archived.')}
               onDelete={() => setDeleting(test)}
             />
           ))}

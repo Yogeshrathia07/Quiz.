@@ -19,6 +19,38 @@ export function applyFilters(rows, groups, selected) {
 
 export const allOptionIds = (groups) => groups.flatMap((group) => group.options.map((option) => option.id));
 
+/** Rows without the value (no SAP ID, no distance) go last either way round. */
+function compare(a, b, read, way) {
+  const [x, y] = [read(a), read(b)];
+  const missing = (x === null || x === '') - (y === null || y === '');
+  if (missing) return missing;
+  const order = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
+  return way === 'desc' ? -order : order;
+}
+
+/** `sort` is 'field-direction', `fields` reads each field's value; ties keep the list's own order. */
+export function sortBy(rows, sort, fields) {
+  const [field, way] = String(sort || '').split('-');
+  const read = fields[field];
+  if (!read) return rows;
+  return rows.map((row, index) => ({ row, index }))
+    .sort((a, b) => compare(a.row, b.row, read, way) || a.index - b.index)
+    .map((entry) => entry.row);
+}
+
+const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+
+/** When a row was created, by the calendar: 'today', 'week' (earlier this week, from Monday), 'month' (earlier this month) or 'older'. */
+export function whenOf(row, now = new Date()) {
+  const at = Date.parse(row.createdAt);
+  const today = startOfDay(now);
+  if (at >= today) return 'today';
+  const monday = today - ((now.getDay() + 6) % 7) * 86_400_000;
+  if (at >= monday) return 'week';
+  if (at >= new Date(now.getFullYear(), now.getMonth(), 1).getTime()) return 'month';
+  return 'older';
+}
+
 /** How many rows each option matches on its own. */
 export const optionCounts = (rows, groups) => Object.fromEntries(
   groups.flatMap((group) => group.options).map((option) => [option.id, rows.filter(option.test).length])

@@ -6,6 +6,11 @@ export const shortDateTime = (value) => (value
   ? new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
   : '—');
 
+/** "10:42 AM": a time later today, as on a clock. */
+export const clockTime = (value) => (value
+  ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(value))
+  : '—');
+
 /** The `value` a datetime-local input expects, in the viewer's own timezone. */
 export const localDateTime = (value) => {
   const date = new Date(value);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, ChartColumn, CircleCheck, ClipboardList, PenLine, Plus, QrCode, Radio, UserCheck, Users } from 'lucide-react';
+import { ArrowRight, CircleCheck, ClipboardList, PenLine, Plus, QrCode, Radio, UserCheck, Users } from 'lucide-react';
 import { api } from '../../lib/api.js';
 
 const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
@@ -18,10 +18,11 @@ async function loadSummary() {
     return await api('/api/admin/home');
   } catch {
     const [tests, attendance] = await Promise.all([api('/api/admin/tests'), api('/api/admin/attendance')]);
-    const list = tests.tests || [];
+    // Archived tests count for nothing, as on the server.
+    const list = (tests.tests || []).filter((test) => !test.archivedAt);
     const sessions = attendance.sessions || [];
     return {
-      tests: { total: list.filter((test) => !test.archivedAt).length, live: list.filter((test) => test.isStarted && !test.isClosed).length, pending: sum(list, 'pendingCount') },
+      tests: { total: list.length, live: list.filter((test) => test.isStarted && !test.isClosed).length, pending: sum(list, 'pendingCount') },
       results: { submitted: sum(list, 'submittedCount'), toMark: null },
       attendance: { sessions: sessions.length, open: sessions.filter((session) => session.isOpen).length },
       users: null
@@ -31,7 +32,7 @@ async function loadSummary() {
 
 /**
  * The faculty home page: what needs you now, then the way into each part of
- * the portal - Tests, Attendance, Results and (for those allowed) Users -
+ * the portal - Tests (results and marking included), Attendance and (for those allowed) Users -
  * each with its key numbers and its most common action. Nothing of any one
  * part lives here; each has its own page.
  */
@@ -57,55 +58,56 @@ export function FacultyHome({ user, go }) {
   const s = summary || null;
   const link = (url) => (event) => { event.preventDefault(); go(url); };
 
-  // What is waiting on the teacher, most urgent first.
+  // What is waiting on the teacher, most urgent first - each opens the tests it is about.
   const attention = s ? [
-    s.tests.pending > 0 && { icon: UserCheck, tone: 'warn', text: `${plural(s.tests.pending, 'registration')} to approve`, url: '/?admin=tests' },
-    s.results.toMark > 0 && { icon: PenLine, tone: 'warn', text: `${plural(s.results.toMark, 'paper')} to mark`, url: '/?page=results' },
-    s.tests.live > 0 && { icon: Radio, tone: 'ok', text: `${plural(s.tests.live, 'test')} live now`, url: '/?admin=tests' },
+    s.tests.pending > 0 && { icon: UserCheck, tone: 'warn', text: `${plural(s.tests.pending, 'registration')} to approve`, url: '/?admin=tests&filter=requests:waiting' },
+    s.results.toMark > 0 && { icon: PenLine, tone: 'warn', text: `${plural(s.results.toMark, 'paper')} to mark`, url: '/?admin=tests&filter=marking:due' },
+    s.tests.live > 0 && { icon: Radio, tone: 'ok', text: `${plural(s.tests.live, 'test')} live now`, url: '/?admin=tests&filter=status:live' },
     s.attendance.open > 0 && { icon: QrCode, tone: 'ok', text: `Attendance open (${s.attendance.open})`, url: '/?admin=attendance' }
   ].filter(Boolean) : [];
 
+  // Each figure: [value, label, tone when above zero - a number that waits on you stands out].
   const cards = [
+    // Everything a test needs - running it, marking, its results - is under Tests.
     {
       id: 'tests', title: 'Tests', icon: ClipboardList, tone: 'info', url: '/?admin=tests',
-      about: 'Create tests, run them live and follow every student.',
-      figures: [[s?.tests.total, 'tests'], [s?.tests.live, 'live']],
+      figures: [[s?.tests.total, 'tests'], [s?.tests.live, 'live', 'ok'], [s?.results.toMark, 'to mark', 'warn']],
       action: { label: 'New test', url: '/?admin=create' }
     },
     {
       id: 'attendance', title: 'Attendance', icon: QrCode, tone: 'ok', url: '/?admin=attendance',
-      about: 'Show a QR in class; students scan it to mark themselves.',
-      figures: [[s?.attendance.sessions, 'sessions'], [s?.attendance.open, 'open']],
+      figures: [[s?.attendance.sessions, 'sessions'], [s?.attendance.open, 'open', 'ok']],
       action: { label: 'Take attendance', url: '/?admin=attendance&new=1' }
-    },
-    {
-      id: 'results', title: 'Results', icon: ChartColumn, tone: 'warn', url: '/?page=results',
-      about: 'Scores and answers from every test, ready to download.',
-      figures: [[s?.results.submitted, 'submitted'], [s?.results.toMark, 'to mark']]
     },
     // Shown from who is signed in - never hidden because a number did not load.
     user?.canManageUsers && {
       id: 'users', title: 'Users', icon: Users, tone: 'muted', url: '/?admin=users',
-      about: 'Accounts, names and SAP IDs, blocking and access.',
       figures: [[s?.users?.accounts, 'accounts'], [s?.users?.students, 'students'], [s?.users?.faculty, 'faculty']]
     }
   ].filter(Boolean);
 
   return (
     <section className="faculty-home">
+      {/* The greeting, and beside it what needs you: a chip each, or a small tick when nothing does.
+          Both wait quietly while loading, and are left out if the numbers cannot be had. */}
       <header className="faculty-home-head">
         <h1>{firstName ? `Welcome, ${firstName}` : 'Welcome'}</h1>
-        <p>{today}</p>
+        <p className="faculty-home-date">
+          {s && !attention.length && (
+            <span className="home-all-clear" role="img" aria-label="Nothing needs you right now" title="Nothing needs you right now">
+              <CircleCheck size={18} aria-hidden="true"/>
+            </span>
+          )}
+          {today}
+        </p>
       </header>
-
-      {/* Waits quietly while loading, and is left out if the numbers cannot be had. */}
-      {s && (
-        <div className={`home-attention${attention.length ? '' : ' is-clear'}`} aria-live="polite">
-          {attention.length ? attention.map((item) => (
+      {attention.length > 0 && (
+        <div className="home-attention" aria-live="polite">
+          {attention.map((item) => (
             <a key={item.text} className={`home-chip is-${item.tone}`} href={item.url} onClick={link(item.url)}>
               <item.icon size={15} aria-hidden="true"/>{item.text}<ArrowRight size={14} aria-hidden="true"/>
             </a>
-          )) : <span className="home-attention-note"><CircleCheck size={16} aria-hidden="true"/>Nothing needs you right now.</span>}
+          ))}
         </div>
       )}
 
@@ -118,16 +120,15 @@ export function FacultyHome({ user, go }) {
               {/* The whole card opens its section; the action below it is a second, separate way in. */}
               <a className="home-card-main" href={card.url} onClick={link(card.url)}>
                 <span className="home-card-icon"><card.icon size={22} aria-hidden="true"/></span>
-                <span className="home-card-text">
-                  <strong>{card.title}</strong>
-                  <span>{card.about}</span>
-                </span>
+                <strong className="home-card-title">{card.title}</strong>
                 <ArrowRight className="home-card-go" size={18} aria-hidden="true"/>
               </a>
               <footer className="home-card-foot">
                 {loading ? <span className="home-figures-loading" aria-hidden="true"><i/><i/></span> : known.length > 0 && (
                   <dl className="home-figures">
-                    {known.map(([value, label]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+                    {known.map(([value, label, tone]) => (
+                      <div key={label} className={tone && value > 0 ? `is-${tone}` : undefined}><dt>{label}</dt><dd>{value}</dd></div>
+                    ))}
                   </dl>
                 )}
                 {card.action && (

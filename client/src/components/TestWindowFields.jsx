@@ -10,7 +10,10 @@ import { DateTimeField, nowValue } from './DateTimeField.jsx';
  *   end    manual     - when the admin presses Close (no clock)
  *          at         - at a set time; every paper is submitted automatically
  *          duration   - so many minutes after it actually starts
- * Not setting a time leaves that moment to the admin.
+ *          each       - so many minutes from each student's own Begin; the
+ *                       test stays open until the admin presses Close
+ * Not setting a time leaves that moment to the admin. A duration is counted
+ * from the test's start or each student's (both are "After a duration").
  */
 
 const START_OPTIONS = [
@@ -21,7 +24,13 @@ const START_OPTIONS = [
 const END_OPTIONS = [
   { value: 'manual', title: 'When I press Close', description: 'No clock for students.' },
   { value: 'at', title: 'At a set time', description: 'Every paper is submitted automatically at this time.' },
-  { value: 'duration', title: 'After a duration', description: 'Counted from the actual start, so a late start costs no time.' }
+  { value: 'duration', title: 'After a duration', description: 'So many minutes - from the test\'s start, or from each student\'s own Begin.' }
+];
+
+/** After a duration: one end for everyone, or each student's own time. */
+const DURATION_FROM = [
+  { value: 'duration', title: 'The test\'s start', description: 'One end for everyone, counted from when the test actually starts: a student who begins late gets what is left.' },
+  { value: 'each', title: 'Each student\'s start', description: 'Everyone gets the whole duration from their own Begin, however late. The test stays open until you press Close.' }
 ];
 
 
@@ -42,8 +51,10 @@ export function suggestedEndsAt(values, estimatedSeconds) {
 /** The whole plan in one sentence, so the admin can check it at a glance. */
 export function scheduleSummary(values) {
   const start = values.startMode === 'scheduled' ? `Starts ${dateTime(values.opensAt)}` : 'Starts when you press Start';
+  const minutes = durationLabel((Number(values.durationMinutes) || 0) * 60);
   const end = values.endMode === 'manual' ? 'ends when you press Close'
-    : values.endMode === 'duration' ? `runs ${durationLabel((Number(values.durationMinutes) || 0) * 60)}, then auto-submits`
+    : values.endMode === 'each' ? `each student gets ${minutes} from their own Begin, then auto-submits; open until you press Close`
+    : values.endMode === 'duration' ? `runs ${minutes}, then auto-submits`
       : `auto-submits at ${dateTime(values.endsAt)}`;
   return `${start} · ${end}.`;
 }
@@ -58,7 +69,7 @@ export function scheduleProblem(values) {
     if (endMs <= Date.now()) return 'The end time has already passed.';
     if (values.startMode === 'scheduled' && endMs <= startMs) return 'The end time must be after the start time.';
   }
-  if (values.endMode === 'duration' && !(Number(values.durationMinutes) >= 1)) return 'Choose how long the test lasts.';
+  if ((values.endMode === 'duration' || values.endMode === 'each') && !(Number(values.durationMinutes) >= 1)) return 'Choose how long the test lasts.';
   return null;
 }
 
@@ -69,8 +80,12 @@ export function EndChoice({ value, onChange, idPrefix, options = END_OPTIONS }) 
 
 export const LIVE_END_OPTIONS = END_OPTIONS.filter((option) => option.value !== 'duration');
 
+/** Both kinds of duration show as "After a duration". */
+const endChoiceOf = (endMode) => (endMode === 'each' ? 'duration' : endMode);
+
 export function TestWindowFields({ values, estimatedSeconds, onChange, idPrefix }) {
-  const windowSeconds = values.endMode === 'duration'
+  const timed = values.endMode === 'duration' || values.endMode === 'each';
+  const windowSeconds = timed
     ? (Number(values.durationMinutes) || 0) * 60
     : values.endMode === 'at' && values.startMode === 'scheduled'
       ? (new Date(values.endsAt).getTime() - new Date(values.opensAt).getTime()) / 1000
@@ -84,6 +99,8 @@ export function TestWindowFields({ values, estimatedSeconds, onChange, idPrefix 
     if (mode === 'scheduled' && !values.opensAt) onChange('opensAt', nowValue(5));
   };
   const chooseEnd = (mode) => {
+    // "After a duration" again keeps whichever start it counts from.
+    if (mode === endChoiceOf(values.endMode)) return;
     onChange('endMode', mode);
     if (mode === 'at' && !values.endsAt) onChange('endsAt', suggestedEndsAt(values, estimatedSeconds));
     if (mode === 'duration' && !values.durationMinutes) onChange('durationMinutes', fit);
@@ -105,7 +122,7 @@ export function TestWindowFields({ values, estimatedSeconds, onChange, idPrefix 
       </div>
 
       <div className="schedule-row">
-        <EndChoice value={values.endMode} onChange={chooseEnd} idPrefix={idPrefix}/>
+        <EndChoice value={endChoiceOf(values.endMode)} onChange={chooseEnd} idPrefix={idPrefix}/>
         {values.endMode === 'at' && (
           <DateTimeField
             id={`${idPrefix}-ends`}
@@ -115,7 +132,7 @@ export function TestWindowFields({ values, estimatedSeconds, onChange, idPrefix 
             extras={[['+30 min', () => later(values.endsAt || nowValue(), 30)]]}
           />
         )}
-        {values.endMode === 'duration' && (
+        {timed && (
           <Stepper
             id={`${idPrefix}-duration`}
             label="Duration"
@@ -129,6 +146,9 @@ export function TestWindowFields({ values, estimatedSeconds, onChange, idPrefix 
           />
         )}
       </div>
+      {timed && (
+        <ChoiceCards label="Counted from" idPrefix={`${idPrefix}-from`} value={values.endMode} onChange={(mode) => onChange('endMode', mode)} options={DURATION_FROM}/>
+      )}
 
       <p className={`schedule-summary${problem ? ' is-problem' : ''}`}>
         {problem || scheduleSummary(values)}

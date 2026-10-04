@@ -16,6 +16,9 @@
  *  - A link opened inside another app (Gmail, Outlook, Teams, Instagram, the
  *    Google app...) is shown by that app, which cannot share location at all.
  *    It is recognised before anything is asked, not after it fails.
+ *  - A laptop with location switched off in Windows or macOS refuses at once
+ *    too, with no question - and was told to change a setting in the browser
+ *    only, and to "allow it on your phone". Laptops get their own steps.
  */
 
 const HIGH_ACCURACY_MS = 12_000;
@@ -40,22 +43,31 @@ export function browserInfo() {
     || (typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches));
   // On an iPhone every browser names Safari; a view inside another app does not.
   const inApp = KNOWN_APPS.test(ua) || (ios && !homeScreen && /AppleWebKit/i.test(ua) && !/Safari\//i.test(ua));
+  // A laptop or desktop: its location is a Windows or macOS setting as well as the browser's.
+  const windows = /Windows NT/i.test(ua);
+  const mac = !ios && /Macintosh|Mac OS X/i.test(ua);
   const app = inApp ? 'inapp'
     : /EdgiOS|EdgA|Edg\//.test(ua) ? 'Edge'
       : /FxiOS|Firefox\//.test(ua) ? 'Firefox'
         : /SamsungBrowser/.test(ua) ? 'Samsung Internet'
           : /CriOS|Chrome\//.test(ua) ? 'Chrome'
             : ios ? 'Safari' : 'your browser';
-  return { ios, android, inApp, app };
+  return { ios, android, inApp, app, windows, mac, desktop: !ios && !android };
 }
 /** Opened inside another app: no location there. */
 export const inAppBrowser = () => browserInfo().inApp;
 
 /** What to do, step by step, on this phone and in this browser. */
 function guidance(reason, { asked, accuracyMeters } = {}) {
-  const { ios, android, app } = browserInfo();
+  const { ios, android, app, windows, mac, desktop } = browserInfo();
   const browser = app === 'inapp' ? (ios ? 'Safari' : 'Chrome') : app;
-  const reloadStep = 'Come back to this page, reload it, and try again. When your phone asks, choose Allow.';
+  const device = desktop ? 'computer' : 'phone';
+  const reloadStep = `Come back to this page, reload it, and try again. When your ${desktop ? 'browser' : 'phone'} asks, choose Allow.`;
+  // Where a laptop keeps its own location switch.
+  const systemStep = windows
+    ? 'Open Windows Settings → Privacy & security → Location: turn on Location services, and "Let desktop apps access your location".'
+    : mac ? `Open System Settings → Privacy & Security → Location Services: turn it on, and turn it on for ${browser}.`
+      : 'Make sure location is switched on in your computer\'s settings.';
   if (reason === 'inapp') {
     return {
       title: 'This page is open inside another app, which cannot share your location',
@@ -69,7 +81,7 @@ function guidance(reason, { asked, accuracyMeters } = {}) {
   }
   if (reason === 'denied') {
     // Refused faster than anyone could answer: nothing was asked on screen.
-    const title = asked === false ? `Your phone did not ask for your location - it is switched off for ${browser}`
+    const title = asked === false ? `Your ${device} did not ask for your location - it is switched off for ${browser}`
       : asked === true ? 'Location was not allowed' : 'Location is blocked for this page';
     if (ios && browser === 'Safari') {
       return { title, steps: [
@@ -92,7 +104,21 @@ function guidance(reason, { asked, accuracyMeters } = {}) {
         'Make sure Location is on in your quick settings (swipe down from the top), then reload this page and try again.'
       ] };
     }
-    return { title, steps: ['Allow location for this site in your browser\'s settings (the icon at the left of the address bar).', reloadStep] };
+    return { title, steps: [
+      `In ${browser}, click the icon at the left of the address bar → Location → Allow${mac && browser === 'Safari' ? ' (in Safari: Safari → Settings for This Website → Location → Allow)' : ''}.`,
+      `Not asked at all? ${systemStep}`,
+      reloadStep
+    ] };
+  }
+  if (reason === 'imprecise' && desktop) {
+    return {
+      title: `Your computer shared only an approximate location (±${Math.round(accuracyMeters || 0)} m)`,
+      steps: [
+        'Laptops have no GPS: they work out where they are from nearby Wi-Fi networks. Turn Wi-Fi on (you do not need to connect).',
+        systemStep,
+        'Still too vague? Use your phone for this test, or ask your teacher for a location exception.'
+      ]
+    };
   }
   if (reason === 'imprecise') {
     return {
@@ -104,6 +130,12 @@ function guidance(reason, { asked, accuracyMeters } = {}) {
         android ? 'Also turn on Settings → Location → Location services → Google Location Accuracy.' : 'Stay near a window or out in the open for a moment.',
         'Then check again.'
       ]
+    };
+  }
+  if ((reason === 'unavailable' || reason === 'timeout') && desktop) {
+    return {
+      title: reason === 'timeout' ? 'Finding your location took too long' : 'Your computer could not find its location',
+      steps: [systemStep, 'Turn Wi-Fi on (you do not need to connect): laptops find their location from nearby networks.', 'Then try again, or use your phone for this test.']
     };
   }
   if (reason === 'unavailable' || reason === 'timeout') {
@@ -133,6 +165,8 @@ export class LocationProblem extends Error {
     this.title = help.title;
     this.steps = help.steps;
     this.copyLink = Boolean(help.copyLink);
+    // Whether a question was shown before the refusal; reported to the teacher with Begin.
+    this.asked = typeof details.asked === 'boolean' ? details.asked : null;
   }
 }
 

@@ -7,6 +7,7 @@ import { UserDetailModal } from './modals/UserDetailModal.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { applyFilters } from '../../lib/filters.js';
 import { USER_FILTERS } from './user-filters.js';
 
@@ -138,9 +139,9 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
   return (
     <section className="admin-list">
       <header className="page-title-row">
-        <div>
+        <div className="page-heading">
           <h1>Users</h1>
-          <p>Open a person to see their tests and SAP ID, or to delete or block them.</p>
+          <InfoTip label="About Users">Open a person to see their tests and SAP ID, or to delete or block them.</InfoTip>
         </div>
       </header>
 
@@ -234,9 +235,9 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
 
       <section className="card students-card users-blocked">
         <div className="users-toolbar" id="users-blocked">
-          <div>
+          <div className="page-heading">
             <h2>Blocked</h2>
-            <p className="table-subtext">Blocked people cannot log in, so they cannot take any test.</p>
+            <InfoTip label="About blocking">Blocked people cannot log in, so they cannot take any test.</InfoTip>
           </div>
         </div>
         <BlockForm busy={busy} onBlock={block}/>

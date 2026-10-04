@@ -22,7 +22,8 @@ Everyone logs in with **email + password** (the email is the username). Only add
 
 - `@stu.upes.ac.in` accounts are **students**. They register for tests, and their home page is **My results**: every test they took, the time it took, and their marks once released.
 - **Sign in with Microsoft** is an extra option for any UPES account (the `AZURE_*` values in `.env`, redirect URI `<PUBLIC_BASE_URL>/auth/microsoft/callback`). Students' and faculty's Microsoft accounts are in different tenants, so the Azure app must be **multi-tenant** and `AZURE_TENANT_ID=organizations`; `AZURE_ALLOWED_TENANTS` limits it to your directories. The button disappears if the Azure values are missing.
-- Every other UPES address (e.g. `@ddn.upes.ac.in`) is **faculty**. Faculty get a private admin portal showing only the tests they created, and they can **also take tests** with no SAP ID. **My results** is in their menu too.
+- Every other UPES address (e.g. `@ddn.upes.ac.in`) is **faculty**. Faculty get a private admin portal showing only the tests they created: **Home · Tests · Attendance** (and **Users** for those allowed). Everything a test needs is under **Tests**, results and marking included: a quiz with papers to mark shows **Mark N**, opening that test's Results tab on the papers waiting, and the home page's "papers to mark", "to approve" and "live now" each open Tests filtered to them. Faculty can **also take tests** with no SAP ID; those attempts are under **My test attempts** in the account menu, where a test of their own opens on its manage page.
+- In a results list, a test that ended without the person beginning a paper reads **Missed** (grey), not "Not started".
 
 Accounts are kept until an administrator deletes them. Test records and marks are stored on the tests, not the account, so deleting an account never removes marks.
 
@@ -66,11 +67,22 @@ A test has two independent timing choices, so every combination works. Setting a
 |---|---|
 | **When I press Close** | No clock. The admin's **Close test** submits every open paper. |
 | **Set an end time** | A wall-clock deadline for everybody. |
-| **After a duration** (default: what the questions are expected to take) | So many minutes after the test *actually* starts, so a late Start costs no one time. The end time is fixed at that moment. |
+| **After a duration** (default: what the questions are expected to take) | So many minutes, **counted from** one of: |
+| &nbsp;&nbsp;→ **The test's start** (default) | After the test *actually* starts, so a late Start costs no one time. The end time is fixed at that moment, the same for everyone. |
+| &nbsp;&nbsp;→ **Each student's start** | From each student's own **Begin**: everyone gets the whole duration, however late they begin. The test itself has no end and stays open until you press **Close**. |
 
 The date and time pickers have one-tap **Now** and **Today** buttons (Today keeps the chosen time and sets today's date), plus quick picks. A one-line summary under them says exactly what will happen.
 
-The end time is **the deadline for everybody**, so **a student who starts late gets only what is left of it**. Nobody may begin a fresh paper once time is up; **Extend time** lets a latecomer in.
+### Each student's own time
+
+With **After a duration → Counted from: Each student's start** (`endMode: "each"` in [`attempt-rules.js`](src/domain/attempt-rules.js)) every paper has its own end: the student's Begin plus the duration, plus any time given back. Approved students can begin at any time until you press **Close**.
+
+- **Students** are told "You get 30 min from when you press Begin". While writing, the timer counts down *their* time remaining ("Your time left 12:04", seconds included), with the usual 5- and 1-minute warnings. When it runs out, their paper is submitted automatically - by their page, or by the scheduler within seconds if the tab was closed - and the result page says "Your time was up at 10:42". Others carry on.
+- **The dashboard** shows *Live · 30 min each, from their own Begin*, how many are writing and when the last of them runs out; each student's row shows *ends 10:42*. **+5 / +10 / +15 min** (or **More → Give more time**) gives the minutes to everyone still writing, from their own end - or from now if theirs has already passed. One student alone: pause or reopen their paper.
+- **Close test** first says how many are still writing and until when, then hands every open paper in. **Resume test** gives each reopened paper back the time the test was closed; an outage is given back paper by paper the same way.
+- Once the test has started, it cannot switch between each student's own time and a shared end (or change the duration); Reset it to.
+
+Otherwise, the end time is **the deadline for everybody**, so **a student who starts late gets only what is left of it**. Nobody may begin a fresh paper once time is up; **Extend time** lets a latecomer in.
 
 **Before the end time** the paper behaves like paper: any question, in any order, any answer changed as often as the student likes, each change written to the server at once. Students get a warning 5 minutes and 1 minute before the end, and the clock turns red in the last minute.
 
@@ -91,7 +103,7 @@ Before anyone has a paper, saving simply saves. Once students have papers, savin
 - **Everyone, including papers already given out** — an edited question changes in place: students writing the test see it on their next refresh, and a changed answer key **re-marks papers already submitted**. A deleted question is taken off every paper and scores are recounted. An answer that no longer fits (fewer options, a switch between choice and written answer) is cleared.
 - **Only students who start from now** — papers already given out keep every question exactly as it was, and their marks. The old version stays in the bank marked *retired* for those papers; new papers get the edited one.
 
-Either way, new questions and a different number of questions per student reach only papers started from now. Once the test has started, the start time, the timer on every question, how questions are picked and shuffling stay fixed, and the end time is changed with **Extend time**.
+Either way, new questions and a different number of questions per student reach only papers started from now. Once the test has started, the start time, whether the paper goes one way only (no Previous) with its question times and Next button, how questions are picked and shuffling stay fixed (a single question's own time can still be edited like the rest of the question), and the end time is changed with **Extend time**.
 
 ### Restarting a quiz
 
@@ -121,10 +133,10 @@ Restarting a student's attempt gives them a **blank paper**, not extra time: the
 
 Each test chooses how students see their paper, in **Create a test** and in **Edit test setup**:
 
-- **One question at a time** — a question navigator with Previous and Next.
+- **One question at a time** — one question on screen with Next, and Previous unless the **Previous button** switch under it is turned off (one way only, see *Strict timing* below).
 - **All questions on one page** — every question in one scrolling page, with a single Submit at the end.
 
-Both keep the same behaviour underneath: free movement between questions, answers written to the server as you go, and automatic submission when time is up. Only the presentation differs. The question navigator is shown either way; on a single page it scrolls to the question instead of swapping it.
+With Previous on, both keep the same behaviour underneath: free movement between questions, answers written to the server as you go, and automatic submission when time is up. Only the presentation differs. The question navigator is shown either way; on a single page it scrolls to the question instead of swapping it.
 
 On an ordinary test, questions carry **no time of their own**: the test's end time is the only deadline, and an attempt finishes when the student submits, time runs out, or the admin closes the test.
 
@@ -147,14 +159,14 @@ When the bank holds more questions of a type than one paper uses, **How question
 
 The order of questions *within* a paper is shuffled per student either way when **Shuffle question order** is on.
 
-### Strict timing (a timer on every question)
+### Strict timing (one way only, a timer on each question)
 
-Turn on **Strict timing** when creating a test (or in **Edit test setup** before it starts) to give each question its own time:
+Under **Question layout → One at a time**, turn the **Previous button** off when creating a test (or editing it before it starts) to make the paper go one way only. **Timer on each question** (off to begin with) then decides whether questions have a time: off, students move on with Next whenever they are ready and the test's own end time is the only limit (they are told "Move on with Next when you are ready"); on, the times below and the **Next button** switch appear. Turning timers off saves no question times - neither the types' nor any question's own - but the form keeps them for turning it back on, and a test loaded or imported with any time shows it on.
 
 - **Time per type** — MCQ, MSQ and short answer each get a default (1 min, 1 min, 2 min to begin with; 0 = no limit).
 - **Time per question** — any question can override that in the question editor (*Default*, *No limit*, 15 s … 5 min, or a custom number of seconds). JSON imports can carry `strictTiming`, `typeSeconds` and a question's `timeSeconds`.
 - **Submit test** is always on screen, so a student can hand in the paper at any point (confirming first). There is never a Back button.
-- **Show a Next button** (on by default) is the admin's choice. Turned off, a timed question stays on screen for its full time and the server refuses any early move; a question with **no** timer still gets Next, so nobody is stuck.
+- **Next button** (on by default, shown once timers are on) is the admin's choice. Turned off, a timed question stays on screen for its full time and the server refuses any early move; a question with **no** timer still gets Next, so nobody is stuck.
 - Confirmations during a test (Submit, Skip) are drawn in the page. The browser's own `confirm()` box would take the page out of fullscreen, and dismissing it with Escape would count as leaving the test.
 - The paper shows **one question at a time, forward only**. A timed question counts down (red for the last 10 seconds); at zero the answer as it stands is kept and the next question opens by itself. **Next** moves on early; skipping an unanswered question asks first. A question with no limit waits for Next. There is **no going back**, and Next on the last question submits the paper.
 - The clock is the server's (`src/domain/strict-timing.js`). Only the open question is ever sent to the browser, and only it accepts answers — for its time plus a 3-second grace. A question's clock starts when it is first shown, so a dropped connection costs the question that was open, never the ones after it. **It counts only while the student is on the paper:** leaving it (another app or tab, out of fullscreen) or being locked stops the open question's clock, and it carries on from where it stopped once they are back, so its time on screen is time actually spent on it. The test's own end time keeps running, and every exit is still recorded and counted against the limits.
@@ -183,13 +195,26 @@ Everything in **Edit test setup** can be changed until the moment the test start
 
 Moving the start time past the current end time, without supplying a new end time, rebuilds the window from the estimate rather than failing.
 
+**Marks.** Under **Marks for each question** the test sets what each type is worth (1 each unless changed); any question can be worth something else, set in its editor, and then shows a small ☆ sign with its marks in its heading (a question with its own time under strict timing shows a ⏱ sign the same way). Changing a type's marks or time moves every question of that type that still had the old value, so the defaults and the questions never disagree. A choice question is marked automatically - all its marks or none; a short answer can be given any mark from 0 to its marks. Any mark can be changed, a choice question's too (part marks for a nearly-right answer, or none for a right one): **Review** on the Results tab, or the Excel Marks sheet. A changed choice mark is the teacher's own - it shows *Changed by you*, survives re-marking, and **Use automatic** puts it back. Students see what each question is worth on the paper, and every score is out of the paper's full marks. Changing what a question is worth after papers are in re-marks them: choice questions again, and a hand-given mark keeps its share (3.5 of 4 becomes 7 of 8) ([`marks.js`](src/domain/marks.js)).
+
+**Reviewing results.** The Results tab lists every handed-in paper - marks, short answers still to mark, when it was handed in - as a table on a laptop and a card per paper on a phone. A row (or **Review**) opens the review pop-up ([`ResultReviewModal.jsx`](client/src/screens/admin/modals/ResultReviewModal.jsx)), which goes through the papers one answer at a time:
+
+- **By student** - one paper, question by question; **By question** - one question, student by student, optionally only the papers still to mark (the test page's **Mark** button opens it this way).
+- Each answer shows the question, the options with the student's choice and the right answer marked (or the written answer), and its mark: type any mark from 0 to what it is worth, or tap 0 or Full. Enter saves and moves on; ← and → move too.
+- A row of coloured squares shows where every answer stands - full, part, none, to mark, blank - and jumps to any of them; a blue underline marks a mark you changed.
+- Each mark saves at once and reaches the student's result page straight away if their marks are released.
+
+**Freezing results.** Once a test is closed, **Freeze** on the Results tab (or **More → Freeze results**) makes its marks final: no marking (by hand or from Excel), no editing the questions or what they are worth, no restart, reset, resume or reopening a paper, and the test cannot be deleted - each is refused with a message saying so, and the test's page shows *Results frozen*. Releasing or holding the marks, viewing and exporting still work, and unmarked papers on a frozen test no longer count as *to mark*. **Unfreeze** (on the Results tab or in More) undoes it, so marks can be changed again; a copy made with Duplicate starts unfrozen ([`freeze.js`](src/domain/freeze.js)).
+
 Choose one mark-release policy: immediately after submission, after the test is closed, or only after the admin presses **Release marks**.
+
+A paper with a short answer still unmarked normally shows *Being marked* until every one is marked. Once the test is closed, **Release marks** on the test's page handles both: with nothing left to mark it releases at once; with papers still waiting it first lists them - each student and how many answers they have to mark - and offers **Mark them first** (the Results tab, on those papers) or **Release anyway**. Released anyway, each student sees the score of what is marked so far, with *N not marked yet* beside it (on the result page and in **My results**), and each mark you give then shows straight away. Those papers then stop counting as *to mark* - on the home page, the quiz card (its button goes back to **Results**), the *Papers to mark* filter and the Results tab's flag; the test's tile reads *Unmarked, released*, and its Results tab can still filter to them. **More → Hold marks until marking is done** goes back, and they count again; Restart, Reset and Resume turn it off too.
 
 ## Fullscreen, attempt recovery, and mark release
 
 For each quiz, the admin sets what leaving the test does, under **When a student leaves the test**: two switches, **Warn** and **Lock**, and three numbers. **Exits allowed** and **Total time away** (all absences added up) are free; 0 turns that limit off. Going past either one is a *violation*, counted once per absence. With **Lock** on, **Warnings before lock** says how many violations only warn ("Warning 1 of 2", "Last warning"); the next one locks the attempt until the admin presses Revive, and 0 locks the first time with no warning. **Warn** alone shows a warning on every exit and never locks; with both switches off every exit is only recorded. Tests from before these settings lock with no warning. It can be changed while the test runs; turning Lock off lifts any lock it already has. Exits are logged per attempt either way. Copying, pasting, screenshots, printing and developer tools are blocked, and the student sees a warning, but they never lock. The dashboard shows the exit timeline, lock reason, and total time outside fullscreen, and can revive a locked attempt or restart any attempt from the beginning.
 
-**Going offline counts as leaving.** The paper checks in with the server every 10–15 seconds. A silence longer than 60 seconds (`OFFLINE_SECONDS`), from Wi-Fi or data off or a sleeping laptop, is recorded as one exit ("Went offline"), with the whole gap as time away, and can lock the attempt like any other exit. It is judged the moment the paper reconnects, before any answer queued offline is accepted. A student already recorded as away is not counted twice.
+**Going offline is noted, never counted as leaving.** The paper checks in with the server regularly. A silence longer than 60 seconds (`OFFLINE_SECONDS`), from Wi-Fi or data off or a sleeping laptop, is recorded as an offline period — from when, and for about how long — on the student's activity log, in their analysis (*Went offline (not counted)*), on the dashboard row and in both exports. It is not an exit, adds no time away and never locks the paper, so a student on bad Wi-Fi sits the test uninterrupted. Everything the page itself saw meanwhile (switching app, leaving fullscreen) is kept on the device and reported when the connection is back, and counts as usual. The teacher judges the offline periods from the log ([`integrity.js`](src/domain/integrity.js)). Papers from before this still show their offline periods as leaves.
 
 **Server-wide switches.** Every exit and the time away are always recorded and shown (student result and dashboard, admin dashboard and analysis, both exports), and the paper is hidden while the student is away. Whether a test with **Lock** on actually locks also needs the server's `LOCK_ON_EXIT`, which is on unless `.env` sets `LOCK_ON_EXIT=false`; with it off, no test locks. A lock waits for the admin's Revive, unless `LOCK_WAIT_SECONDS` is set, in which case it lifts itself after that many seconds.
 
@@ -216,7 +241,9 @@ Fullscreen is a browser-level deterrent, not a device lockdown. Students must ta
 
 The whole app, test pages included, uses one dark theme defined in [`client/src/styles/theme.css`](client/src/styles/theme.css), loaded after every other stylesheet: page `#1E2124`, navigation `#232629`, cards `#2A2D31`, raised `#33373B`, inputs `#3A3E43`, borders `#474C52` (neutral charcoal greys), and primary blue `#1598D1` for actions; green, red and orange are kept for feedback. Text is Manrope, bundled with the app (no external font request). The **QUIZ.** wordmark, the name in browser tabs and the sign-in line are in [`client/src/brand.js`](client/src/brand.js); the browser-tab icon is [`public/favicon.svg`](public/favicon.svg).
 
-**My quizzes** (the admin home) shows totals for quizzes, registrations, average score and attendance (students present per class), then one card per quiz with its registrations, submissions, average score and submission rate. Search by name or code; filter by status and creation date; sort by newest, oldest, title or score. Each card's menu exports, duplicates (a new, unstarted copy with the same questions and settings, and no students), archives (hidden from the list until you pick Status → Archived) or deletes after a confirmation that can download the results first.
+**My quizzes** (the admin home) shows totals for quizzes, registrations, average score and attendance (students present per class), then one card per quiz with its registrations, submissions, average score and submission rate. Search by name or code. The **Filter** button (the same panel as the Students and Attendance lists, each option with its count) narrows by status, registration requests waiting, papers to mark, whether students can see their marks yet, and when the quiz was created; it also sorts by created date, title, average score or registrations, either way round ([`test-filters.js`](client/src/screens/admin/test-filters.js)). Each card's menu exports, duplicates (a new, unstarted copy with the same questions and settings, and no students), archives or deletes after a confirmation that can download the results first.
+
+**Archiving** puts a quiz away without deleting anything. It leaves the list until you tick Filter → Archived, leaves every student's **My results** and stops counting on the home page (requests to approve, papers to mark, live tests), whatever it still had pending or unreleased. Restore it and everything comes back as it was.
 
 On a test's dashboard: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs, <kbd>/</kbd> jumps to search, <kbd>↑</kbd> <kbd>↓</kbd> move between rows, and on a waiting registration <kbd>A</kbd> approves and <kbd>X</kbd> rejects. The row-height button next to the filters makes the tables compact, remembered on that computer.
 
@@ -235,18 +262,19 @@ On a test's dashboard: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs, <kbd>
 
 ## The Excel export
 
-**Download Excel** on the dashboard gives one workbook with six sheets:
+**Download Excel** on the dashboard (**Excel → Export Excel** on the Results tab) gives one workbook. Scores are marks: each question earns what it is worth (see *Marks* below), and every total is out of the paper's full marks. Its sheets:
 
 - **Overview** — registered, started, submitted, average / median / highest / lowest score, average time taken, how many left the test, how many are locked.
-- **Results** — one row per student: marks, percentage, rank, time taken, and every integrity count.
-- **Answer grid** — students down, questions across: what each student answered, marked ✓ or ✗ and coloured (green correct, red wrong, yellow awaiting a manual mark, grey blank, white not on that student's paper), with the answer key in the first row.
+- **Results** — one row per student: marks, out of, percentage, rank, time taken, and every integrity count.
+- **Marks** — one row per handed-in paper, one column per question, each cell the marks it earned. Yellow cells are short answers still to mark. Change any cell (0 to what the question is worth; Excel refuses anything else) and upload the file with **Excel → Upload marks** on the Results tab. Each row finds its student by a hidden id, else their SAP ID or email. Only cells changed from what the file was exported with are read, so an empty cell, or an older file sent after newer marks were given, changes nothing; a choice question's cell you change becomes your own mark, as in the review pop-up. Total adds each row up as you type, and the upload lists any row or cell it could not use ([`marks-import.js`](src/services/marks-import.js)).
+- **Answer grid** — students down, questions across: what each student answered, marked ✓, ✗ or with its part marks, and coloured (green full marks, light green part marks, red none, yellow awaiting a manual mark, grey blank, white not on that student's paper), with the answer key in the first row.
 - **Question analysis** — per question: how many papers it was on, answered, blank, correct, incorrect, % correct, and the most common wrong answer.
-- **Responses** — one row per student per question, with when it was answered and how many minutes into the attempt.
+- **Responses** — one row per student per question: marks earned, out of, when it was answered and how many minutes into the attempt.
 - **Integrity log** — every departure, return, copy/paste attempt and lock, in time order.
 
 ## Importing a quiz from JSON
 
-In **Create a test**, press **Import JSON** next to the title and choose a `.json` file. The app fills the title, timing, question mix, questions, options and correct answers, then lets the admin review and edit everything before creating the quiz. **Template** downloads [`quiz-template.json`](public/quiz-template.json), a working example. Correct answers can be option indexes (starting at `0`) or the exact option text.
+In **Create a test**, press **Import JSON** next to the title and choose a `.json` file. The app fills the title, timing, question mix, questions, options and correct answers, then lets the admin review and edit everything before creating the quiz. **Template** downloads [`quiz-template.json`](public/quiz-template.json), a working example, or copies it as text (**Copy template**) to paste wherever the questions are written. Correct answers can be option indexes (starting at `0`) or the exact option text.
 
 **Formatting a question.** The question box in the editor has buttons for **bold**, bullet points and numbered lists (Ctrl+B for bold; Enter starts a new line, and inside a list the next item), and shows a preview of the student's view. It is written as plain text — `**bold**`, `- ` bullets, `1. ` numbers — so a JSON file can use it too. Students see it formatted; spreadsheets get it as plain text with • bullets.
 
@@ -258,19 +286,20 @@ Every key is optional except `questions`; anything left out keeps the form's def
 | `startsAt` | Start by itself at this time (ISO, e.g. `2026-09-30T10:00:00+05:30`). Leave out to start with the Start button |
 | `endsAt` | Submit every paper automatically at this time |
 | `durationMinutes` | Or: run this many minutes from the actual start |
+| `durationFrom` | `"student"`: count the duration from each student's own Begin instead (the test stays open until closed) |
 | `untimed: true` | Or: no clock; ends when the admin presses Close |
 | `questionMix` | `{ "mcq": 1, "msq": 1, "short": 1 }` — how many of each type each student gets |
 | `questionDraw` | `"spread"` (least overlap) or `"random"` |
 | `strictNext` | `false` hides Next under strict timing (default `true`) |
-| `strictTiming`, `typeSeconds` | A timer on every question, and the default seconds per type (0 = no limit) |
+| `strictTiming`, `typeSeconds` | One way only (no Previous button), and the default seconds per type (0 = no limit) |
+| `typeMarks` | What each type is worth: `{ "mcq": 1, "msq": 2, "short": 5 }` (1 each if left out) |
 | `questionLayout` | `"one"` (one at a time) or `"all"` (one page); ignored under strict timing |
 | `shuffleQuestions`, `allowGuests`, `requirePrivateWindow`, `locationRequired` | `true` / `false` |
 | `fullscreenExitLimit`, `fullscreenAbsenceLimitSeconds` | Exits allowed, and seconds away allowed in total (0 = no limit) |
 | `warningsBeforeLock` | With `"warn_lock"`: how many times going past a limit only warns before the next time locks (0 = lock at once) |
 | `violationAction` | `"lock"` (default: no warnings; past the limit the attempt waits for the admin's Revive), `"record"` (recorded only, no warning or lock), `"warn"` (a warning each time, never locked) or `"warn_lock"` (a numbered warning each time, then the lock after the last one) |
 | `resultReleaseMode` | `"instant"`, `"after_quiz"` or `"admin"` |
-| `questions[]` | `prompt`, `type` (`mcq` / `msq` / `short`), `options`, `correctOptions`, and optionally `timeSeconds` for strict timing. A `prompt` may be formatted: `**bold**`, a new line as `
-`, lines starting `- ` for bullet points and `1. ` for a numbered list (the template shows each) |
+| `questions[]` | `prompt`, `type` (`mcq` / `msq` / `short`), `options`, `correctOptions`, and optionally `timeSeconds` for strict timing and `marks` (what this question is worth, if not its type's). A `timeSeconds` or `marks` equal to its type's default follows that default. A `prompt` may be formatted: `**bold**`, a new line as `\n`, lines starting `- ` for bullet points and `1. ` for a numbered list (the template shows each) |
 
 ## Project layout
 
@@ -375,11 +404,14 @@ Each student writes only their own small document (a few KB, the same at 50 stud
 
 ### Slow and interrupted networks
 
-- The current paper and unsent answers are mirrored to both local storage and IndexedDB. A reload without a connection can recover the paper by test code; reconnecting sends only the newest value for each question.
+- The current paper and unsent answers are mirrored to both local storage and IndexedDB. A reload without a connection opens the paper from the device (the sign-in and test checks wait for the connection), and a reload with one puts any unsent answers back in the queue; reconnecting sends only the newest value for each question. A lock, a pause or a venue check that went quiet while offline only holds an answer back — it is sent once the paper is open again, never dropped.
 - Answer writes request a compact acknowledgement containing the saved answer and state counters, never the prompts, choices or whole paper. Polls carry the last paper revision and receive an empty `204` when nothing changed.
 - Failed answer and submission writes retry with capped exponential jitter. Exit, return and integrity reports use a short batch (exits still leave immediately so a hidden phone cannot suspend them). GPS checks remain immediate by design: replaying an old location later would give a misleading venue decision.
 - The paper always shows **Synced**, **Saved on this device**, or **Offline / server unreachable**, so a student knows where an answer currently exists. JSON, HTML, CSS and SVG responses are compressed when large enough to benefit.
-- At the shared deadline the page still locks immediately, but the server now allows 90 seconds for already queued answers to arrive before automatic finalisation. Client timestamps are never trusted to extend the deadline.
+- At the shared deadline the page still locks immediately, but the server allows 90 seconds for already queued answers to arrive before automatic finalisation, and the page does not hand the paper in over answers it still holds.
+- **Answers that arrive late.** An answer made on the device before its time ran out (the paper's, or a strict question's) but held there by a lost connection is still taken for `LATE_ANSWER_MINUTES` (default 30; 0 turns it off) — only if the server really had not heard from the paper across that end, and only into a paper still open or handed in by the clock or the test's Close. Each one is marked *arrived late* with when the device says it was made and when it came — in the analysis, the marking review, the activity log and the dashboard row — for the teacher to judge against the offline periods ([`late-answers.js`](src/domain/late-answers.js)). The device's time cannot be checked, so this is a record, not a verdict.
+- **The clock starts when the question is on screen.** A strict question's clock — and on each-student's-own-time tests, the paper's — starts when the student's device says it is showing it, not when the server sent it, so seconds lost delivering it on a slow connection are given back. It starts no later than `SHOWN_GRACE_SECONDS` (default 10) after sending, so a tampered page gains at most that much. Begin and Next give up on a stuck request after 8 seconds and ask again (both are safe to repeat), and a Next that could not reach the server goes again by itself as soon as the connection is back.
+- Timers follow the server's clock, measured from the quickest recent reply (every API reply carries `X-Server-Time`), so a slow reply or a wrong device clock never shows more time than the server counts ([`server-clock.js`](client/src/lib/server-clock.js)).
 
 Measured with `npm run check:load` on one laptop (i5-1335U) against a local MongoDB, every student answering 20 questions back-to-back — far harsher than a real exam — and then everyone saving and pressing Submit in the same instant:
 

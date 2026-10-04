@@ -3,6 +3,7 @@ import { ArrowDownAZ, BookOpen, CalendarDays, CircleDot, Download, Lock, Search,
 import { api, post } from '../../lib/api.js';
 import { shortDateTime } from '../../lib/format.js';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
 import { applyFilters } from '../../lib/filters.js';
 import { sessionFilters, sortSessions } from './attendance-filters.js';
@@ -55,16 +56,18 @@ export function AttendanceListScreen({ go, showToast }) {
 
   return (
     <section className="min-page att-page">
-      <header className="min-head">
-        <div>
+      <header className="min-head att-list-head">
+        <div className="page-heading">
           <h1>Attendance</h1>
-          <p>Show a QR in class. Students scan it to mark themselves.</p>
+          <InfoTip label="About attendance">Show a QR in class: students scan it with their phone to mark themselves present.</InfoTip>
         </div>
         {!showForm && (
           <div className="min-head-actions">
+            {/* On a narrow phone just its icon; the name stays its tooltip and what a screen reader says. */}
             <button className="button button-secondary" type="button" onClick={() => setExporting(true)} disabled={!shown.length}
+              aria-label="Download Excel"
               title={narrowed ? `Download the ${plural(shown.length, 'session')} shown as one Excel register` : 'Download your sessions as one Excel register'}>
-              <Download size={16} aria-hidden="true"/>Download Excel
+              <Download size={16} aria-hidden="true"/><span className="toolbar-text">Download Excel</span>
             </button>
             <button className="button button-primary" type="button" onClick={() => setCreating(true)}>New attendance</button>
           </div>

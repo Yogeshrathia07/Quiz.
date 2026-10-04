@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { QUESTION_LAYOUTS } from '../lib/quiz.js';
+import { InfoTip } from './InfoTip.jsx';
 
 /**
  * The clickable controls the test forms are built from, so the create form,
@@ -17,30 +18,47 @@ export function FormGroupTitle({ title, hint }) {
 }
 
 /**
- * One choice out of a few, as a segmented control. Only the chosen option's
- * description is shown, as one line underneath, so the form stays short.
+ * One choice out of a few, as a segmented control. What each option does is
+ * an (i) away - beside the label, or after the options when there is none -
+ * so the form stays short.
  */
-export function ChoiceCards({ label, value, options, onChange, idPrefix }) {
+export function ChoiceCards({ label, value, options, onChange, idPrefix, more = null }) {
   const labelId = `${idPrefix}-label`;
-  const chosen = options.find((option) => option.value === value);
+  // `more`: a last line for the (i), after the options.
+  const about = (more || options.some((option) => option.description)) && (
+    <InfoTip label={label ? `About ${label.toLowerCase()}` : 'About these options'}>
+      <span className="info-tip-list">
+        {options.filter((option) => option.description).map((option) => (
+          <span key={String(option.value)} className={option.value === value ? 'is-on' : undefined}>
+            <strong>{option.title}</strong>{option.description}
+          </span>
+        ))}
+        {more && <span>{more}</span>}
+      </span>
+    </InfoTip>
+  );
+  const segments = (
+    <div className="segmented choice-segments" role="radiogroup" aria-labelledby={label ? labelId : undefined}>
+      {options.map((option) => (
+        <button
+          key={String(option.value)}
+          type="button"
+          role="radio"
+          aria-checked={option.value === value}
+          className={option.value === value ? 'is-on' : ''}
+          onClick={() => onChange(option.value)}
+        >
+          {option.title}
+        </button>
+      ))}
+    </div>
+  );
   return (
     <div className="choice-field">
-      {label && <span className="field-label" id={labelId}>{label}</span>}
-      <div className="segmented choice-segments" role="radiogroup" aria-labelledby={label ? labelId : undefined}>
-        {options.map((option) => (
-          <button
-            key={String(option.value)}
-            type="button"
-            role="radio"
-            aria-checked={option.value === value}
-            className={option.value === value ? 'is-on' : ''}
-            onClick={() => onChange(option.value)}
-          >
-            {option.title}
-          </button>
-        ))}
-      </div>
-      {chosen?.description && <p className="help choice-help">{chosen.description}</p>}
+      {label && (about
+        ? <span className="field-label-row"><span className="field-label" id={labelId}>{label}</span>{about}</span>
+        : <span className="field-label" id={labelId}>{label}</span>)}
+      {!label && about ? <div className="choice-line">{segments}{about}</div> : segments}
     </div>
   );
 }
@@ -209,12 +227,16 @@ export function TimeStepper({ id, label, seconds, onChange, maxSeconds = 3600, s
 }
 
 /** A checkbox drawn as a switch on a clickable row. */
+/** An on/off setting. What it does is an (i) beside its title; tapping the (i) does not flip it. */
 export function SwitchRow({ checked, onChange, title, description }) {
   return (
     <label className={`toggle-option switch-row${checked ? ' is-on' : ''}`}>
       <input type="checkbox" role="switch" checked={checked} onChange={(event) => onChange(event.target.checked)}/>
       <span className="switch" aria-hidden="true"/>
-      <span><strong>{title}</strong>{description && <small>{description}</small>}</span>
+      <span className="switch-row-text">
+        <strong>{title}</strong>
+        {description && <InfoTip label={`About ${title.toLowerCase()}`}>{description}</InfoTip>}
+      </span>
     </label>
   );
 }

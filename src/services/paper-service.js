@@ -7,6 +7,8 @@ import { activeQuestions, questionType } from '../domain/question-bank.js';
 import { endModeOf, startModeOf } from '../domain/attempt-rules.js';
 import { invalidateTestCache, registrationsOf, requireOwnedTest, serializePaperWrite, serializeTestWrite, testDocByCode } from '../data/test-repository.js';
 import { gradeAnswers } from './attempt-service.js';
+import { earnedMarks, questionMarks, roundMarks } from '../domain/marks.js';
+import { refuseIfFrozen } from '../domain/freeze.js';
 import { adminDashboard } from './admin-service.js';
 import { refusePastTimes } from './test-service.js';
 
@@ -38,9 +40,13 @@ const toStored = (built, id) => ({
   options: built.options,
   correctOptions: built.correctOptions,
   manualGrading: built.type === 'short',
-  timeSeconds: built.timeSeconds ?? null
+  timeSeconds: built.timeSeconds ?? null,
+  // Its own marks; null follows its type's (domain/marks.js).
+  marks: built.marks ?? null
 });
 
+// Marks are not part of what makes a question a different version: a change
+// to what it is worth re-marks every paper that has it (see saveTestPaper).
 const sameQuestion = (a, b) => JSON.stringify([a.prompt, a.type, a.options, a.correctOptions, Boolean(a.manualGrading), a.timeSeconds ?? null])
   === JSON.stringify([b.prompt, b.type, b.options, b.correctOptions, Boolean(b.manualGrading), b.timeSeconds ?? null]);
 
@@ -63,6 +69,7 @@ export async function testForEditing(req, code) {
       options: question.options || [],
       correctOptions: (question.correctOptions || []).map(String),
       timeSeconds: question.timeSeconds ?? null,
+      marks: question.marks ?? null,
       onPapers: onPapers.get(question.id) || 0
     })),
     papers: { started: papers.length, submitted: papers.filter(({ attempt }) => attempt.status === 'submitted').length }
@@ -95,7 +102,8 @@ function planBank(stored, rawQuestions, built, mode, usedIds) {
     }
     kept.add(wanted);
     const after = toStored(question, wanted);
-    if (sameQuestion(before, after)) { active.push(before); return; }
+    // The same question, perhaps worth something else now: it keeps its place, with its new marks.
+    if (sameQuestion(before, after)) { active.push({ ...before, marks: after.marks }); return; }
     edited += 1;
     if (mode === 'new' && usedIds.has(wanted)) {
       // Papers that have it keep this version; new papers get the edit.
@@ -122,9 +130,10 @@ function planBank(stored, rawQuestions, built, mode, usedIds) {
  * One paper brought up to the edited bank ('everyone'): deleted questions
  * taken off (and the rest renumbered), answers that no longer fit an edited
  * question cleared, a strict paper's place kept, and a submitted paper
- * re-marked against the new answer key.
+ * re-marked against the new answer key - and against what each question is
+ * worth now (`rescaled`: question id → { from, to } marks).
  */
-function migratePaper(nextTest, attempt, changed, removedIds) {
+function migratePaper(nextTest, attempt, changed, removedIds, rescaled = new Map()) {
   const order = [...(attempt.questions || [])].sort((left, right) => left.questionIndex - right.questionIndex);
   const kept = order.filter((assigned) => !removedIds.has(assigned.questionId));
   if (!kept.length) throw new PublicTestError(409, 'This would leave a student\'s paper with no questions. Keep at least one of the questions they were given.');
@@ -141,17 +150,28 @@ function migratePaper(nextTest, attempt, changed, removedIds) {
     };
   });
 
-  let answers = (attempt.answers || []).filter((answer) => !removedIds.has(answer.questionId)).map((answer) => {
+  const manualIds = new Set((nextTest.questions || []).filter((question) => question.manualGrading).map((question) => question.id));
+  let answers = (attempt.answers || []).filter((answer) => !removedIds.has(answer.questionId)).map((given) => {
+    // Worth something else now: a mark given by hand - a short answer's, or one
+    // a teacher gave a choice answer - keeps its share: full stays full, half
+    // stays half. Other choice answers are simply marked again.
+    const worth = rescaled.get(given.questionId);
+    const answer = worth && (manualIds.has(given.questionId) || given.marksOverride) && earnedMarks(given) !== null
+      ? { ...given, isCorrect: roundMarks((earnedMarks(given) * worth.to) / worth.from) }
+      : given;
     const change = changed.get(answer.questionId);
     if (!change) return answer;
+    // The question itself changed: a mark a teacher gave its old version no
+    // longer applies, and the answer is marked again.
+    const { marksOverride: _given, ...fresh } = answer;
     // Switched between a written answer and a choice: the old answer no longer fits.
     if (Boolean(change.before.manualGrading) !== Boolean(change.after.manualGrading)) {
-      return { ...answer, selectedOptions: [], answerText: '', answeredAt: null, isCorrect: null };
+      return { ...fresh, selectedOptions: [], answerText: '', answeredAt: null, isCorrect: null };
     }
     if (change.after.manualGrading) return answer;
-    let selected = (answer.selectedOptions || []).filter((id) => Number(id) < change.after.options.length);
+    let selected = (fresh.selectedOptions || []).filter((id) => Number(id) < change.after.options.length);
     if (change.after.type === 'mcq' && selected.length > 1) selected = [];
-    return { ...answer, selectedOptions: selected, answeredAt: selected.length ? answer.answeredAt : null };
+    return { ...fresh, selectedOptions: selected, answeredAt: selected.length ? fresh.answeredAt : null };
   });
   if (attempt.status === 'submitted') answers = gradeAnswers(nextTest, { answers });
 
@@ -197,6 +217,7 @@ async function rewritePaper(testCode, registration, migrated, migrate) {
 
 export async function saveTestPaper(req, code, raw = {}) {
   const test = await requireOwnedTest(req, code);
+  refuseIfFrozen(test, 'edit the test');
   if (!Array.isArray(raw.questions)) throw new PublicTestError(400, 'Send the list of questions.');
   const hasPapers = papersOf(test).length > 0;
   if (hasPapers && !CHOICES.includes(raw.applyTo)) {
@@ -224,8 +245,11 @@ export async function saveTestPaper(req, code, raw = {}) {
     devices: raw.devices ?? test.devices,
     questionLayout: pick('questionLayout', test.questionLayout),
     strictTiming: pick('strictTiming', test.strictTiming === true),
-    strictNext: raw.strictNext ?? test.strictNext !== false,
-    typeSeconds: raw.typeSeconds ?? test.typeSeconds,
+    // A one-way paper's clock is fixed once it is under way, as in Edit test setup (LOCKED_ONCE_STARTED).
+    strictNext: pick('strictNext', test.strictNext !== false),
+    typeSeconds: pick('typeSeconds', test.typeSeconds),
+    // What questions are worth can change at any time: papers are re-marked.
+    typeMarks: raw.typeMarks ?? test.typeMarks,
     questionDraw: pick('questionDraw', test.questionDraw),
     locationRequired: raw.locationRequired ?? test.locationRequired,
     locationRadiusMeters: raw.locationRadiusMeters ?? test.locationRadiusMeters,
@@ -234,7 +258,8 @@ export async function saveTestPaper(req, code, raw = {}) {
     resultReleaseMode: raw.resultReleaseMode ?? test.resultReleaseMode,
     questionMix: raw.questionMix ?? test.questionMix,
     questions: raw.questions.map((question) => ({
-      prompt: question?.prompt, type: question?.type, options: question?.options, correctOptions: question?.correctOptions, timeSeconds: question?.timeSeconds
+      prompt: question?.prompt, type: question?.type, options: question?.options, correctOptions: question?.correctOptions,
+      timeSeconds: question?.timeSeconds, marks: question?.marks
     }))
   };
   const input = buildTest(source);
@@ -248,15 +273,25 @@ export async function saveTestPaper(req, code, raw = {}) {
     const usedIds = new Set(papers.flatMap(({ attempt }) => (attempt.questions || []).map((assigned) => assigned.questionId)));
     const mode = papers.length ? raw.applyTo : 'everyone';
     const plan = planBank(fresh.questions || [], raw.questions, input.questions, mode, usedIds);
-    const nextTest = { ...fresh, questions: plan.questions };
+    const nextTest = { ...fresh, typeMarks: input.typeMarks, questions: plan.questions };
+    // What each question on a paper was worth, and is worth now - its own
+    // marks or its type's. A change re-marks every paper that has it, whichever
+    // choice was made: that choice is about a question's content.
+    const worthOf = (doc) => new Map((doc.questions || []).map((question) => [question.id, questionMarks(doc, question)]));
+    const before = worthOf(fresh);
+    const rescaled = new Map([...worthOf(nextTest)]
+      .filter(([id, to]) => usedIds.has(id) && before.has(id) && before.get(id) !== to)
+      .map(([id, to]) => [id, { from: before.get(id), to }]));
 
     // Every paper the edit reaches, worked out before anything is written: a
     // paper that would be left with no questions stops the whole save here.
     const migrations = [];
-    if (mode === 'everyone' && (plan.changed.size || plan.removedIds.size)) {
+    if (plan.changed.size || plan.removedIds.size || rescaled.size) {
       for (const registration of papers) {
-        const touches = (registration.attempt.questions || []).some((assigned) => plan.changed.has(assigned.questionId) || plan.removedIds.has(assigned.questionId));
-        if (touches) migrations.push({ registration, attempt: migratePaper(nextTest, registration.attempt, plan.changed, plan.removedIds) });
+        const touches = (registration.attempt.questions || []).some((assigned) => (
+          plan.changed.has(assigned.questionId) || plan.removedIds.has(assigned.questionId) || rescaled.has(assigned.questionId)
+        ));
+        if (touches) migrations.push({ registration, attempt: migratePaper(nextTest, registration.attempt, plan.changed, plan.removedIds, rescaled) });
       }
     }
 
@@ -276,6 +311,7 @@ export async function saveTestPaper(req, code, raw = {}) {
       devices: input.devices,
       strictNext: input.strictNext,
       typeSeconds: input.typeSeconds,
+      typeMarks: input.typeMarks,
       locationRequired: input.locationRequired,
       locationRadiusMeters: input.locationRadiusMeters,
       locationLatitude: input.locationLatitude,
@@ -294,7 +330,7 @@ export async function saveTestPaper(req, code, raw = {}) {
     await tests().updateOne({ code: test.code }, { $set: set });
     await invalidateTestCache(test.code);
     for (const { registration, attempt } of migrations) {
-      await rewritePaper(test.code, registration, attempt, (latest) => migratePaper(nextTest, latest, plan.changed, plan.removedIds));
+      await rewritePaper(test.code, registration, attempt, (latest) => migratePaper(nextTest, latest, plan.changed, plan.removedIds, rescaled));
     }
     summary = {
       applyTo: papers.length ? mode : null,

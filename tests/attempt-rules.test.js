@@ -138,3 +138,34 @@ test('buildSchedule reads an older payload as a manual start that ends at endsAt
   assert.equal(schedule.endsAtMs, afterDeadline);
   assert.equal(buildSchedule({ untimed: true }, 600).endMode, 'manual');
 });
+
+test('each student\'s own time: their Begin plus the duration, with time given back, and no shared end', async () => {
+  const { attemptDeadlineMs, isPerStudent, ownBaseDeadlineMs } = await import('../src/domain/attempt-rules.js');
+  const began = Date.parse('2026-10-02T10:00:00.000Z');
+  const own = { endMode: 'each', durationMinutes: 30, isStarted: true };
+  assert.equal(isPerStudent(own), true);
+  assert.equal(isUntimed(own), false, 'students have a clock');
+  assert.equal(testDeadlineMs(own), Infinity, 'the test itself never runs out');
+  assert.equal(isTimeOver(own, began + 10 * 60 * 60_000), false, 'anyone may still begin until it is closed');
+  assert.equal(ownBaseDeadlineMs(own, { startedAt: new Date(began) }), began + 30 * 60_000);
+  assert.equal(ownBaseDeadlineMs(own, null), Infinity, 'no paper, no end yet');
+  // A late starter gets the full time; extra minutes and a pause still count.
+  const late = { startedAt: new Date(began + 20 * 60_000), extraMs: 5 * 60_000 };
+  assert.equal(attemptDeadlineMs(own, late), began + 55 * 60_000);
+  const paused = { startedAt: new Date(began), pausedAt: new Date(began + 10 * 60_000) };
+  assert.equal(attemptDeadlineMs(own, paused, began + 25 * 60_000), began + 45 * 60_000, 'a pause still going on stops the clock');
+  // What the student's page is told.
+  const view = attemptView({ ...own, code: 'TEST-OWN', title: 'Own', questions: [] }, { id: 'a', status: 'in_progress', startedAt: new Date(began), questions: [], answers: [] }, began + 60_000);
+  assert.equal(view.ownTime, true);
+  assert.equal(view.durationMinutes, 30);
+  assert.equal(view.deadlineAt, new Date(began + 30 * 60_000).toISOString());
+  assert.equal(view.untimed, false);
+});
+
+test('buildSchedule: each student\'s own time needs a duration and has no end time', () => {
+  const schedule = buildSchedule({ startMode: 'scheduled', opensAt: new Date(Date.now() + 3_600_000).toISOString(), endMode: 'each', durationMinutes: 30 }, 600);
+  assert.equal(schedule.endMode, 'each');
+  assert.equal(schedule.durationMinutes, 30);
+  assert.equal(schedule.endsAtMs, null, 'even with a scheduled start');
+  assert.throws(() => buildSchedule({ endMode: 'each' }, 600), PublicTestError);
+});

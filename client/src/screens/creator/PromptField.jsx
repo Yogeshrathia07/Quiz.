@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import { Bold, List, ListOrdered } from 'lucide-react';
 import { RichText, hasFormatting } from '../../components/RichText.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { continueList, toggleBold, toggleList } from '../../lib/text-format.js';
 
 /**
@@ -45,7 +46,13 @@ export function PromptField({ value, onChange, label = 'Question' }) {
   return (
     <div className="prompt-field">
       <div className="prompt-field-head">
-        <span className="field-label">{label}</span>
+        <span className="field-label-row">
+          <span className="field-label">{label}</span>
+          <InfoTip label="Formatting">
+            Written as plain text: **bold**, a new line, &quot;- &quot; for bullet points, &quot;1. &quot; for numbered lists - or use
+            the buttons. Enter in a list starts its next item.
+          </InfoTip>
+        </span>
         <div className="prompt-tools" role="toolbar" aria-label="Formatting">
           <button type="button" title="Bold (Ctrl+B)" aria-label="Bold" onMouseDown={keepSelection} onClick={() => apply(toggleBold)}><Bold size={16} aria-hidden="true"/></button>
           <button type="button" title="Bullet points" aria-label="Bullet points" onMouseDown={keepSelection} onClick={() => apply((text, start, end) => toggleList(text, start, end, 'bullet'))}><List size={16} aria-hidden="true"/></button>
@@ -53,7 +60,6 @@ export function PromptField({ value, onChange, label = 'Question' }) {
         </div>
       </div>
       <textarea ref={box} className="text-area" value={value} required aria-label={label} onChange={(event) => onChange(event.target.value)} onKeyDown={onKeyDown}/>
-      <p className="prompt-field-hint">**bold** · a new line · "- " bullet points · "1. " numbered lists</p>
       {hasFormatting(value) && (
         <div className="prompt-preview">
           <span>How students see it</span>

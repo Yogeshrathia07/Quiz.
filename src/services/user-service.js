@@ -5,6 +5,7 @@ import { isAllowedEmail, normalizeEmail, revokeSessionsFor, roleForEmail } from 
 import { cleanText, normalizeSapId } from '../domain/test-builder.js';
 import { studentResponseData, timeTakenSeconds } from '../domain/presenters.js';
 import { integrityRecord } from '../domain/integrity.js';
+import { paperMarks, paperScore } from '../domain/marks.js';
 import { STUDENT_SEATS, serializeTestWrite, testsForEmail } from '../data/test-repository.js';
 import { pendingManualCount, responsesAvailable } from './attempt-service.js';
 
@@ -131,8 +132,9 @@ export async function userDetail(rawEmail) {
         timeTakenSeconds: timeTakenSeconds(attempt),
         timesLeft: attempt ? integrityRecord(attempt).leaveCount : 0,
         totalQuestions: attempt?.questions?.length || 0,
+        totalMarks: attempt ? paperMarks(test, attempt) : 0,
         answered: (attempt?.answers || []).filter((answer) => answer.answeredAt).length,
-        score: submitted ? (attempt.answers || []).reduce((total, answer) => total + (Number(answer.isCorrect) || 0), 0) : null,
+        score: submitted ? paperScore(attempt) : null,
         pendingManual: submitted ? pendingManualCount(test, attempt) : 0,
         testClosed: Boolean(test.isClosed),
         visibleToStudent: submitted && responsesAvailable(test, attempt)

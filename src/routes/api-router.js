@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { config } from '../config.js';
 import {
   authStatus, logout, requireAccount, requireAdmin, requireTestTaker, requireUserManager
@@ -7,8 +7,9 @@ import {
   changePassword, logIn, passwordStatus, requestCode, resetPassword, signUp
 } from '../auth/account-login.js';
 import { beginMicrosoftLogin, finishMicrosoftLogin } from '../auth/microsoft-login.js';
-import { createTest, testQrSvg, updateTestSettings } from '../services/test-service.js';
+  import { createTest, testQrSvg, updateTestSettings } from '../services/test-service.js';
 import { saveTestPaper, testForEditing } from '../services/paper-service.js';
+import { importMarks } from '../services/marks-import.js';
 import {
   beginGuestSession, endGuestVisit, getTest, myResponseData, myResults, registerForTest, setMySapId, studentProfile
 } from '../services/registration-service.js';
@@ -16,12 +17,12 @@ import {
   blockUser, deleteUser, listUsers, setUserName, setUserSapId, unblockUser, userDetail, userResponseData
 } from '../services/user-service.js';
 import {
-  attemptResult, getAttempt, nextQuestion, recordFullscreenEvent, recordFullscreenEvents, recordLocationCheck, saveAnswer, startAttempt, submitAttemptForStudent
+  attemptResult, getAttempt, markShown, nextQuestion, recordFullscreenEvent, recordFullscreenEvents, recordLocationCheck, saveAnswer, startAttempt, submitAttemptForStudent
 } from '../services/attempt-service.js';
 import { attemptRevision, compactAnswerResponse, compactAttemptState, revisionedAttempt } from '../domain/attempt-sync.js';
 import {
   adminDashboard, adminExportData, adminTests, archiveTest, userTestAnalysis, bulkAttemptAction, duplicateTest, bulkDecision, closeTest, csvForAdmin, decideRegistration,
-  deleteTest, gradeManualAnswer, manualReview, registrationAnalysis, releaseResults, restartAllAttempts, restartQuiz,
+  deleteTest, gradeManualAnswer, manualReview, registrationAnalysis, releaseResults, restartAllAttempts, restartQuiz, reviewData, setAnswerMarks, setResultsFrozen, setUnmarkedRelease,
   continueAttempt, pauseAttempt, reopenTest, restartAttempt, resetTest, resumeAttempt, reopenStudentPaper, submitStudentPaper, setDeviceOverride, setLocationOverride, setTestEndTime, startTest, updateStudentSapId
 } from '../services/admin-service.js';
 import { exportWorkerStats, runExportJob } from '../export/worker-pool.js';
@@ -96,6 +97,18 @@ const sendResponseSheet = async (res, data, { audit = false } = {}) => {
 
 export function createApiRouter() {
   const router = Router();
+
+  // The server's clock, stamped as each reply leaves. A test paper measures
+  // the round trip around it to keep its timers on this clock, however slow
+  // or wrong the device's own (client/src/lib/server-clock.js).
+  router.use('/api', (_req, res, next) => {
+    const writeHead = res.writeHead;
+    res.writeHead = function stampServerTime(...args) {
+      if (!res.headersSent) res.setHeader('X-Server-Time', String(Date.now()));
+      return writeHead.apply(this, args);
+    };
+    next();
+  });
 
   /* ------------------------------------------------------------------ auth */
   router.get('/api/auth/status', (req, res) => res.json(authStatus(req)));
@@ -205,6 +218,10 @@ export function createApiRouter() {
     signal({ code: attempt.code, kind: 'question_next' });
     res.json({ attempt });
   }));
+  // The paper or the open question is on the student's screen: its clock starts.
+  router.post('/api/test-attempts/:attemptId/shown', requireTestTaker, route(async (req, res) => {
+    res.json({ attempt: await markShown(req, req.params.attemptId, req.body || {}) });
+  }));
   router.post('/api/test-attempts/:attemptId/submit', requireTestTaker, route(async (req, res) => {
     const attempt = await submitAttemptForStudent(req, req.params.attemptId);
     signal({ code: attempt.code, kind: 'submitted' });
@@ -305,6 +322,19 @@ export function createApiRouter() {
     signalTest(req.params.code, 'results_released', { test: response.test });
     res.json(response);
   }));
+  // { frozen: true } makes a closed test's marks final; { frozen: false } unfreezes them.
+  router.post('/api/admin/tests/:code/results/freeze', requireAdmin, route(async (req, res) => {
+    const response = await setResultsFrozen(req, req.params.code, req.body || {}, { compact: true });
+    // Teachers' pages only: students see nothing different.
+    signalTest(req.params.code, 'results_frozen', { test: response.test });
+    res.json(response);
+  }));
+  // { show: true } shows marks before marking is finished; { show: false } holds them for it again.
+  router.post('/api/admin/tests/:code/results/unmarked', requireAdmin, route(async (req, res) => {
+    const response = await setUnmarkedRelease(req, req.params.code, req.body || {}, { compact: true });
+    signalTest(req.params.code, 'results_released', { test: response.test });
+    res.json(response);
+  }));
   router.post('/api/admin/tests/:code/attempts/restart', requireAdmin, route(async (req, res) => {
     const response = await restartAllAttempts(req, req.params.code, { compact: true });
     signalTest(req.params.code, 'attempts_restarted', { test: response.test });
@@ -382,7 +412,23 @@ export function createApiRouter() {
     res.json(await registrationAnalysis(req, req.params.code, req.params.registrationId));
   }));
   router.post(`${registrationPath}/manual-grade`, requireAdmin, route(async (req, res) => {
-    res.json(await gradeManualAnswer(req, req.params.code, req.params.registrationId, req.body || {}));
+    const response = await gradeManualAnswer(req, req.params.code, req.params.registrationId, req.body || {});
+    // That student's result page, already showing marks (released before marking was done), takes the new one at once.
+    signalRegistration(req.params.code, req.params.registrationId, 'marks_updated');
+    res.json(response);
+  }));
+  // The result review: every handed-in paper and question, and any answer's mark changed from it.
+  router.get('/api/admin/tests/:code/review', requireAdmin, route(async (req, res) => res.json(await reviewData(req, req.params.code))));
+  router.post(`${registrationPath}/marks`, requireAdmin, route(async (req, res) => {
+    const response = await setAnswerMarks(req, req.params.code, req.params.registrationId, req.body || {});
+    signalRegistration(req.params.code, req.params.registrationId, 'marks_updated');
+    res.json(response);
+  }));
+  // The Excel export's Marks sheet, typed into and sent back as the file itself (services/marks-import.js).
+  router.post('/api/admin/tests/:code/marks.xlsx', requireAdmin, express.raw({ type: () => true, limit: '20mb' }), route(async (req, res) => {
+    const result = await importMarks(req, req.params.code, req.body);
+    if (result.marks) signalTest(req.params.code, 'marks_updated', {});
+    res.json(result);
   }));
   router.post(`${registrationPath}/sap-id`, requireAdmin, route(async (req, res) => {
     const response = await updateStudentSapId(req, req.params.code, req.params.registrationId, req.body || {}, { compact: true });

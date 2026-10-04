@@ -7,7 +7,7 @@ export const QUESTION_TYPE_LABELS = {
 };
 
 export const QUESTION_LAYOUTS = [
-  ['one', 'One at a time', 'With Previous and Next.'],
+  ['one', 'One at a time', 'One question on screen, with Next - and Previous unless you turn it off.'],
   ['all', 'All on one page', 'One scrolling page with a single Submit at the end.']
 ];
 
@@ -57,6 +57,39 @@ export function clampMix(mix, pool) {
 export const extendedEndMs = (currentEndMs, minutes, nowMs = Date.now()) =>
   Math.max(currentEndMs, nowMs) + Number(minutes || 0) * 60_000;
 
+/* -------------------------------------------- a type's default, a question's own */
+
+const hasOwnValue = (value) => value !== undefined && value !== null && value !== '';
+
+/**
+ * A type's default changed (its time, or its marks): every question of that
+ * type that held the old default as its own value follows the new default
+ * instead, so the change reaches every question not deliberately set apart.
+ * A question with a value of its own that differs keeps it.
+ */
+export function followTypeDefault(questions, field, type, previous) {
+  return questions.map((question) => (
+    question.type === type && hasOwnValue(question[field]) && Number(question[field]) === Number(previous)
+      ? { ...question, [field]: null }
+      : question
+  ));
+}
+
+/* ------------------------------------------------------------- marks ---- */
+
+/** Mirrors the server's defaults (domain/marks.js): every question type worth 1. */
+export const DEFAULT_TYPE_MARKS = { mcq: 1, msq: 1, short: 1 };
+
+/** What a question is worth: its own marks, else its type's. `marks` null follows its type. */
+export const questionMarksFor = (question, typeMarks = DEFAULT_TYPE_MARKS) => (
+  hasOwnValue(question.marks)
+    ? Number(question.marks)
+    : Number(typeMarks?.[question.type] ?? DEFAULT_TYPE_MARKS[question.type] ?? 1)
+);
+
+/** "1 mark", "2.5 marks". */
+export const marksLabel = (marks) => `${Number(marks)} mark${Number(marks) === 1 ? '' : 's'}`;
+
 /* ------------------------------------------------------ strict timing ---- */
 
 /** Mirrors the server's defaults: what each type gets unless a question says otherwise. */
@@ -91,6 +124,24 @@ export function strictEstimateSeconds(questions, mix, typeSeconds) {
       .sort((a, b) => b - a);
     return total + times.slice(0, Number(mix?.[type] || 0)).reduce((sum, seconds) => sum + seconds, 0);
   }, 0);
+}
+
+/** Whether a one-way paper has question timers at all: a time on any type, or on any question of its own. */
+export const hasQuestionTimers = (typeSeconds, questions = []) => Object.values(typeSeconds || {}).some((seconds) => Number(seconds) > 0)
+  || questions.some((question) => Number(question.timeSeconds) > 0);
+
+/** The same paper with no question timers: no type has a time, and no question one of its own. */
+export const NO_TYPE_SECONDS = Object.freeze({ mcq: 0, msq: 0, short: 0 });
+
+/**
+ * Whether the questions a paper can draw have a timer: 'all' (the estimate is
+ * the most a paper can take), 'some' (questions with none are counted at the
+ * usual estimate) or 'none' (Next only, the test's end time the only limit).
+ */
+export function timerCoverage(questions, mix, typeSeconds) {
+  const drawn = questions.filter((question) => Number(mix?.[question.type]) > 0);
+  const timed = drawn.filter((question) => questionSecondsFor(question, typeSeconds) > 0).length;
+  return !timed ? 'none' : timed === drawn.length ? 'all' : 'some';
 }
 
 /* ------------------------------------------------------ question draw ---- */

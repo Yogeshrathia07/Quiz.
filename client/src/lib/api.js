@@ -1,3 +1,5 @@
+import { recordServerTime } from './server-clock.js';
+
 /**
  * Errors carry `status` so a caller can tell a refusal from a dead connection:
  * a rejected write must not be retried, an unreachable server must be. A
@@ -22,6 +24,10 @@ export const isOffline = (error) => error instanceof ApiError && error.status ==
 export const isSignedOut = (error) => error instanceof ApiError && error.code === 'SIGNED_OUT';
 export const SESSION_ENDED_EVENT = 'portal-session-ended';
 
+/** Worth asking again: no connection, too slow, or the server momentarily overloaded. */
+export const isRetryable = (error) => error instanceof ApiError
+  && (error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500);
+
 export async function api(url, options = {}) {
   const { timeoutMs = 25_000, ...requestOptions } = options;
   const controller = !requestOptions.signal && typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -29,6 +35,7 @@ export async function api(url, options = {}) {
     ? window.setTimeout(() => controller.abort(), timeoutMs)
     : null;
   let response;
+  const sentAt = Date.now();
   try {
     response = await fetch(url, {
       credentials: 'same-origin',
@@ -42,6 +49,9 @@ export async function api(url, options = {}) {
   } finally {
     if (timeout) window.clearTimeout(timeout);
   }
+  // Every reply keeps the exam's timers on the server's clock (server-clock.js).
+  const stamp = response.headers?.get?.('x-server-time');
+  if (stamp) recordServerTime(Number(stamp), sentAt, Date.now());
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -51,7 +61,13 @@ export async function api(url, options = {}) {
   return data;
 }
 
-export const post = (url, body) => api(url, { method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+export const post = (url, body, options = {}) => api(url, { ...options, method: 'POST', body: body === undefined ? undefined : JSON.stringify(body) });
+
+/** Sends a file as it is - a workbook for the server to read back - rather than as JSON. */
+export const uploadFile = (url, file) => api(url, {
+  method: 'POST', body: file, timeoutMs: 120_000,
+  headers: { 'content-type': file.type || 'application/octet-stream' }
+});
 
 /** Streams a file from the server straight to the browser's downloads. */
 export async function downloadFile(path, fallbackName, body) {

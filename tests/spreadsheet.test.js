@@ -14,7 +14,7 @@ test('the Excel export includes a response-level analysis sheet', async () => {
     responses: [{
       studentName: 'Student One', email: 'student@stu.upes.ac.in', sapId: '5001', attemptStatus: 'submitted', submittedAt: '2026-09-20T10:10:00.000Z',
       questionNumber: 1, type: 'short', prompt: 'Explain a stack.', selectedAnswer: 'A last-in, first-out collection.', correctAnswer: '',
-      manualGrading: true, answered: true, isCorrect: null, answeredAt: '2026-09-20T10:06:00.000Z'
+      manualGrading: true, answered: true, isCorrect: null, marks: null, maxMarks: 2, answeredAt: '2026-09-20T10:06:00.000Z'
     }]
   });
   const workbook = new ExcelJS.Workbook();
@@ -24,7 +24,11 @@ test('the Excel export includes a response-level analysis sheet', async () => {
   assert.equal(responses.getCell('A4').value, 'Student');
   assert.equal(responses.getCell('H5').value, 'Explain a stack.');
   assert.equal(responses.getCell('I5').value, 'A last-in, first-out collection.');
-  assert.equal(responses.getCell('L5').value, 'Awaiting manual mark');
+  // Marks earned (none yet), out of what the question is worth, and where it stands.
+  assert.equal(responses.getCell('K4').value, 'Marks');
+  assert.equal(responses.getCell('L5').value, 2);
+  assert.equal(responses.getCell('M5').value, 'Awaiting manual mark');
+  assert.ok(workbook.getWorksheet('Marks'), 'and a Marks sheet to mark in');
 });
 
 const onePaper = () => ({

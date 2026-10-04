@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { post } from '../../../lib/api.js';
 import { Modal } from '../../../components/Modal.jsx';
+import { InfoTip } from '../../../components/InfoTip.jsx';
 
 export function SapIdModal({ code, registration, onClose, onSaved, showToast }) {
   const [sapId, setSapId] = useState(registration.sapId || '');
@@ -19,8 +20,10 @@ export function SapIdModal({ code, registration, onClose, onSaved, showToast }) 
 
   return (
     <Modal label="Edit student SAP ID" onClose={onClose}>
-      <h1>Edit SAP ID</h1>
-      <p>Use exactly nine digits. This updates the student profile and this test registration.</p>
+      <div className="page-heading">
+        <h1>Edit SAP ID</h1>
+        <InfoTip label="About the SAP ID">Use exactly nine digits. This updates the student profile and this test registration.</InfoTip>
+      </div>
       <form onSubmit={save}>
         <label className="field-label">SAP ID</label>
         <input

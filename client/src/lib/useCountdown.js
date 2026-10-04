@@ -1,16 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
+import { serverNow } from './server-clock.js';
 
 /**
- * Counts down to `deadlineAt` on the *server's* clock. `serverTime` is stamped
- * on the same response as the deadline, so a device whose clock is wrong still
- * sees the same remaining time as everyone else.
+ * Counts down to `deadlineAt` on the *server's* clock (lib/server-clock.js),
+ * so a device whose clock is wrong - or whose last reply was slow to arrive -
+ * still sees the same remaining time as the server counts. `serverTime`, the
+ * time stamped on the same response as the deadline, stands in until a reply
+ * has given the clock a reading.
  */
 export function useCountdown(deadlineAt, serverTime) {
-  const offset = useRef(0);
+  const fallback = useRef(0);
   const [, tick] = useState(0);
 
   useEffect(() => {
-    if (serverTime) offset.current = Date.parse(serverTime) - Date.now();
+    if (serverTime) fallback.current = Date.parse(serverTime) - Date.now();
   }, [serverTime]);
 
   useEffect(() => {
@@ -23,7 +26,7 @@ export function useCountdown(deadlineAt, serverTime) {
   useEffect(() => {
     const at = Date.parse(deadlineAt);
     if (!Number.isFinite(at)) return undefined;
-    const msLeft = at - (Date.now() + offset.current);
+    const msLeft = at - serverNow(fallback.current);
     if (msLeft <= 0 || msLeft > 2 ** 31 - 1) return undefined;
     const timer = window.setTimeout(() => tick((value) => value + 1), msLeft + 5);
     return () => window.clearTimeout(timer);
@@ -31,6 +34,6 @@ export function useCountdown(deadlineAt, serverTime) {
 
   const deadline = Date.parse(deadlineAt);
   if (!Number.isFinite(deadline)) return { secondsLeft: 0, isOver: false, known: false };
-  const secondsLeft = (deadline - (Date.now() + offset.current)) / 1000;
+  const secondsLeft = (deadline - serverNow(fallback.current)) / 1000;
   return { secondsLeft, isOver: secondsLeft <= 0, known: true };
 }

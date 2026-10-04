@@ -3,7 +3,8 @@ import { detectWindowKind } from '../../lib/private-mode.js';
 import { PrivateWindowRequired } from './PrivateWindowRequired.jsx';
 import { DeviceNotAllowed } from './DeviceNotAllowed.jsx';
 import { deviceRefused, useDeviceCheck } from '../../lib/device.js';
-import { api } from '../../lib/api.js';
+import { api, isRetryable } from '../../lib/api.js';
+import { loadCacheForCode, loadDurableCache } from '../../lib/offline-answers.js';
 import { liveEventsFromPayload, useLiveUpdate } from '../../lib/live-updates.js';
 import { AttemptScreen } from './AttemptScreen.jsx';
 import { useKeepAwake } from '../../lib/keep-awake.js';
@@ -22,6 +23,9 @@ import {
 export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
+  // No connection, but this device holds the paper: it opens from here (the
+  // page was reloaded mid-test, or the phone put it away and reopened it).
+  const [offlinePaper, setOfflinePaper] = useState(null);
   // The Start response is a complete paper. Keep it briefly while this parent
   // still has the pre-start `attemptId: null` state, rather than asking the
   // server for the same paper again.
@@ -52,10 +56,34 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
 
   const reload = useCallback(async () => {
     try { setData(await api(`/api/tests/${encodeURIComponent(code)}`)); setError(''); }
-    catch (requestError) { setError(requestError.message); }
+    catch (requestError) {
+      if (isRetryable(requestError)) {
+        let cached = null;
+        try { cached = loadCacheForCode(window.localStorage, code) || await loadDurableCache(window.indexedDB, code); } catch { /* storage blocked */ }
+        if (cached?.attempt && cached.attempt.status !== 'submitted') {
+          setOfflinePaper(cached.attempt);
+          setError('');
+          return;
+        }
+      }
+      setError(requestError.message);
+    }
   }, [code]);
 
   useEffect(() => { reload(); }, [reload]);
+  // Opened offline: try again as soon as the connection is back, and every so often.
+  // Until the account is known again too, or the paper would give way to the sign-in page for a moment.
+  const openedOffline = Boolean(offlinePaper) && (!data || Boolean(auth.offline));
+  useEffect(() => {
+    if (!openedOffline) return undefined;
+    const retry = () => { void reload(); };
+    window.addEventListener('online', retry);
+    const timer = window.setInterval(retry, 15_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.clearInterval(timer);
+    };
+  }, [openedOffline, reload]);
   useEffect(() => { setStartedAttempt(null); }, [code]);
   // Waiting students learn about approval and Start immediately instead of
   // relying on a timer. Once they have an attempt, AttemptScreen owns it.
@@ -99,6 +127,22 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   // new view of the test to pick up before the next screen can be chosen.
   const onSignedIn = useCallback(async () => { await refreshAuth(); await reload(); }, [refreshAuth, reload]);
 
+  // The same element as the paper further down, so when the connection comes
+  // back it carries on as it is, unsent answers and all.
+  if (openedOffline) {
+    return (
+      <AttemptScreen
+        code={code}
+        initialAttempt={offlinePaper}
+        microsoft={auth.microsoft}
+        showToast={showToast}
+        onPaperGone={() => { setOfflinePaper(null); reload(); }}
+        windowKind={windowKind}
+        privateExempt={false}
+        onDeclareWindow={() => setWindowKind('declared')}
+      />
+    );
+  }
   if (error) {
     return (
       <section className="join-card card">

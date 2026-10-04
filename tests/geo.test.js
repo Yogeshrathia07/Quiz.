@@ -155,3 +155,21 @@ test('location switched off, and a page not on https', async () => {
   phone([], { secure: false });
   await assert.rejects(getBrowserLocation(), (error) => error.reason === 'insecure');
 });
+
+test('a laptop refusing without a question is told where Windows or macOS keeps the switch', async () => {
+  phone([{ code: 1 }], { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/128 Safari/537.36' });
+  assert.equal(browserInfo().desktop, true);
+  const windows = await getBrowserLocation().catch((error) => error);
+  assert.equal(windows.reason, 'denied');
+  assert.equal(windows.asked, false, 'refused at once: no question was shown, and the teacher is told so');
+  assert.match(windows.title, /computer did not ask/);
+  assert.ok(windows.steps.some((step) => /Windows Settings → Privacy & security → Location/.test(step)));
+  assert.ok(!windows.steps.some((step) => /phone/i.test(step)), 'no phone instructions on a laptop');
+
+  phone([{ code: 2 }, { code: 2 }], { userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 Version/17.5 Safari/605.1.15' });
+  Object.defineProperty(globalThis.navigator, 'maxTouchPoints', { value: 0 });
+  const mac = await getBrowserLocation().catch((error) => error);
+  assert.equal(mac.reason, 'unavailable');
+  assert.ok(mac.steps.some((step) => /System Settings → Privacy & Security → Location Services/.test(step)));
+  assert.ok(mac.steps.some((step) => /Wi-Fi/.test(step)), 'laptops find themselves from Wi-Fi');
+});

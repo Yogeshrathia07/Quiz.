@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { downloadMyResponses } from '../../lib/api.js';
-import { dateTime } from '../../lib/format.js';
+import { clockTime, dateTime } from '../../lib/format.js';
 
 /** Offered once the test is closed and marks are released; unmarked short answers show as ungraded. */
 function DownloadResponses({ result }) {
@@ -23,7 +23,9 @@ function DownloadResponses({ result }) {
 /** Why the paper was handed in, when it was not the student's own Submit. */
 function HowSubmitted({ result }) {
   if (result.submittedBy === 'time') {
-    return <p className="notice">⏱ Time's up — your answers were submitted automatically ({result.answeredQuestionCount} of {result.totalQuestions} answered).</p>;
+    // Each student's own time: theirs ran out, not the test's.
+    const when = result.ownTime && result.deadlineAt ? `Your time was up at ${clockTime(result.deadlineAt)}` : "Time's up";
+    return <p className="notice">⏱ {when} — your answers were submitted automatically ({result.answeredQuestionCount} of {result.totalQuestions} answered).</p>;
   }
   if (result.submittedBy === 'admin') {
     return <p className="notice">Your instructor closed the test, so your answers were submitted as they stood ({result.answeredQuestionCount} of {result.totalQuestions} answered).</p>;
@@ -75,9 +77,16 @@ export function ResultScreen({ result }) {
   return (
     <section className="join-card card">
       <p className="eyebrow" style={{ color: 'var(--success)' }}>Test submitted</p>
-      <h1>{result.score}/{result.totalQuestions}</h1>
+      <h1>{result.score}/{result.totalMarks ?? result.totalQuestions}</h1>
       <HowSubmitted result={result}/>
       {!['time', 'admin'].includes(result.submittedBy) && <p>Your answers were submitted successfully.</p>}
+      {/* Shown before marking was finished: the score so far, said plainly. */}
+      {result.pendingManual > 0 && (
+        <p className="notice">
+          {result.pendingManual} short answer{result.pendingManual === 1 ? ' is' : 's are'} not marked yet. This score counts only what has been
+          marked so far, and changes as your teacher marks the rest.
+        </p>
+      )}
       <p className="help">
         Answered {result.answered} of {result.totalQuestions} · submitted {dateTime(result.submittedAt)}
       </p>

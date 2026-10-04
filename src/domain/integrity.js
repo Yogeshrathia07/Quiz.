@@ -14,6 +14,11 @@ import { kindWord } from './device.js';
  *
  * Leaving is recorded whether or not the test's limits permit it: a limit of 0
  * means "never lock", not "don't watch".
+ *
+ * Losing the connection is not leaving. It is noted - when, and for how long
+ * (`offlineCount`, `offlineMs`, a `connection_lost` event) - for the teacher
+ * to set against the rest of the log, and never counts towards a limit.
+ * Papers from before that still carry it as a leave (`leaves.offline`).
  */
 
 /** Why the student was away. Only these reach the database as counter keys. */
@@ -25,7 +30,7 @@ export const LEAVE_REASONS = Object.freeze({
   focus_lost: 'Another window or pop-up came in front',
   reload: 'Reloaded or reopened the page',
   not_fullscreen: 'Was not in fullscreen',
-  // No contact from the paper for longer than the offline limit.
+  // Papers from before going offline stopped counting as leaving.
   offline: 'Went offline',
   // The test shared the screen with something else (split screen, pop-up).
   split_screen: 'Used split screen'
@@ -95,7 +100,13 @@ export const emptyIntegrity = () => ({
   longestAwayMs: 0,
   lockCount: 0,
   leaves: {},
-  flags: {}
+  flags: {},
+  // Offline periods: noted, never counted as leaving (see above).
+  offlineCount: 0,
+  offlineMs: 0,
+  longestOfflineMs: 0,
+  // Answers made in time on the device but held there by the connection (domain/late-answers.js).
+  lateAnswers: 0
 });
 
 /**
@@ -115,6 +126,13 @@ function integrityFromEvents(events = []) {
       record.longestAwayMs = Math.max(record.longestAwayMs, duration);
     } else if (event.type === 'attempt_locked') {
       record.lockCount += 1;
+    } else if (event.type === 'connection_lost') {
+      const duration = Number(event.durationMs) || 0;
+      record.offlineCount += 1;
+      record.offlineMs += duration;
+      record.longestOfflineMs = Math.max(record.longestOfflineMs, duration);
+    } else if (event.type === 'late_answer') {
+      record.lateAnswers += 1;
     }
   }
   return record;
@@ -137,9 +155,21 @@ export function integritySummary(attempt) {
     leaves,
     flags,
     flagCount: Object.values(flags).reduce((total, value) => total + value, 0),
+    // Offline periods, never counted as leaving; older papers' offline "leaves" are included.
+    offline: {
+      count: (Number(record.offlineCount) || 0) + leaves.offline,
+      ms: Number(record.offlineMs) || 0,
+      longestMs: Number(record.longestOfflineMs) || 0
+    },
+    lateAnswers: Number(record.lateAnswers) || 0,
     isAway: Boolean(attempt?.awaySince)
   };
 }
+
+const duration = (ms) => {
+  const total = Math.round((Number(ms) || 0) / 1000);
+  return total >= 60 ? `${Math.floor(total / 60)}m ${total % 60}s` : `${total}s`;
+};
 
 const eventLabel = (event) => {
   if (event.type === 'fullscreen_exit') return LEAVE_REASONS[leaveReason(event.detail)];
@@ -160,6 +190,8 @@ const eventLabel = (event) => {
   if (event.type === 'teacher_continued') return 'Continued by the administrator';
   if (event.type === 'teacher_submitted') return 'Handed in by the administrator';
   if (event.type === 'teacher_reopened') return event.durationMs ? `Paper reopened by the administrator, with ${Math.round(event.durationMs / 60_000)} more minutes` : 'Paper reopened by the administrator';
+  if (event.type === 'connection_lost') return `Offline for about ${duration(event.durationMs)} (not counted as leaving)`;
+  if (event.type === 'late_answer') return 'An answer arrived late, after the connection came back';
   return event.type;
 };
 
@@ -177,15 +209,15 @@ export const integrityHeaders = [
   'Times left the test (total)', 'Time away in total (seconds)', 'Longest time away (seconds)',
   'Left fullscreen', 'Switched app or tab', 'Window lost focus', 'Reloaded the page', 'Not in fullscreen', 'Went offline',
   'Copy / cut / paste / drag attempts', 'Times locked', 'Screenshot / print / developer-tools attempts', 'Used split screen',
-  'Browser extension seen', 'Text appeared all at once'
+  'Browser extension seen', 'Text appeared all at once', 'Time offline in total (seconds, not counted as leaving)', 'Answers that arrived late'
 ];
 
 export const integrityCells = (summary) => (summary
   ? [
     summary.leaveCount, Math.round(summary.awayMs / 1000), Math.round(summary.longestAwayMs / 1000),
     summary.leaves.fullscreen, summary.leaves.tab_switch, summary.leaves.focus_lost, summary.leaves.reload,
-    summary.leaves.not_fullscreen, summary.leaves.offline, summary.flags.copy + summary.flags.cut + summary.flags.paste + summary.flags.drop, summary.lockCount,
+    summary.leaves.not_fullscreen, summary.offline?.count ?? summary.leaves.offline, summary.flags.copy + summary.flags.cut + summary.flags.paste + summary.flags.drop, summary.lockCount,
     summary.flags.screenshot + summary.flags.print + summary.flags.devtools, summary.leaves.split_screen,
-    summary.flags.extension, summary.flags.text_burst
+    summary.flags.extension, summary.flags.text_burst, Math.round((summary.offline?.ms || 0) / 1000), summary.lateAnswers || 0
   ]
   : integrityHeaders.map(() => ''));

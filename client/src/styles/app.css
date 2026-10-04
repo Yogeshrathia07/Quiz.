@@ -13,7 +13,7 @@
 .test-list-row .table-actions{justify-content:flex-end}
 .test-list-openable{cursor:pointer;outline:none}
 .test-list-openable:focus-visible{box-shadow:inset 0 0 0 2px #1598D1;border-radius:10px}
-.test-list-openable:hover h2{text-decoration:underline;text-underline-offset:4px}
+.test-list-openable:hover h2{color:#35AEE3}
 .overview-actions .button-secondary{background:#2A2D31;color:#F7FAFC;border-color:#474C52}
 .overview-actions .button-secondary:hover:not(:disabled){background:#1598D1;color:#F7FAFC;border-color:#1598D1}
 .overview-actions .button-secondary:disabled{background:#33373B;color:#AAB6BC;border-color:#474C52}
@@ -922,6 +922,9 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .activity-log li.is-exit .activity-kind,.activity-log li.is-flag .activity-kind,.activity-log li.is-lock .activity-kind{color:#EF5B5F}
 .activity-log li.is-submit,.activity-log li.is-start{background:rgba(39,182,111,.14)}
 .activity-log li.is-submit .activity-kind,.activity-log li.is-start .activity-kind{color:#27B66F}
+/* Noted for the teacher to check, never counted: offline periods and answers that arrived late. */
+.activity-log li.is-offline,.activity-log li.is-late{background:rgba(243,154,74,.14)}
+.activity-log li.is-offline .activity-kind,.activity-log li.is-late .activity-kind{color:var(--warn)}
 @media (max-width:560px){.activity-log li{grid-template-columns:66px 1fr}.activity-kind{display:none}}
 
 /* "Open this test in an Incognito window" */
@@ -1043,19 +1046,15 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
   .row-chevron{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:#33373B;color:#D5DEE2;transition:transform .18s ease}
   .live-table tr.is-open .row-chevron{transform:rotate(180deg);background:#1598D1;color:#F7FAFC}
   /* Closed:name and SAP ID only. Open: everything, as before. */
-  .live-table:not(.results-table) tr:not(.is-open) td:not([data-label="Student"]):not([data-label="Person"]):not([data-label="Test"]){display:none}
+  .live-table:not(.results-table):not(.review-table) tr:not(.is-open) td:not([data-label="Student"]):not([data-label="Person"]):not([data-label="Test"]){display:none}
   .live-table tr:not(.is-open) td[data-label="Student"]{border-bottom:0;padding-bottom:0;margin-bottom:0}
   .live-table tr{padding:10px 12px}
   .person-detail .pill{margin-top:4px}
 }
 
 /* ---------------------------------------------- student dashboard extras ---- */
-.my-summary{margin:0 0 16px;padding:6px 18px}
-.my-summary .analysis-summary{margin:12px 0;padding:0;border:0}
-.my-summary .analysis-summary strong{text-transform:none}
-.my-sap-id{margin:10px 0 0;color:#AAB6BC;font-size:.86rem}
+.my-sap-id{margin:4px 0 0;color:#AAB6BC;font-size:.84rem}
 .my-sap-id strong{color:#1598D1;letter-spacing:.06em}
-.my-sap-id span{color:#AAB6BC;font-size:.78rem}
 .my-sap-missing{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:12px 0 0}
 /* Users page:the whole row opens that person. */
 .users-row-open{cursor:pointer}
@@ -1117,7 +1116,6 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
    switches are a plain list:the form reads top to bottom without boxes
    inside boxes. */
 .choice-segments{display:inline-flex;flex-wrap:wrap}
-.choice-help{margin:6px 0 0}
 .schedule-fields{display:grid;gap:16px}
 .schedule-row{display:grid;gap:8px;justify-items:start}
 .schedule-row>*{max-width:100%}
@@ -1142,7 +1140,6 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .creator-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
 .creator-head-row h1{margin:0}
 .creator-head-row .json-import-actions{gap:14px}
-.creator-template{color:#AAB6BC;font-weight:700}
 .creator-head-row .json-import-actions .button{min-height:38px;border-color:rgba(255,255,255,.6);background:transparent;color:#F7FAFC}
 .creator-head-row .json-import-actions .button:hover{background:#2A2D31;color:#F7FAFC}
 .join-card>p.start-countdown{color:#F7FAFC}

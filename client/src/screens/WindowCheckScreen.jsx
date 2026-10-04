@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { InfoTip } from '../components/InfoTip.jsx';
 import { detectWindowDetails } from '../lib/private-mode.js';
 import { DEVICE_WORDS, checkThisDevice, readDeviceSignals } from '../lib/device.js';
 
@@ -40,7 +41,13 @@ function DeviceCheckCard() {
   return (
     <section className="join-card card window-check device-check">
       <p className="eyebrow">Device check</p>
-      <h1>{device ? `A ${DEVICE_WORDS[device.kind] || DEVICE_WORDS.unknown}` : error ? 'Could not check' : 'Checking this device…'}</h1>
+      <div className="page-heading">
+        <h1>{device ? `A ${DEVICE_WORDS[device.kind] || DEVICE_WORDS.unknown}` : error ? 'Could not check' : 'Checking this device…'}</h1>
+        <InfoTip label="How a device is told apart">
+          A phone or tablet is known by its touch screen (a phone&apos;s short side is under 600 points); a laptop by its
+          mouse or trackpad, even with a touch screen. Try a phone in its normal mode and with “Desktop site” on.
+        </InfoTip>
+      </div>
       {error && <p className="notice danger">{error}</p>}
       {device && (
         <>
@@ -70,10 +77,6 @@ function DeviceCheckCard() {
           </details>
         </>
       )}
-      <p className="help">
-        A phone or tablet is known by its touch screen (a phone&apos;s short side is under 600 points); a laptop by its
-        mouse or trackpad, even with a touch screen. Try a phone in its normal mode and with “Desktop site” on.
-      </p>
       <button className="button button-secondary" type="button" disabled={!result && !error} onClick={check}>Check again</button>
     </section>
   );
@@ -98,7 +101,13 @@ export function WindowCheckScreen() {
     <div className="join-stack">
       <section className="join-card card window-check">
         <p className="eyebrow">Private window check</p>
-        <h1>{verdict ? verdict.title : 'Checking this window…'}</h1>
+        <div className="page-heading">
+          <h1>{verdict ? verdict.title : 'Checking this window…'}</h1>
+          <InfoTip label="How to try a phone">
+            Open this page in a normal tab, then in a private (Incognito) tab. The first should say Normal window and the
+            second Private window. If a browser gets either one wrong, or the answer is not steady, the check cannot judge that browser.
+          </InfoTip>
+        </div>
         {verdict && <p className={`notice ${verdict.tone === 'success' ? 'success' : verdict.tone === 'danger' ? 'danger' : ''}`}>{verdict.text}</p>}
         {runs && (
           <dl className="window-check-facts">
@@ -107,11 +116,6 @@ export function WindowCheckScreen() {
             {first.reason !== 'no_extensions' && <div><dt>Time taken</dt><dd>{runs.map((run) => `${run.ms} ms`).join(' · ')}</dd></div>}
           </dl>
         )}
-        <p className="help">
-          To try a phone: open this page in a normal tab, then in a private (Incognito) tab. The first should say
-          Normal window and the second Private window. If a browser gets either one wrong, or the answer is not steady,
-          the check cannot judge that browser.
-        </p>
         <button className="button button-secondary" type="button" disabled={!runs} onClick={check}>Check again</button>
       </section>
       <DeviceCheckCard/>

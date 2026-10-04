@@ -63,6 +63,7 @@ export async function createTest(req, raw) {
     strictTiming: input.strictTiming,
     strictNext: input.strictNext,
     typeSeconds: input.typeSeconds,
+    typeMarks: input.typeMarks,
     questionDraw: input.questionDraw,
     // Under the spread draw, the next student to begin takes this block.
     paperSlots: 0,
@@ -81,7 +82,9 @@ export async function createTest(req, raw) {
       options: question.options,
       correctOptions: question.correctOptions,
       manualGrading: question.type === 'short',
-      timeSeconds: question.timeSeconds
+      timeSeconds: question.timeSeconds,
+      // Its own marks; null follows its type's (domain/marks.js).
+      marks: question.marks ?? null
     }))
   };
   await tests().insertOne(doc);
@@ -139,6 +142,11 @@ export async function updateTestSettings(req, code, raw = {}) {
   const startMode = test.isStarted ? startModeOf(test) : raw.startMode ?? startModeOf(test);
   const opensAt = test.isStarted ? test.opensAt : raw.opensAt !== undefined ? raw.opensAt : test.opensAt;
   const endMode = raw.endMode ?? (raw.untimed !== undefined ? (raw.untimed ? 'manual' : 'at') : endModeOf(test));
+  // Papers already running keep the clock they began with: each student's own
+  // time cannot become a shared end, or the other way round, mid-test.
+  if (test.isStarted && (endMode === 'each') !== (endModeOf(test) === 'each')) {
+    throw new PublicTestError(409, 'Students have already started, so whether each student gets their own time cannot change. Reset the test if you need to.');
+  }
   // Carry the stored end time forward, unless the start has just been moved
   // past it and no new end time came with the edit - then let `buildTest` fall
   // back to start + estimate rather than failing on an impossible window. An
@@ -169,6 +177,8 @@ export async function updateTestSettings(req, code, raw = {}) {
     strictTiming: raw.strictTiming ?? test.strictTiming === true,
     strictNext: raw.strictNext ?? test.strictNext !== false,
     typeSeconds: raw.typeSeconds ?? test.typeSeconds,
+    // Marks are set with the questions (Edit test), not here: kept as they are.
+    typeMarks: test.typeMarks,
     questionDraw: raw.questionDraw ?? test.questionDraw,
     locationRequired: raw.locationRequired ?? test.locationRequired,
     locationRadiusMeters: raw.locationRadiusMeters ?? test.locationRadiusMeters,
@@ -181,6 +191,7 @@ export async function updateTestSettings(req, code, raw = {}) {
       type: question.manualGrading ? 'short' : question.type,
       options: question.options,
       correctOptions: question.correctOptions,
+      marks: question.marks ?? null,
       timeSeconds: raw.questionTimes && Object.hasOwn(raw.questionTimes, String(question.id))
         ? raw.questionTimes[String(question.id)]
         : question.timeSeconds ?? null

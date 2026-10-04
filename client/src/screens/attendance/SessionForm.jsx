@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { SwitchRow } from '../../components/FormControls.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { VenueFields } from '../../components/VenueFields.jsx';
 
 const venueBody = (values) => ({
@@ -49,10 +50,12 @@ export function SessionForm({ session = null, lastVenue = null, onSave, onCancel
 
   return (
     <form className="card min-card att-create" onSubmit={save}>
-      <label className="field-label" htmlFor={`${idPrefix}-title`}>Class name</label>
+      <span className="field-label-row">
+        <label className="field-label" htmlFor={`${idPrefix}-title`}>Class name</label>
+        <InfoTip label="About the class name">Use the same name for every lecture: that is how the absent list and the register know the class.</InfoTip>
+      </span>
       <input id={`${idPrefix}-title`} className="text-input" required minLength="2" maxLength="120" autoFocus value={values.title}
         onChange={(event) => set('title', event.target.value)} placeholder="e.g. DBMS · CSE-B"/>
-      <p className="help att-create-help">Use the same name for every lecture: that is how the absent list and the register know the class.</p>
       <div className="att-create-options">
         <SwitchRow checked={values.locationRequired} onChange={(value) => set('locationRequired', value)}
           title="Check distance" description="Only students near the classroom can mark."/>

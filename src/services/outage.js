@@ -60,16 +60,21 @@ export async function compensateForOutage(nowMs = Date.now()) {
   // Running when the server went down: started before it, not closed.
   const running = await tests().find(
     { isStarted: true, isClosed: { $ne: true }, startedAt: { $lte: downSince } },
-    { projection: { code: 1, endsAt: 1, untimed: 1 } }
+    { projection: { code: 1, endsAt: 1, untimed: 1, endMode: 1, durationMinutes: 1 } }
   ).toArray();
 
   for (const test of running) {
+    // Each student's own time: no shared end - each paper still running gets the outage back itself.
+    const ownTimes = test.endMode === 'each' && Number(test.durationMinutes) > 0;
     // Only an end time that had not already passed (with its grace) is moved.
-    const hasEnd = test.untimed !== true && test.endsAt && new Date(test.endsAt).getTime() + END_GRACE_MS > downSince.getTime();
+    const hasEnd = ownTimes || (test.untimed !== true && test.endsAt && new Date(test.endsAt).getTime() + END_GRACE_MS > downSince.getTime());
     const extend = giveBack && Boolean(hasEnd);
+    const extra = { $ifNull: ['$attempt.extraMs', 0] };
+    // A paper whose own time (and grace) had already run out before the outage gets nothing back.
+    const ownTimeLeft = { $gt: [{ $add: ['$attempt.startedAt', Number(test.durationMinutes) * 60_000 + END_GRACE_MS, extra] }, downSince] };
     await serializeTestWrite(test.code, () => tests().updateOne({ code: test.code }, [{
       $set: {
-        ...(extend ? { endsAt: { $add: ['$endsAt', outageMs] } } : {}),
+        ...(extend && !ownTimes ? { endsAt: { $add: ['$endsAt', outageMs] } } : {}),
         outages: {
           $concatArrays: [{ $ifNull: ['$outages', []] }, [{ from: downSince, to: now, ms: outageMs, extended: extend }]]
         }
@@ -82,6 +87,7 @@ export async function compensateForOutage(nowMs = Date.now()) {
       $set: {
         'attempt.lastSeenAt': now,
         'attempt.awaySince': later('$attempt.awaySince', outageMs),
+        ...(extend && ownTimes ? { 'attempt.extraMs': { $cond: [ownTimeLeft, { $add: [extra, outageMs] }, extra] } } : {}),
         'attempt.strict': {
           $cond: [
             { $ifNull: ['$attempt.strict', false] },

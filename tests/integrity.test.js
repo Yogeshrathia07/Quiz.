@@ -23,6 +23,23 @@ test('an attempt from before the lifetime record is summarised from its event lo
   assert.equal(summary.leaves.fullscreen, 1);
 });
 
+test('going offline is noted with its length, and never counted as leaving', () => {
+  const summary = integritySummary({
+    events: [
+      { type: 'connection_lost', createdAt: new Date(), durationMs: 95_000 },
+      { type: 'connection_lost', createdAt: new Date(), durationMs: 70_000 },
+      { type: 'late_answer', createdAt: new Date(), detail: 'Q3' }
+    ]
+  });
+  assert.equal(summary.leaveCount, 0, 'not an exit');
+  assert.equal(summary.awayMs, 0, 'not time away');
+  assert.deepEqual(summary.offline, { count: 2, ms: 165_000, longestMs: 95_000 });
+  assert.equal(summary.lateAnswers, 1);
+  // Papers from before still show their offline "leaves" among the offline periods.
+  const older = integritySummary({ integrity: { leaveCount: 1, leaves: { offline: 1 }, flags: {} } });
+  assert.equal(older.offline.count, 1);
+});
+
 test('only known leave reasons become counter keys', () => {
   assert.equal(leaveReason('tab_switch'), 'tab_switch');
   assert.equal(leaveReason('$where'), 'fullscreen');

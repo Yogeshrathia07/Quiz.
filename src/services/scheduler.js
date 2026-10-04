@@ -3,7 +3,7 @@ import { config } from '../config.js';
 import { runAsLeader } from '../coordination/index.js';
 import { END_GRACE_MS, isTimeOver } from '../domain/attempt-rules.js';
 import { beginTest } from './test-lifecycle.js';
-import { finishTest } from './admin-service.js';
+import { finishOwnTimes, finishTest } from './admin-service.js';
 import { compensateForOutage, recordHeartbeat } from './outage.js';
 
 const TICK_MS = 5_000;
@@ -52,7 +52,16 @@ export async function runScheduleOnce(atMs = Date.now()) {
     const test = await tests().findOne({ code });
     if (test && !test.isClosed && isTimeOver(test, atMs - END_GRACE_MS)) await finishTest(test, { automatic: true });
   }
-  return { started: due.length, ended: ending.length, expired };
+
+  // Each student's own time: hand in every paper whose own time is up. The
+  // test itself stays open until the admin closes it.
+  const ownTimed = await tests().find(
+    { endMode: 'each', isStarted: true, isClosed: { $ne: true } },
+    { projection: { registrations: 0, questions: 0 } }
+  ).toArray();
+  let handedIn = 0;
+  for (const test of ownTimed) handedIn += await finishOwnTimes(test, atMs);
+  return { started: due.length, ended: ending.length, expired, handedIn };
 }
 
 /**

@@ -8,6 +8,8 @@ import { oneLine, plainText } from '../domain/rich-text.js';
  *
  *   Overview           how the class did, in a dozen numbers
  *   Results            one row per student: marks, timing, integrity
+ *   Marks              one row per paper, one column per question - marks
+ *                      typed into its short-answer cells upload back
  *   Answer grid        one row per student, one column per question - what
  *                      each student answered and whether it was right
  *   Question analysis  one row per question: how many got it right, and the
@@ -30,27 +32,29 @@ const FILL = {
   correct: 'FFDCF5E7',
   wrong: 'FFFBE1E1',
   pending: 'FFFFF2CC',
+  // Part of a question's marks (a short answer marked so).
+  partial: 'FFEAF5D3',
   blank: 'FFEFF1F4',
   notAsked: 'FFFFFFFF'
 };
 // Text on those fills, a shade darker so the word stands out, not just the colour.
-const TEXT = { correct: 'FF15803D', wrong: 'FFB91C1C', pending: 'FFB45309', blank: 'FF4B5563', notAsked: INK };
+const TEXT = { correct: 'FF15803D', wrong: 'FFB91C1C', pending: 'FFB45309', partial: 'FF4D7C0F', blank: 'FF4B5563', notAsked: INK };
 
 const headers = [
   'Name', 'College email', 'SAP ID', 'Registration status', 'Requested at',
-  'Attempt status', 'Started at', 'Submitted at', 'Answered', 'Score',
+  'Attempt status', 'Started at', 'Submitted at', 'Answered', 'Marks',
   'Fullscreen exits', 'Time outside fullscreen (seconds)', 'Attempt locked', 'Lock reason',
   ...integrityHeaders,
-  'Questions on paper', 'Percentage', 'Time taken (minutes)', 'Rank'
+  'Questions on paper', 'Out of (marks)', 'Percentage', 'Time taken (minutes)', 'Rank'
 ];
 const responseHeaders = [
   'Student', 'College email', 'SAP ID', 'Attempt status', 'Submitted at',
   'Question no.', 'Question type', 'Question', 'Student answer', 'Correct answer',
-  'Mark', 'Mark status', 'Answered at', 'Answered after (minutes)',
+  'Marks', 'Out of', 'Mark status', 'Answered at', 'Answered after (minutes)',
   'Time allowed (s)', 'Time spent (s)', 'Timed out'
 ];
-const columnWidths = [22, 30, 15, 18, 22, 18, 22, 22, 11, 9, 16, 31, 16, 32, ...integrityHeaders.map(() => 16), 14, 12, 16, 8];
-const responseColumnWidths = [22, 30, 15, 16, 22, 13, 16, 42, 38, 38, 10, 22, 22, 16, 14, 14, 11];
+const columnWidths = [22, 30, 15, 18, 22, 18, 22, 22, 11, 9, 16, 31, 16, 32, ...integrityHeaders.map(() => 16), 14, 12, 12, 16, 8];
+const responseColumnWidths = [22, 30, 15, 16, 22, 13, 16, 42, 38, 38, 9, 8, 22, 22, 16, 14, 14, 11];
 const logHeaders = ['Student', 'College email', 'SAP ID', 'When', 'What happened', 'Time away (seconds)', 'Detail'];
 const logColumnWidths = [22, 30, 15, 22, 34, 18, 48];
 
@@ -127,9 +131,11 @@ function emptyNote(sheet, text) {
 }
 
 function answerStatus(response) {
+  if (response.overridden) return `Marked by teacher (${response.marks} of ${response.maxMarks})`;
   if (!response.answered) return 'Not answered';
   if (response.manualGrading) {
     if (response.isCorrect === null) return 'Awaiting manual mark';
+    if (response.partial) return 'Manual part marks';
     return response.isCorrect ? 'Manual correct' : 'Manual incorrect';
   }
   return response.isCorrect ? 'Correct' : 'Incorrect';
@@ -139,6 +145,7 @@ const statusFill = (response) => {
   if (!response) return FILL.notAsked;
   if (!response.answered) return FILL.blank;
   if (response.isCorrect === null) return FILL.pending;
+  if (response.partial) return FILL.partial;
   return response.isCorrect ? FILL.correct : FILL.wrong;
 };
 
@@ -155,7 +162,9 @@ function overviewSheet(workbook, dashboard) {
   const sheet = sheetTitle(workbook, 'Overview', `${test.title} — overview`, test);
   const submitted = registrations.filter((entry) => entry.attemptStatus === 'submitted');
   const scores = submitted.map((entry) => Number(entry.score) || 0).sort((a, b) => a - b);
-  const outOf = Math.max(0, ...submitted.map((entry) => entry.totalQuestions || 0));
+  const questionsPerPaper = Math.max(0, ...submitted.map((entry) => entry.totalQuestions || 0));
+  // Full marks per paper (domain/marks.js): the most any paper is worth.
+  const outOf = Math.max(0, ...submitted.map((entry) => entry.totalMarks || 0));
   const average = scores.length ? scores.reduce((total, value) => total + value, 0) / scores.length : null;
   const median = scores.length ? (scores[Math.floor((scores.length - 1) / 2)] + scores[Math.ceil((scores.length - 1) / 2)]) / 2 : null;
   const times = submitted.map((entry) => minutesBetween(entry.startedAt, entry.submittedAt)).filter((value) => value !== '');
@@ -168,12 +177,13 @@ function overviewSheet(workbook, dashboard) {
     ['Started the test', registrations.filter((entry) => entry.attemptStatus).length],
     ['Submitted', submitted.length],
     ['Still in progress', registrations.filter((entry) => entry.attemptStatus === 'in_progress').length],
-    ['Questions per paper', outOf || '—'],
-    ['Average score', round(average)],
+    ['Questions per paper', questionsPerPaper || '—'],
+    ['Full marks per paper', outOf || '—'],
+    ['Average marks', round(average)],
     ['Average percentage', average === null || !outOf ? '—' : `${percent(average, outOf)}%`],
-    ['Median score', round(median)],
-    ['Highest score', scores.length ? scores[scores.length - 1] : '—'],
-    ['Lowest score', scores.length ? scores[0] : '—'],
+    ['Median marks', round(median)],
+    ['Highest marks', scores.length ? scores[scores.length - 1] : '—'],
+    ['Lowest marks', scores.length ? scores[0] : '—'],
     ['Average time taken (minutes)', times.length ? round(times.reduce((total, value) => total + value, 0) / times.length) : '—'],
     ['Students who left the test at least once', leftOnce],
     ['Attempts locked right now', registrations.filter((entry) => entry.isLocked).length],
@@ -212,7 +222,8 @@ function resultsSheet(workbook, dashboard) {
     registration.lockReason || '',
     ...integrityCells(registration.integrity),
     registration.totalQuestions || '',
-    registration.score === null || registration.score === undefined ? '' : percent(registration.score, registration.totalQuestions),
+    registration.totalMarks ?? '',
+    registration.score === null || registration.score === undefined ? '' : percent(registration.score, registration.totalMarks),
     minutesBetween(registration.startedAt, registration.submittedAt),
     registration.attemptStatus === 'submitted' ? rankOf(registration.score) : ''
   ]);
@@ -238,7 +249,7 @@ function answerGridSheet(workbook, dashboard) {
   const { test, registrations } = dashboard;
   const bank = dashboard.questionBank || [];
   const sheet = sheetTitle(workbook, 'Answer grid', `${test.title} — every answer, side by side`, test);
-  sheet.getCell('A3').value = 'Green: correct · Red: incorrect · Yellow: awaiting manual mark · Grey: left blank · White: not on this student’s paper';
+  sheet.getCell('A3').value = 'Green: full marks · Light green: part marks · Red: no marks · Yellow: awaiting manual mark · Grey: left blank · White: not on this student’s paper';
   sheet.getCell('A3').font = { name: 'Aptos', size: 9, italic: true, color: { argb: MUTED } };
   sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: 4, showGridLines: false }];
 
@@ -250,7 +261,7 @@ function answerGridSheet(workbook, dashboard) {
   }
 
   const headerRow = sheet.getRow(4);
-  headerRow.values = ['Student', 'SAP ID', 'Score', ...bank.map((question) => `Q${question.number} (${question.type.toUpperCase()}${question.retired ? ', old version' : ''}): ${clip(oneLine(question.prompt), 60)}`)];
+  headerRow.values = ['Student', 'SAP ID', 'Marks', ...bank.map((question) => `Q${question.number} (${question.type.toUpperCase()}, ${question.maxMarks} mark${question.maxMarks === 1 ? '' : 's'}${question.retired ? ', old version' : ''}): ${clip(oneLine(question.prompt), 60)}`)];
   styleHeader(headerRow);
   headerRow.height = 60;
 
@@ -266,11 +277,11 @@ function answerGridSheet(workbook, dashboard) {
     const row = sheet.addRow([
       registration.name,
       registration.sapId,
-      registration.score === null || registration.score === undefined ? '' : `${registration.score} / ${registration.totalQuestions}`,
+      registration.score === null || registration.score === undefined ? '' : `${registration.score} / ${registration.totalMarks}`,
       ...bank.map((question) => {
         const response = answers.get(question.id);
         if (!response) return '';
-        const mark = response.isCorrect === null ? '' : response.isCorrect ? ' ✓' : ' ✗';
+        const mark = response.isCorrect === null ? '' : response.partial ? ` (${response.marks}/${response.maxMarks})` : response.isCorrect ? ' ✓' : ' ✗';
         return response.answered ? `${response.selectedAnswer}${mark}` : '(blank)';
       })
     ]);
@@ -296,7 +307,7 @@ function questionAnalysisSheet(workbook, dashboard) {
   const headerRow = sheet.getRow(4);
   headerRow.values = [
     'Q no.', 'Type', 'Question', 'Correct answer', 'On how many papers', 'Answered', 'Left blank',
-    'Correct', 'Incorrect', 'Awaiting mark', '% correct (of those who got it)', 'Most common wrong answer', 'Chosen by'
+    'Correct', 'Part marks', 'Incorrect', 'Awaiting mark', '% correct (of those who got it)', 'Most common wrong answer', 'Chosen by'
   ];
   styleHeader(headerRow);
 
@@ -305,7 +316,9 @@ function questionAnalysisSheet(workbook, dashboard) {
     const forQuestion = responses.filter((response) => response.questionId === question.id);
     const answered = forQuestion.filter((response) => response.answered);
     const correct = answered.filter((response) => response.isCorrect === true).length;
-    const incorrect = answered.filter((response) => response.isCorrect === false);
+    // Part marks (a short answer marked so) are neither right nor wrong.
+    const partial = answered.filter((response) => response.partial).length;
+    const incorrect = answered.filter((response) => response.isCorrect === false && !response.partial);
     const pending = answered.filter((response) => response.isCorrect === null).length;
     const wrongCounts = new Map();
     if (!question.manualGrading) incorrect.forEach((response) => wrongCounts.set(response.selectedAnswer, (wrongCounts.get(response.selectedAnswer) || 0) + 1));
@@ -319,6 +332,7 @@ function questionAnalysisSheet(workbook, dashboard) {
       answered.length,
       forQuestion.length - answered.length,
       correct,
+      partial,
       incorrect.length,
       pending,
       forQuestion.length ? percent(correct, forQuestion.length) : '',
@@ -326,11 +340,11 @@ function questionAnalysisSheet(workbook, dashboard) {
       topWrongCount
     ]);
     const share = forQuestion.length ? correct / forQuestion.length : null;
-    if (share !== null) paint(row.getCell(11), share >= 0.7 ? FILL.correct : share >= 0.4 ? FILL.pending : FILL.wrong);
+    if (share !== null) paint(row.getCell(12), share >= 0.7 ? FILL.correct : share >= 0.4 ? FILL.pending : FILL.wrong);
   });
   if (bank.length) styleDataRows(sheet, 5, bank.length);
   else emptyNote(sheet, 'This test has no questions.');
-  [7, 8, 46, 34, 14, 11, 11, 10, 11, 12, 16, 34, 10].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+  [7, 8, 46, 34, 14, 11, 11, 10, 11, 11, 12, 16, 34, 10].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
 }
 
 function responsesSheet(workbook, dashboard) {
@@ -342,7 +356,7 @@ function responsesSheet(workbook, dashboard) {
   styleHeader(headerRow);
   if (responses.length) {
     responses.forEach((response) => {
-      const mark = response.isCorrect === null ? '' : response.isCorrect ? 1 : 0;
+      const mark = response.marks ?? '';
       const row = sheet.addRow([
         response.studentName,
         response.email,
@@ -355,6 +369,7 @@ function responsesSheet(workbook, dashboard) {
         response.selectedAnswer,
         response.manualGrading ? 'Manual review' : response.correctAnswer,
         mark,
+        response.maxMarks ?? '',
         answerStatus(response),
         asDate(response.answeredAt),
         minutesBetween(response.startedAt, response.answeredAt),
@@ -363,8 +378,8 @@ function responsesSheet(workbook, dashboard) {
         response.timeSpentSeconds ?? '',
         response.timedOut === undefined || response.timedOut === null ? '' : response.timedOut ? 'Yes' : 'No'
       ]);
-      if (response.timedOut) paint(row.getCell(17), FILL.wrong);
-      paint(row.getCell(12), statusFill(response));
+      if (response.timedOut) paint(row.getCell(18), FILL.wrong);
+      paint(row.getCell(13), statusFill(response));
     });
     styleDataRows(sheet, 5, responses.length);
   } else {
@@ -372,7 +387,7 @@ function responsesSheet(workbook, dashboard) {
   }
   responseColumnWidths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
   sheet.getColumn(5).numFmt = 'yyyy-mm-dd hh:mm';
-  sheet.getColumn(13).numFmt = 'yyyy-mm-dd hh:mm';
+  sheet.getColumn(14).numFmt = 'yyyy-mm-dd hh:mm';
 }
 
 /** Every departure, return, flag and lock, in order - the evidence behind the counts. */
@@ -428,12 +443,107 @@ function activitySheet(workbook, dashboard) {
   sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 7 } };
 }
 
+/* ------------------------------------------ the Marks sheet: marking in Excel */
+
+/**
+ * The Marks sheet, its hidden row naming each column, and the hidden copy of
+ * the marks as exported - all read back by services/marks-import.js.
+ */
+export const MARKS_SHEET = 'Marks';
+export const MARKS_BASE_SHEET = 'Marks as exported';
+export const MARKS_KEY_ROW = 5;
+const MARKS_FIRST_QUESTION = 6;
+const MARKS_EDITABLE = 'FFFFFBEA';
+
+/**
+ * One row per handed-in paper, one column per question: the marks each answer
+ * earned, any of them changed here and uploaded on the test's Results tab
+ * (services/marks-import.js); short answers still to mark are yellow. A hidden last column
+ * and a hidden row name each student and question, so the file finds its way
+ * back even with its rows sorted, and a hidden sheet keeps the marks as they
+ * were exported: the upload changes only what was typed over them, so a mark
+ * given in the app since is not undone by an older file. Total adds the row up
+ * as marks are typed.
+ */
+function marksSheet(workbook, dashboard) {
+  const { test } = dashboard;
+  const bank = dashboard.questionBank || [];
+  const lastQuestion = MARKS_FIRST_QUESTION - 1 + bank.length;
+  const idColumn = lastQuestion + 1;
+  const sheet = sheetTitle(workbook, MARKS_SHEET, `${test.title} — marks`, test, Math.max(8, lastQuestion));
+  sheet.getCell('A3').value = 'Change any mark - yellow cells are short answers still to mark - then upload this file on the test’s Results tab. A choice question’s mark you change becomes your own; type its automatic mark to go back to that.';
+  sheet.getCell('A3').font = { name: 'Aptos', size: 9, italic: true, color: { argb: MUTED } };
+  sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: MARKS_KEY_ROW, showGridLines: false }];
+
+  const headerRow = sheet.getRow(4);
+  headerRow.values = ['Student', 'SAP ID', 'College email', 'Total', 'Out of', ...bank.map((question) => (
+    `Q${question.number} · ${question.manualGrading ? 'short answer' : question.type.toUpperCase()} · out of ${question.maxMarks}${question.retired ? ' (old version)' : ''}`
+  )), 'Registration'];
+  styleHeader(headerRow);
+  headerRow.height = 44;
+  // What each column is, for reading the file back.
+  const keys = ['name', 'sapId', 'email', 'total', 'outOf', ...bank.map((question) => `q:${question.id}`), `test:${test.code}`];
+  sheet.getRow(MARKS_KEY_ROW).values = keys;
+  sheet.getRow(MARKS_KEY_ROW).hidden = true;
+
+  const byStudent = new Map();
+  for (const response of dashboard.responses || []) {
+    if (!byStudent.has(response.registrationId)) byStudent.set(response.registrationId, new Map());
+    byStudent.get(response.registrationId).set(response.questionId, response);
+  }
+  const papers = (dashboard.registrations || []).filter((registration) => registration.attemptStatus === 'submitted');
+  const rowValues = (registration) => {
+    const answers = byStudent.get(registration.id) || new Map();
+    return [registration.name, registration.sapId || '', registration.email, null, registration.totalMarks ?? '',
+      ...bank.map((question) => answers.get(question.id)?.marks ?? null), registration.id];
+  };
+  papers.forEach((registration, index) => {
+    const answers = byStudent.get(registration.id) || new Map();
+    const row = sheet.getRow(MARKS_KEY_ROW + 1 + index);
+    row.values = rowValues(registration);
+    // Total: the row added up, as marks are typed.
+    row.getCell(4).value = bank.length
+      ? { formula: `SUM(${row.getCell(MARKS_FIRST_QUESTION).address}:${row.getCell(lastQuestion).address})`, result: registration.score ?? 0 }
+      : 0;
+    row.eachCell({ includeEmpty: true }, (cell, column) => {
+      cell.font = { name: 'Aptos', size: 10, color: { argb: INK }, ...(column === 4 ? { bold: true } : {}) };
+      cell.alignment = { vertical: 'middle', ...(column >= 4 ? { horizontal: 'center' } : {}) };
+      cell.border = box;
+    });
+    bank.forEach((question, position) => {
+      const cell = row.getCell(MARKS_FIRST_QUESTION + position);
+      const response = answers.get(question.id);
+      // Not on this student's paper.
+      if (!response) { paint(cell, FILL.blank); return; }
+      // A short answer still to mark stands out; any mark can be changed.
+      if (question.manualGrading) paint(cell, response.marks === null ? FILL.pending : MARKS_EDITABLE);
+      cell.dataValidation = {
+        type: 'decimal', operator: 'between', allowBlank: true, formulae: [0, question.maxMarks],
+        showErrorMessage: true, errorTitle: 'Marks', error: `From 0 to ${question.maxMarks}.`
+      };
+    });
+  });
+  if (!papers.length) {
+    sheet.getCell('A6').value = 'Nobody has handed in a paper yet.';
+    sheet.getCell('A6').font = { name: 'Aptos', size: 10, italic: true, color: { argb: MUTED } };
+  }
+  [26, 13, 30, 9, 9].forEach((columnWidth, index) => { sheet.getColumn(index + 1).width = columnWidth; });
+  bank.forEach((_question, index) => { sheet.getColumn(MARKS_FIRST_QUESTION + index).width = 14; });
+  sheet.getColumn(idColumn).hidden = true;
+
+  // The marks as exported, out of sight.
+  const base = workbook.addWorksheet(MARKS_BASE_SHEET, { state: 'veryHidden' });
+  base.addRow(keys);
+  papers.forEach((registration) => base.addRow(rowValues(registration)));
+}
+
 export async function buildTestSpreadsheet(dashboard) {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Quiz';
   workbook.created = new Date();
   overviewSheet(workbook, dashboard);
   resultsSheet(workbook, dashboard);
+  marksSheet(workbook, dashboard);
   answerGridSheet(workbook, dashboard);
   questionAnalysisSheet(workbook, dashboard);
   responsesSheet(workbook, dashboard);
@@ -458,6 +568,7 @@ const howItEnded = (by) => ({ student: 'You submitted it', time: 'Time ran out, 
 function studentResult(answer) {
   if (answer.manualGrading && answer.isCorrect === null) return answer.answered ? 'Awaiting marking' : 'Not answered';
   if (!answer.answered) return 'Not answered';
+  if (answer.partial) return `Part marks (${answer.marks} of ${answer.maxMarks})`;
   if (answer.manualGrading) return answer.isCorrect ? 'Correct (marked)' : 'Incorrect (marked)';
   return answer.isCorrect ? 'Correct' : 'Incorrect';
 }
@@ -465,6 +576,7 @@ const resultTone = (answer) => {
   if (answer.manualGrading && answer.answered && answer.isCorrect === null) return 'pending';
   if (!answer.answered) return 'blank';
   if (answer.isCorrect === null) return 'pending';
+  if (answer.partial) return 'partial';
   return answer.isCorrect ? 'correct' : 'wrong';
 };
 
@@ -533,7 +645,7 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
   sheet.getRow(3).height = 8;
 
   const final = summary.ungraded === 0;
-  tile(sheet, 'A', 'B', 'Score', `${summary.score} / ${summary.total}`, 'brand');
+  tile(sheet, 'A', 'B', 'Marks', `${summary.score} / ${summary.totalMarks ?? summary.total}`, 'brand');
   tile(sheet, 'C', 'C', 'Correct', summary.correct, 'correct');
   tile(sheet, 'D', 'D', 'Incorrect', summary.incorrect, 'wrong');
   tile(sheet, 'E', 'E', 'Not answered', summary.unanswered, 'blank');
@@ -567,7 +679,7 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
   const headerRowNumber = 7 + details.length + 1;
   sheet.getRow(headerRowNumber - 1).height = 10;
   const headerRow = sheet.getRow(headerRowNumber);
-  headerRow.values = ['Q', 'Type', 'Question', 'Your answer', 'Correct answer', 'Result', 'Mark'];
+  headerRow.values = ['Q', 'Type', 'Question', 'Your answer', 'Correct answer', 'Result', 'Marks'];
   styleHeader(headerRow);
   answers.forEach((answer) => {
     const tone = resultTone(answer);
@@ -578,7 +690,7 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
       answer.answered ? answer.selectedAnswer : '—',
       answer.manualGrading ? 'Marked by your teacher' : answer.correctAnswer,
       studentResult(answer),
-      answer.isCorrect === null ? '…' : answer.isCorrect ? 1 : 0
+      answer.marks === null || answer.marks === undefined ? '…' : `${answer.marks} / ${answer.maxMarks}`
     ]);
     [6, 7].forEach((column) => {
       paint(row.getCell(column), FILL[tone]);

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { SESSION_ENDED_EVENT, api, post } from './lib/api.js';
+import { SESSION_ENDED_EVENT, api, isRetryable, post } from './lib/api.js';
 import { useAppUpdate, useExamInProgress } from './lib/useAppUpdate.js';
 import { SiteHeader } from './components/SiteHeader.jsx';
 import { TOAST_FADE_MS, Toast, toastDuration } from './components/Toast.jsx';
@@ -65,7 +65,25 @@ export default function App() {
     } catch (error) { showToast(error.message); }
   }, [auth, go, showToast]);
 
-  useEffect(() => { refreshAuth().catch((error) => showToast(error.message)); }, [refreshAuth, showToast]);
+  useEffect(() => {
+    refreshAuth().catch((error) => {
+      // Offline on a test link (a reload mid-test): the paper this device
+      // holds still opens (StudentScreen); the account is asked for again
+      // once the connection is back.
+      if (isRetryable(error) && currentRoute().test) setAuth((current) => current || { user: null, offline: true });
+      showToast(error.message);
+    });
+  }, [refreshAuth, showToast]);
+  useEffect(() => {
+    if (!auth?.offline) return undefined;
+    const retry = () => { refreshAuth().catch(() => {}); };
+    window.addEventListener('online', retry);
+    const timer = window.setInterval(retry, 15_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.clearInterval(timer);
+    };
+  }, [auth?.offline, refreshAuth]);
 
   useEffect(() => {
     const onPopState = () => setRoute(currentRoute());
@@ -111,8 +129,10 @@ export default function App() {
   useEffect(() => {
     document.body.dataset.area = route.test ? 'test' : 'portal';
     const titles = { attendance: 'Attendance', users: 'Users', tests: 'Tests', create: 'New test', edit: 'Edit test' };
-    document.title = pageTitle(route.page === 'results' ? 'My results' : route.page === 'window-check' ? 'Browser check' : titles[route.admin] || (route.attend ? 'Attendance' : null));
-  }, [route]);
+    // Faculty reach the results page as their own test attempts.
+    const results = auth?.user?.role === 'student' ? 'My results' : 'My test attempts';
+    document.title = pageTitle(route.page === 'results' ? results : route.page === 'window-check' ? 'Browser check' : titles[route.admin] || (route.attend ? 'Attendance' : null));
+  }, [route, auth?.user?.role]);
 
   const { updateAvailable, applyUpdate } = useAppUpdate();
 

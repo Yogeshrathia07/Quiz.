@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { countdown, dateTime, durationLabel } from '../../lib/format.js';
 import { useCountdown } from '../../lib/useCountdown.js';
+import { InfoTip } from '../../components/InfoTip.jsx';
 
 export function TestHeader({ test, showInstructions = true }) {
   return (
@@ -86,23 +87,31 @@ export function RegistrationPending({ test, registration, reload }) {
     <section className="join-card card">
       <TestHeader test={test}/>
       <p className="eyebrow" style={{ color: 'var(--warning)' }}>Registration pending</p>
-      <h2>Waiting for approval</h2>
-      <p>Your request was sent at {dateTime(registration.requestedAt)}. This page checks for the decision automatically.</p>
-      {registration.expiresAt && (
-        <p className="help">If it is not approved by {dateTime(registration.expiresAt)}, the request is withdrawn and you can send it again.</p>
-      )}
+      <div className="launch-title">
+        <h2>Waiting for approval</h2>
+        <InfoTip label="About your request">
+          Sent at {dateTime(registration.requestedAt)}. This page checks for the decision by itself.
+          {registration.expiresAt && ` If it is not approved by ${dateTime(registration.expiresAt)}, the request is withdrawn and you can send it again.`}
+        </InfoTip>
+      </div>
+      <p>Your teacher has to let you in. This page moves on by itself.</p>
       <button className="button button-secondary button-wide" onClick={reload}>Check now</button>
     </section>
   );
 }
 
-/** How the test ends, in one line a student can plan around. */
-export function EndLine({ test }) {
-  if (test.untimed) return <>No time limit — your instructor ends the test, which submits your paper.</>;
-  if (test.endMode === 'duration' && !test.isStarted) {
-    return <>You will have <strong>{durationLabel((test.durationMinutes || 0) * 60)}</strong> from the start. When time runs out, your paper is submitted automatically.</>;
+/** How the test ends, in one line a student can plan around; `brief` leaves out what happens then. */
+export function EndLine({ test, brief = false }) {
+  const then = brief ? '' : ' When time runs out, your paper is submitted automatically.';
+  if (test.untimed) return <>No time limit — your instructor ends the test{brief ? '' : ', which submits your paper'}.</>;
+  // Each student's own time: however late they begin, the whole duration is theirs.
+  if (test.endMode === 'each') {
+    return <>You get <strong>{durationLabel((test.durationMinutes || 0) * 60)}</strong> from when you press Begin.{then}</>;
   }
-  return <>The test ends at <strong>{dateTime(test.endsAt)}</strong> for everyone. When time runs out, your paper is submitted automatically.</>;
+  if (test.endMode === 'duration' && !test.isStarted) {
+    return <>You will have <strong>{durationLabel((test.durationMinutes || 0) * 60)}</strong> from the start.{then}</>;
+  }
+  return <>Ends at <strong>{dateTime(test.endsAt)}</strong> for everyone.{then}</>;
 }
 
 /**
@@ -158,7 +167,7 @@ export function PausedAttempt({ attempt, reload }) {
         <div><strong>{attempt.answeredQuestionCount}/{attempt.totalQuestions}</strong><span>answered</span></div>
         {leftMs !== null && <div><strong>{countdown(Math.round(leftMs / 1000))}</strong><span>left, not running</span></div>}
       </div>
-      <p className="help">Stay on this page. Your test carries on from here, with this time, the moment your teacher continues it.</p>
+      <p className="help">Stay on this page — it carries on by itself.</p>
     </section>
   );
 }
@@ -190,15 +199,16 @@ export function LockedAttempt({ attempt, reload }) {
         <div><strong>{attempt.timesLeft}</strong><span>times left the test</span></div>
         <div><strong>{attempt.timesLocked}</strong><span>times locked</span></div>
       </div>
-      <p className="help">
-        {attempt.unlocksAt
-          ? 'Stay on this page. Your test continues automatically when the timer ends.'
-          : 'You went past what this test allows. Tell your administrator — your test continues here the moment they approve it.'}
-        {allowance ? ` After that you get ${allowance} again before it locks.` : ''}
-        {' '}{attempt.strictTiming
-          ? 'This question’s timer is paused until you are back on it; the test’s own time keeps running.'
-          : 'Your test time keeps running while it is locked.'}
-        {' '}Every exit is recorded in your result.
+      <p className="help lock-line">
+        <span>{attempt.unlocksAt ? 'Stay on this page — it unlocks by itself.' : 'Tell your administrator. Your test continues here once they approve it.'}</span>
+        <InfoTip label="About the lock">
+          {attempt.unlocksAt ? 'Your test continues automatically when the timer ends.' : 'You went past what this test allows.'}
+          {allowance ? ` After the unlock you get ${allowance} again before it locks.` : ''}
+          {' '}{attempt.strictTiming
+            ? 'This question’s timer is paused until you are back on it; the test’s own time keeps running.'
+            : 'Your test time keeps running while it is locked.'}
+          {' '}Every exit is recorded in your result.
+        </InfoTip>
       </p>
     </section>
   );

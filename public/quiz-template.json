@@ -8,6 +8,11 @@
     "msq": 60,
     "short": 120
   },
+  "typeMarks": {
+    "mcq": 1,
+    "msq": 2,
+    "short": 5
+  },
   "questionMix": {
     "mcq": 2,
     "msq": 1,
@@ -48,7 +53,8 @@
       ],
       "correctOptions": [
         "1"
-      ]
+      ],
+      "marks": 2
     },
     {
       "prompt": "Which of these are valid HTTP methods?\nSelect **every** correct answer.",

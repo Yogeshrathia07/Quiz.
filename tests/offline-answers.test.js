@@ -144,6 +144,16 @@ test('a compact lock state removes question text until a full refresh', () => {
   assert.equal(merged.isLocked, true);
 });
 
+test('strict timing moving on during an answer makes the next look fetch the paper', () => {
+  const current = { id: 'abc', revision: 'r1', strict: { index: 1 }, questions: [paper[0]] };
+  const merged = mergeAttemptState(current, { state: { revision: 'r2', strict: { index: 2 } } });
+  assert.equal(merged.questionsStale, true);
+  assert.equal(merged.revision, undefined, 'never "unchanged" for a paper holding the wrong question');
+  const same = mergeAttemptState(current, { state: { revision: 'r2', strict: { index: 1 } } });
+  assert.equal(same.questionsStale, undefined);
+  assert.equal(same.revision, 'r2');
+});
+
 test('network retry grows exponentially, jitters and stays capped', () => {
   assert.equal(retryDelay(0, 0), 500);
   assert.equal(retryDelay(1, 1), 2_000);

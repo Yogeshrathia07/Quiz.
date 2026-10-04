@@ -8,7 +8,11 @@
  *
  * The server stays the authority. Anything it rejects - a frozen question, a
  * closed test - is dropped from the queue and its answer reverts to whatever
- * the server says. This never invents an answer the server refused.
+ * the server says. This never invents an answer the server refused. Each
+ * answer carries when it was made (`madeAt`, on the server's clock), so one
+ * held here past its time by a lost connection can still be taken, marked
+ * late for the teacher (src/domain/late-answers.js). A lock, a pause or the
+ * venue check only holds an answer back; it is never dropped for them.
  */
 
 const KEY = (attemptId) => `quiz-offline:${attemptId}`;
@@ -272,6 +276,14 @@ export function mergeAttemptState(current, response) {
   if (!current || !response?.state) return current;
   const next = { ...current, ...response.state };
   if (next.status === 'submitted' || next.isLocked || next.paused) delete next.questions;
+  // Strict timing moved on meanwhile (a question closed by its clock, an
+  // answer taken late): the question held here is not the open one any more.
+  // Its revision is forgotten, so the next look fetches the paper instead of
+  // hearing "unchanged".
+  else if (current.strict && response.state.strict && current.strict.index !== response.state.strict.index) {
+    next.revision = undefined;
+    next.questionsStale = true;
+  }
   return next;
 }
 

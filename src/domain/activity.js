@@ -41,6 +41,17 @@ function answerEntries(test, attempt) {
     const detail = question?.manualGrading
       ? `Wrote ${entry.textLength || 0} character${entry.textLength === 1 ? '' : 's'}`
       : optionTexts(question, entry.selectedOptions).join(' • ');
+    // Held on the device by a lost connection (domain/late-answers.js): placed
+    // when the device says it was made, and marked with when it arrived.
+    if (entry.late) {
+      return {
+        at: entry.late.madeAt || entry.at,
+        kind: 'late',
+        label: `${changed ? 'Changed answer to' : 'Answered'} Q${number} (arrived late)`,
+        detail: [detail, 'time is when the device says it was made'].filter(Boolean).join(' · '),
+        late: { madeAt: new Date(entry.late.madeAt || entry.at).toISOString(), arrivedAt: new Date(entry.at).toISOString() }
+      };
+    }
     return { at: entry.at, kind: 'answer', label: `${changed ? 'Changed answer to' : 'Answered'} Q${number}`, detail };
   });
 }
@@ -50,7 +61,9 @@ const EVENT_KIND = {
   fullscreen_exit: 'exit', fullscreen_return: 'return', integrity_flag: 'flag',
   attempt_locked: 'lock', attempt_warned: 'flag', attempt_resumed: 'lock', attempt_restarted: 'restart',
   teacher_paused: 'lock', teacher_continued: 'lock', teacher_submitted: 'restart', teacher_reopened: 'restart',
-  device_kind_changed: 'flag'
+  device_kind_changed: 'flag',
+  // Noted for the teacher, never counted as leaving.
+  connection_lost: 'offline', late_answer: 'late'
 };
 
 /** One student's whole test, oldest first. */

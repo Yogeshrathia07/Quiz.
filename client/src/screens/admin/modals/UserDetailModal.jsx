@@ -4,15 +4,9 @@ import { durationLabel, shortDateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
 import { Ban, ChevronRight, CircleCheck, Download, Pencil, Trash2 } from 'lucide-react';
 import { StudentAnalysisModal } from './StudentAnalysisModal.jsx';
-import { InfoPill, StatusPill } from '../../../components/StatusPill.jsx';
+import { InfoPill, StatusPill, attemptLabel } from '../../../components/StatusPill.jsx';
 
 const userPath = (email) => `/api/admin/users/${encodeURIComponent(email)}`;
-
-function attemptLabel(result) {
-  if (result.registrationStatus === 'rejected') return 'rejected';
-  if (result.registrationStatus === 'pending') return 'pending';
-  return result.attemptStatus || 'not_started';
-}
 
 // The date input is expressed in the administrator's local calendar day.
 // Converting the stored ISO time the same way prevents an evening test from
@@ -226,7 +220,7 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
                 </span>
                 <StatusPill status={attemptLabel(result)}/>
                 <span className="user-test-score">
-                  {result.score === null ? '—' : `${result.score}/${result.totalQuestions}`}
+                  {result.score === null ? '—' : `${result.score}/${result.totalMarks ?? result.totalQuestions}`}
                   {result.pendingManual > 0 && <small>{result.pendingManual} to mark</small>}
                 </span>
                 <ChevronRight size={16} className="user-test-go" aria-hidden="true"/>

@@ -5,6 +5,7 @@ import { asInteger } from '../lib/crypto.js';
 import { dateMs } from '../lib/time.js';
 import { ESTIMATE_SECONDS, QUESTION_DRAWS, QUESTION_LAYOUTS, estimateSeconds, questionMixCount, questionMixFrom } from './question-bank.js';
 import { buildTypeSeconds, secondsOrNull, strictEstimateSeconds } from './strict-timing.js';
+import { buildTypeMarks, marksField } from './marks.js';
 import { END_MODES } from './attempt-rules.js';
 
 export const RESULT_RELEASE_MODES = ['instant', 'after_quiz', 'admin'];
@@ -61,11 +62,12 @@ export function buildSchedule(raw, estimatedSeconds) {
   const endMode = END_MODES.includes(raw.endMode) ? raw.endMode : raw.untimed === true ? 'manual' : 'at';
 
   if (endMode === 'manual') return { startMode, opensAtMs, endMode, endsAtMs: null, durationMinutes: null };
-  if (endMode === 'duration') {
+  if (endMode === 'duration' || endMode === 'each') {
     const durationMinutes = asInteger(raw.durationMinutes, 1, MAX_DURATION_MINUTES);
     if (durationMinutes === null) throw new PublicTestError(400, 'Choose a test duration between 1 minute and 24 hours.');
     // A scheduled start already fixes the end; a manual one fixes it on Start.
-    const endsAtMs = startMode === 'scheduled' ? opensAtMs + durationMinutes * 60_000 : null;
+    // Each student's own time has no shared end at all.
+    const endsAtMs = endMode === 'duration' && startMode === 'scheduled' ? opensAtMs + durationMinutes * 60_000 : null;
     return { startMode, opensAtMs, endMode, endsAtMs, durationMinutes };
   }
   // No end time given (an older payload, or a JSON import): fall back to the
@@ -96,9 +98,10 @@ function buildQuestion(rawQuestion, index) {
   if (prompt.length < 3 || prompt.length > 3000) throw new PublicTestError(400, `Question ${index + 1} must be between 3 and 3000 characters.`);
   const type = ['short', 'msq', 'mcq'].includes(rawQuestion.type) ? rawQuestion.type : null;
   if (!type) throw new PublicTestError(400, `Question ${index + 1} has an invalid type.`);
-  // Its own time under strict timing: null follows the test's default for its type.
+  // Its own time under strict timing, and its own marks: null follows the test's default for its type.
   const timeSeconds = secondsOrNull(rawQuestion.timeSeconds, `Question ${index + 1}'s time`);
-  if (type === 'short') return { prompt, type, options: [], correctOptions: [], timeSeconds };
+  const marks = marksField(rawQuestion.marks, `Question ${index + 1}'s marks`);
+  if (type === 'short') return { prompt, type, options: [], correctOptions: [], timeSeconds, marks };
 
   if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length < 2 || rawQuestion.options.length > 8) {
     throw new PublicTestError(400, `Question ${index + 1} needs 2 to 8 answer options.`);
@@ -109,7 +112,7 @@ function buildQuestion(rawQuestion, index) {
     throw new PublicTestError(400, `Choose valid correct answer(s) for question ${index + 1}.`);
   }
   if (type === 'mcq' && correctOptions.length !== 1) throw new PublicTestError(400, `Question ${index + 1} is single-choice, so select one correct answer.`);
-  return { prompt, type, options, correctOptions, timeSeconds };
+  return { prompt, type, options, correctOptions, timeSeconds, marks };
 }
 
 /**
@@ -149,6 +152,8 @@ export function buildTest(raw) {
   // Tests saved before this choice existed drew at random, and still do.
   const questionDraw = QUESTION_DRAWS.includes(raw.questionDraw) ? raw.questionDraw : 'random';
   const typeSeconds = buildTypeSeconds(raw.typeSeconds);
+  // What each question type is worth unless a question says otherwise (domain/marks.js).
+  const typeMarks = buildTypeMarks(raw.typeMarks);
   const questionLayout = strictTiming ? 'one' : QUESTION_LAYOUTS.includes(raw.questionLayout) ? raw.questionLayout : 'one';
   const resultReleaseMode = RESULT_RELEASE_MODES.includes(raw.resultReleaseMode) ? raw.resultReleaseMode : 'instant';
 
@@ -202,6 +207,7 @@ export function buildTest(raw) {
     strictTiming,
     strictNext,
     typeSeconds,
+    typeMarks,
     questionDraw,
     resultReleaseMode,
     locationRequired,

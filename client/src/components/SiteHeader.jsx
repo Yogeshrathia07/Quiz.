@@ -11,10 +11,11 @@ const initials = (name) => String(name || '?')
   .join('') || '?';
 
 /** Which link the current page belongs to. */
-function activeLink(route) {
+function activeLink(route, isAdmin) {
   if (route.admin === 'attendance') return 'attendance';
   if (route.admin === 'users') return 'users';
-  if (route.page === 'results') return 'results';
+  // A student's results are their Home; a teacher's own attempts sit in the account menu.
+  if (route.page === 'results') return isAdmin ? null : 'home';
   if (route.test || route.attend) return null;
   // The quiz list, and a test's dashboard, creator or editor: all the Tests section.
   if (route.admin && route.admin !== 'portal') return 'tests';
@@ -50,14 +51,17 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
   const user = auth?.user || null;
   const isAdmin = user?.role === 'admin' && !user.isGuest;
 
+  // Faculty do everything with a test - marking and its results too - under
+  // Tests; a student's Home is their results.
   const links = [
     { id: 'home', url: '/', label: 'Home', icon: House },
     isAdmin && { id: 'tests', url: '/?admin=tests', label: 'Tests', icon: ClipboardList },
     isAdmin && { id: 'attendance', url: '/?admin=attendance', label: 'Attendance', icon: UserCheck },
-    isAdmin && { id: 'results', url: '/?page=results', label: 'Results', icon: ChartColumn },
     user?.canManageUsers && { id: 'users', url: '/?admin=users', label: 'Users', icon: Users }
   ].filter(Boolean);
-  const active = activeLink(route);
+  const active = activeLink(route, isAdmin);
+  // Tests a teacher sat themselves - a colleague's, or their own to try it.
+  const attemptsUrl = '/?page=results';
   // A guest's password is not theirs to change, and a test page keeps the student on the test.
   const canChangePassword = user && !user.isGuest && !route.test;
 
@@ -101,6 +105,7 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
                 <strong>{user.name.replace(/^Guest:\s*/, '')}</strong>
                 <span>{subtitle}</span>
               </div>
+              {isAdmin && <button type="button" role="menuitem" onClick={run(() => go(attemptsUrl))}><ChartColumn size={16} aria-hidden="true"/>My test attempts</button>}
               {canChangePassword && <button type="button" role="menuitem" onClick={run(onChangePassword)}><KeyRound size={16} aria-hidden="true"/>Change password</button>}
               <button type="button" role="menuitem" className="is-danger" onClick={run(onSignOut)}><LogOut size={16} aria-hidden="true"/>Sign out</button>
             </div>
@@ -132,6 +137,7 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
             </div>
           </div>
           <div className="nav-panel-actions">
+            {isAdmin && <button className="button button-secondary" type="button" onClick={run(() => go(attemptsUrl))}>My test attempts</button>}
             {canChangePassword && <button className="button button-secondary" type="button" onClick={run(onChangePassword)}>Change password</button>}
             <button className="button button-danger" type="button" onClick={run(onSignOut)}>Sign out</button>
           </div>

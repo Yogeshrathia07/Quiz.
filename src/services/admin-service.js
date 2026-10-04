@@ -6,7 +6,9 @@ import { dateMs, iso, now } from '../lib/time.js';
 import { publicTest, responseDetails, scoreSummary, timeTakenSeconds } from '../domain/presenters.js';
 import { isGuestAccount } from '../auth/portal-auth.js';
 import { questionType } from '../domain/question-bank.js';
-import { END_GRACE_MS, attemptDeadlineMs, endModeOf, isTimeOver, isUntimed, testDeadlineMs } from '../domain/attempt-rules.js';
+import { automaticMarks, earnedMarks, paperMarks, paperScore, questionMarks, roundMarks } from '../domain/marks.js';
+import { refuseIfFrozen } from '../domain/freeze.js';
+import { END_GRACE_MS, attemptDeadlineMs, endModeOf, isPerStudent, isTimeOver, isUntimed, ownBaseDeadlineMs } from '../domain/attempt-rules.js';
 import { isStrict } from '../domain/strict-timing.js';
 import { DEVICE_KINDS, DEVICE_NOTES, deviceFactLine, deviceFits, deviceRuleOf, kindWord } from '../domain/device.js';
 import {
@@ -46,7 +48,7 @@ const registrationAccountType = (registration) => registration.accountType
 /** How long a paper runs, in minutes: a set duration, the window to a fixed end, or the estimate. */
 function runMinutes(test) {
   if (isUntimed(test)) return null;
-  if (endModeOf(test) === 'duration' && test.durationMinutes) return Number(test.durationMinutes);
+  if (['duration', 'each'].includes(endModeOf(test)) && test.durationMinutes) return Number(test.durationMinutes);
   if (test.windowSeconds) return Math.round(test.windowSeconds / 60);
   return test.estimatedSeconds ? Math.max(1, Math.round(test.estimatedSeconds / 60)) : null;
 }
@@ -61,14 +63,15 @@ export async function adminTests(req) {
   const students = docs.length
     ? await registrationsCollection().find(
       { testCode: { $in: docs.map((test) => test.code) } },
-      { projection: { _id: 0, testCode: 1, status: 1, 'attempt.status': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1 } }
+      { projection: { _id: 0, testCode: 1, status: 1, 'attempt.status': 1, 'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1 } }
     ).toArray()
     : [];
   return docs.map((test) => {
     const registrations = students.filter((entry) => entry.testCode === test.code);
     const submitted = registrations.filter((entry) => entry.attempt?.status === 'submitted');
+    // Each paper's marks out of its own full marks (domain/marks.js).
     const percents = submitted
-      .map((entry) => scoreSummary(entry))
+      .map((entry) => scoreSummary(entry, test))
       .filter((summary) => summary.total > 0)
       .map((summary) => (summary.score / summary.total) * 100);
     return {
@@ -76,7 +79,11 @@ export async function adminTests(req) {
       registrationCount: registrations.length,
       pendingCount: registrations.filter((entry) => entry.status === 'pending').length,
       startedCount: registrations.filter((entry) => entry.attempt).length,
+      // Approved but never began: not started yet while it runs, missed once it has ended.
+      notStartedCount: registrations.filter((entry) => entry.status === 'approved' && !entry.attempt).length,
       submittedCount: submitted.length,
+      // Handed in with a written answer nobody has marked yet (as on the home page).
+      toMarkCount: submitted.filter((entry) => (entry.attempt.answers || []).some((answer) => answer.isCorrect === null && answer.answeredAt)).length,
       // Marks still to be given by hand count as zero until they are.
       averageScore: percents.length ? Math.round(percents.reduce((sum, value) => sum + value, 0) / percents.length) : null,
       runMinutes: runMinutes(test),
@@ -109,9 +116,9 @@ export async function duplicateTest(req, code) {
     opensAt: null,
     endMode,
     endsAt: null,
-    durationMinutes: endMode === 'duration' ? (test.durationMinutes || runMinutes(test) || 30) : test.durationMinutes ?? null,
+    durationMinutes: endMode === 'duration' || endMode === 'each' ? (test.durationMinutes || runMinutes(test) || 30) : test.durationMinutes ?? null,
     isStarted: false, startedAt: null, isClosed: false, closedAt: null, closedAutomatically: false,
-    paperSlots: 0, resultsReleasedAt: null, outages: [],
+    paperSlots: 0, resultsReleasedAt: null, releaseUnmarked: false, resultsFrozenAt: null, outages: [],
     createdAt, updatedAt: createdAt, archivedAt: null
   };
   await tests().insertOne(doc);
@@ -138,7 +145,7 @@ const DASHBOARD_REGISTRATION_PROJECTION = {
   _id: 0,
   id: 1, fullName: 1, collegeEmail: 1, sapId: 1, accountType: 1, status: 1,
   requestedAt: 1, decidedAt: 1, exitedAt: 1, deviceSwitches: 1,
-  locationVerifiedAt: 1, locationDistanceMeters: 1, locationOverride: 1,
+  locationVerifiedAt: 1, locationDistanceMeters: 1, locationOverride: 1, locationProblem: 1,
   device: 1, deviceLog: 1, deviceOverride: 1,
   'attempt.id': 1, 'attempt.status': 1, 'attempt.windowCheck': 1, 'attempt.device': 1,
   'attempt.startedAt': 1, 'attempt.submittedAt': 1, 'attempt.submittedBy': 1,
@@ -217,14 +224,18 @@ function dashboardRegistration(test, registration, manualQuestionIds) {
     deadlineAt: attempt ? iso(test.endsAt ?? test.closesAt) : null,
     answeredCount: answers.filter((answer) => answer.answeredAt).length,
     totalQuestions: attempt?.questions?.length || 0,
-    score: attempt?.status === 'submitted'
-      ? answers.reduce((total, answer) => total + (Number(answer.isCorrect) || 0), 0)
-      : null,
+    // Marks earned, out of the paper's full marks (domain/marks.js).
+    score: attempt?.status === 'submitted' ? paperScore(attempt) : null,
+    totalMarks: attempt ? paperMarks(test, attempt) : null,
     manualTotal: manualAnswers.length,
     manualGraded: manualAnswers.filter((answer) => answer.isCorrect !== null).length,
     locationVerifiedAt: iso(registration.locationVerifiedAt),
     locationDistanceMeters: registration.locationDistanceMeters,
     locationOverride: Boolean(registration.locationOverride),
+    // Why their page could not share a location at Begin, if it could not (attempt-service verifyStartLocation).
+    locationProblem: registration.locationProblem
+      ? { reason: registration.locationProblem.reason, asked: registration.locationProblem.asked ?? null, at: iso(registration.locationProblem.at), accuracyMeters: registration.locationProblem.accuracyMeters ?? null }
+      : null,
     locationChecks: attempt?.locationChecks || { inRange: 0, outOfRange: 0, inconclusive: 0, last: null },
     venueClosed: attempt?.status === 'in_progress' ? venueClosed(test, registration, attempt) : null,
     fullscreenExitCount: attempt?.fullscreenExitCount || 0,
@@ -532,8 +543,12 @@ function dashboardClassCountPipeline(code, manualQuestionIds) {
           equals('attempt.status', 'in_progress'),
           joinExpressionOr([isPresent('attempt.pausedAt'), { $gt: [{ $ifNull: [field('attempt.extraMs'), 0] }, 0] }])
         ]),
-        handedInByClose: joinExpressionAnd([equals('attempt.status', 'submitted'), equals('attempt.submittedBy', 'admin')])
-      })
+        handedInByClose: joinExpressionAnd([equals('attempt.status', 'submitted'), equals('attempt.submittedBy', 'admin')]),
+        writing: equals('attempt.status', 'in_progress')
+      }),
+      // Each student's own time: the latest Begin (with time given back) among
+      // papers still being written - the last of them ends a duration later.
+      lastOwnBase: { $max: { $cond: [equals('attempt.status', 'in_progress'), { $add: ['$attempt.startedAt', { $ifNull: ['$attempt.extraMs', 0] }] }, null] } }
     }
   }]);
 }
@@ -569,8 +584,12 @@ function dashboardPagePipeline(baseMatch, selectedMatch, page) {
   ];
 }
 
-function asDashboardCounts(result = {}) {
+function asDashboardCounts(result = {}, test = null) {
+  const lastOwnBase = result.lastOwnBase ? dateMs(result.lastOwnBase) : NaN;
   return {
+    writing: Number(result.writing) || 0,
+    // When the last paper still being written runs out of its own time (each student's own time only).
+    lastOwnEndAt: test && isPerStudent(test) && Number.isFinite(lastOwnBase) ? iso(lastOwnBase + Number(test.durationMinutes) * 60_000) : null,
     total: Number(result.total) || 0,
     pending: Number(result.pending) || 0,
     started: Number(result.started) || 0,
@@ -609,7 +628,7 @@ async function pagedAdminDashboard(test, rawPage, manualQuestionIds) {
   const dashboard = dashboardShell(test, registrations, manualQuestionIds);
   return {
     ...dashboard,
-    counts: asDashboardCounts(wholeCounts[0]),
+    counts: asDashboardCounts(wholeCounts[0], test),
     filterCounts,
     pagination: { page: resolvedPage, pageSize: page.pageSize, total, unfilteredTotal, pages, section: page.section }
   };
@@ -643,8 +662,11 @@ function dashboardFilter(row, id) {
   return true;
 }
 
-export function dashboardCounts(rows) {
+export function dashboardCounts(rows, perStudent = false) {
+  const ends = rows.filter((row) => row.attemptStatus === 'in_progress' && row.ownDeadlineAt).map((row) => Date.parse(row.ownDeadlineAt));
   return {
+    writing: rows.filter((row) => row.attemptStatus === 'in_progress').length,
+    lastOwnEndAt: perStudent && ends.length ? new Date(Math.max(...ends)).toISOString() : null,
     total: rows.length,
     pending: rows.filter((row) => row.status === 'pending').length,
     started: rows.filter((row) => row.attemptStatus).length,
@@ -698,7 +720,7 @@ export function paginateDashboard(dashboard, raw = {}) {
   return {
     ...dashboard,
     registrations: filtered.slice(start, start + pageSize),
-    counts: dashboardCounts(all),
+    counts: dashboardCounts(all, dashboard.test?.endMode === 'each'),
     filterCounts: Object.fromEntries(relevantIds.map((id) => [id, searched.filter((row) => dashboardFilter(row, id)).length])),
     pagination: { page, pageSize, total: filtered.length, unfilteredTotal: base.length, pages, section }
   };
@@ -726,6 +748,8 @@ export async function adminExportData(req, code) {
     prompt: question.prompt,
     options: question.options || [],
     manualGrading: Boolean(question.manualGrading),
+    // What it is worth: the Marks sheet's "out of" row.
+    maxMarks: questionMarks(test, question),
     // An older version kept for the papers that were given it.
     retired: Boolean(question.retired),
     correctAnswer: question.manualGrading
@@ -811,7 +835,7 @@ function analysisOf(test, registration) {
       sapId: registration.sapId, status: registration.status
     },
     attempt: attempt
-      ? { id: attempt.id, status: attempt.status, startedAt: iso(attempt.startedAt), submittedAt: iso(attempt.submittedAt), ...scoreSummary(registration) }
+      ? { id: attempt.id, status: attempt.status, startedAt: iso(attempt.startedAt), submittedAt: iso(attempt.submittedAt), ...scoreSummary(registration, test) }
       : null,
     integrity: attempt
       ? {
@@ -932,6 +956,8 @@ export async function manualReview(req, code, registrationId) {
       questionNumber: ((attempt.questions || []).find((entry) => entry.questionId === answer.questionId)?.questionIndex ?? 0) + 1,
       prompt: manualQuestions.get(answer.questionId).prompt,
       answerText: answer.answerText || '',
+      marks: earnedMarks(answer),
+      maxMarks: questionMarks(test, manualQuestions.get(answer.questionId)),
       isCorrect: answer.isCorrect === null ? null : Boolean(answer.isCorrect)
     }))
     .sort((a, b) => a.questionNumber - b.questionNumber);
@@ -943,25 +969,136 @@ export async function manualReview(req, code, registrationId) {
   };
 }
 
-export async function gradeManualAnswer(req, code, registrationId, raw) {
+/**
+ * The update that gives one answer its mark. A short answer takes the mark as
+ * given. A choice answer takes it as the teacher's own (`marksOverride`), so
+ * re-marking leaves it be - unless it is the automatic mark, which is the
+ * automatic marking again; `{ auto: true }` goes back to that.
+ */
+export function markUpdate(test, question, answer, raw = {}) {
+  const worth = questionMarks(test, question);
+  const automatic = automaticMarks(test, question, answer);
+  if (raw.auto === true) {
+    if (automatic === null) throw new PublicTestError(400, 'A short answer has no automatic mark: give it one.');
+    return { set: automatic, override: false };
+  }
+  // Marks out of what the question is worth (`marks`); `isCorrect` true/false
+  // - from before marks existed - is full marks or none.
+  const marks = raw.marks !== undefined ? markWithin(raw.marks, worth)
+    : raw.isCorrect === true || raw.isCorrect === 1 || raw.isCorrect === '1' ? worth
+      : raw.isCorrect === false || raw.isCorrect === 0 || raw.isCorrect === '0' ? 0 : null;
+  if (marks === null) throw new PublicTestError(400, `Give a mark from 0 to ${worth}.`);
+  return { set: marks, override: automatic !== null && marks !== automatic };
+}
+
+/** One answer's mark written: `$[ans]` is the answer, by its question. */
+export const markWrite = (update, at = 'ans') => ({
+  $set: { [`attempt.answers.$[${at}].isCorrect`]: update.set, ...(update.override ? { [`attempt.answers.$[${at}].marksOverride`]: true } : {}) },
+  ...(update.override ? {} : { $unset: { [`attempt.answers.$[${at}].marksOverride`]: '' } })
+});
+
+/** Any answer on a handed-in paper given its mark, by hand: the paper as it now stands. */
+export async function setAnswerMarks(req, code, registrationId, raw = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+  refuseIfFrozen(test, 'change a mark');
   const attempt = registration.attempt;
   if (!attempt) throw new PublicTestError(404, 'This student has not started an attempt yet.');
-  if (attempt.status !== 'submitted') throw new PublicTestError(409, 'Manual answers can be marked after the student submits the test.');
-
+  if (attempt.status !== 'submitted') throw new PublicTestError(409, 'Marks can be given once the student hands the paper in.');
   const questionId = asInteger(raw?.questionId, 1, Number.MAX_SAFE_INTEGER);
-  const isCorrect = raw?.isCorrect === true || raw?.isCorrect === 1 || raw?.isCorrect === '1' ? 1
-    : raw?.isCorrect === false || raw?.isCorrect === 0 || raw?.isCorrect === '0' ? 0 : null;
-  if (questionId === null || isCorrect === null) throw new PublicTestError(400, 'Choose a valid manual-marking decision.');
+  const question = (test.questions || []).find((entry) => entry.id === questionId);
+  const answer = (attempt.answers || []).find((entry) => entry.questionId === questionId);
+  if (questionId === null || !question || !answer) throw new PublicTestError(404, 'That question is not on this paper.');
 
-  const question = (test.questions || []).find((entry) => entry.id === questionId && entry.manualGrading);
-  const hasAnswer = (attempt.answers || []).some((answer) => answer.questionId === questionId);
-  if (!question || !hasAnswer) throw new PublicTestError(404, 'Short-answer question not found for this attempt.');
+  await updateRegistration(test.code, registration.id, markWrite(markUpdate(test, question, answer, raw || {})), { arrayFilters: [{ 'ans.questionId': questionId }] });
+  const [fresh] = await registrationsOf(test.code, { id: registration.id });
+  return { paper: reviewPaper(test, fresh) };
+}
 
-  await updateRegistration(test.code, registration.id,
-    { $set: { 'attempt.answers.$[ans].isCorrect': isCorrect } },
-    { arrayFilters: [{ 'ans.questionId': questionId }] });
+/** A short answer marked by hand (the paper analysis): its marks out of what it is worth. */
+export async function gradeManualAnswer(req, code, registrationId, raw) {
+  await setAnswerMarks(req, code, registrationId, raw);
   return manualReview(req, code, registrationId);
+}
+
+/**
+ * One handed-in paper for the result review: each answer in the paper's own
+ * order, with the marks it earned, what the automatic marking gives it, and
+ * whether the teacher changed that.
+ */
+function reviewPaper(test, registration) {
+  const attempt = registration.attempt;
+  const bank = new Map((test.questions || []).map((question) => [question.id, question]));
+  const answers = new Map((attempt.answers || []).map((answer) => [answer.questionId, answer]));
+  return {
+    registrationId: registration.id,
+    name: registration.fullName,
+    sapId: registration.sapId,
+    email: registration.collegeEmail,
+    accountType: registrationAccountType(registration),
+    submittedAt: iso(attempt.submittedAt),
+    score: paperScore(attempt),
+    totalMarks: paperMarks(test, attempt),
+    answers: [...(attempt.questions || [])]
+      .sort((left, right) => left.questionIndex - right.questionIndex)
+      .map((assigned) => {
+        const question = bank.get(assigned.questionId);
+        if (!question) return null;
+        const answer = answers.get(assigned.questionId) || {};
+        return {
+          questionId: question.id,
+          position: assigned.questionIndex + 1,
+          selectedOptions: (answer.selectedOptions || []).map(String),
+          answerText: answer.answerText || '',
+          answered: Boolean(answer.answeredAt),
+          answeredAt: iso(answer.answeredAt),
+          marks: earnedMarks(answer),
+          maxMarks: questionMarks(test, question),
+          autoMarks: automaticMarks(test, question, answer),
+          overridden: Boolean(answer.marksOverride),
+          // Held on the device by a lost connection, taken after its time (domain/late-answers.js).
+          late: answer.late ? { madeAt: iso(answer.late.madeAt), arrivedAt: iso(answer.late.arrivedAt) } : null
+        };
+      })
+      .filter(Boolean)
+  };
+}
+
+/**
+ * Everything the result review needs: every question on a handed-in paper
+ * (in the bank's order, with its options and key) and every handed-in paper,
+ * by name - to go student by student, or question by question.
+ */
+export async function reviewData(req, code) {
+  const test = await requireOwnedTest(req, code);
+  const papers = (test.registrations || []).filter((registration) => registration.attempt?.status === 'submitted');
+  const used = new Set(papers.flatMap((registration) => (registration.attempt.questions || []).map((assigned) => assigned.questionId)));
+  return {
+    test: { code: test.code, title: test.title, frozen: Boolean(test.resultsFrozenAt) },
+    questions: (test.questions || [])
+      .map((question, index) => ({ question, number: index + 1 }))
+      .filter(({ question }) => used.has(question.id))
+      .map(({ question, number }) => ({
+        id: question.id,
+        number,
+        type: questionType(question),
+        prompt: question.prompt,
+        options: question.options || [],
+        correctOptions: (question.correctOptions || []).map(String),
+        manualGrading: Boolean(question.manualGrading),
+        maxMarks: questionMarks(test, question),
+        retired: Boolean(question.retired)
+      })),
+    papers: papers
+      .sort((left, right) => String(left.fullName || '').localeCompare(String(right.fullName || '')))
+      .map((registration) => reviewPaper(test, registration))
+  };
+}
+
+/** A mark from 0 to `worth`, to two places, or null. */
+function markWithin(value, worth) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 && number <= worth ? roundMarks(number) : null;
 }
 
 /* -------------------------------------------------------- attempt lifecycle */
@@ -1055,6 +1192,7 @@ const REOPEN_MIN_LEFT_MS = 60_000;
  */
 export async function reopenStudentPaper(req, code, registrationId, raw = {}, options = {}) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+  refuseIfFrozen(test, 'reopen a paper');
   const attempt = registration.attempt;
   if (!attempt) throw new PublicTestError(404, 'This student has not started yet.');
   if (attempt.status !== 'submitted') throw new PublicTestError(409, 'This paper is still open.');
@@ -1069,15 +1207,16 @@ export async function reopenStudentPaper(req, code, registrationId, raw = {}, op
   if (minutes === null) throw new PublicTestError(400, 'Add between 1 and 1440 minutes.');
 
   const at = now();
-  const shared = testDeadlineMs(test);
+  // The test's shared end - or, each student's own time, their Begin plus the duration.
+  const base = ownBaseDeadlineMs(test, attempt);
   let extraMs = Number(attempt.extraMs) || 0;
-  if (Number.isFinite(shared)) {
-    const ownEnd = shared + extraMs;
+  if (Number.isFinite(base)) {
+    const ownEnd = base + extraMs;
     const newEnd = minutes ? Math.max(ownEnd, at.getTime()) + minutes * 60_000 : ownEnd;
     if (newEnd - at.getTime() < REOPEN_MIN_LEFT_MS) {
       throw new PublicTestError(409, `${registration.fullName} has no time left. Add minutes for them to reopen the paper.`, 'NEEDS_TIME');
     }
-    extraMs = newEnd - shared;
+    extraMs = newEnd - base;
   }
 
   // Closed because its time ran out: open again, for this student.
@@ -1223,6 +1362,7 @@ export async function bulkAttemptAction(req, code, action, raw = {}, options = {
 export async function setTestEndTime(req, code, raw = {}, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
   if (test.isClosed) throw new PublicTestError(409, 'This test is complete. Reset it before running it again.');
+  if (isPerStudent(test)) return extendOwnTimes(req, code, test, raw, options);
 
   // Measured from the real start once there is one, else the planned start.
   const startMs = test.startedAt ? dateMs(test.startedAt) : test.opensAt ? dateMs(test.opensAt) : null;
@@ -1251,6 +1391,29 @@ export async function setTestEndTime(req, code, raw = {}, options = {}) {
   });
   const updated = await requireOwnedTest(req, code, { withStudents: false });
   return actionResult(req, code, updated, options.compact);
+}
+
+/**
+ * Each student's own time has no shared end to move: "+10 min" goes to every
+ * student still writing, counted from their own end - or from now, if theirs
+ * has already passed (a paused student's end runs on with the pause) - so the
+ * minutes are real. A student who begins later gets the full duration anyway.
+ */
+async function extendOwnTimes(req, code, test, raw, options) {
+  if (raw.addMinutes === undefined) {
+    throw new PublicTestError(400, 'Each student has their own end time: add minutes for everyone still writing instead.');
+  }
+  const minutes = asInteger(raw.addMinutes, 1, 24 * 60);
+  if (minutes === null) throw new PublicTestError(400, 'Add between 1 and 1440 minutes.');
+  const at = now();
+  const extra = { $ifNull: ['$attempt.extraMs', 0] };
+  const pausing = { $cond: [{ $ifNull: ['$attempt.pausedAt', false] }, { $subtract: [at, '$attempt.pausedAt'] }, 0] };
+  const ownEnd = { $add: ['$attempt.startedAt', Number(test.durationMinutes) * 60_000, extra, pausing] };
+  const given = await updateRegistrationsWhere(test.code, { 'attempt.status': 'in_progress' }, [{
+    $set: { 'attempt.extraMs': { $add: [extra, minutes * 60_000, { $max: [0, { $subtract: [at, ownEnd] }] }] } }
+  }]);
+  const updated = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, updated, options.compact, { affectedCount: given.modifiedCount });
 }
 
 export async function startTest(req, code, options = {}) {
@@ -1298,6 +1461,25 @@ export async function finishTest(test, { automatic = false, atMs = Date.now() } 
   return active.length + late.length;
 }
 
+/**
+ * Each student's own time (endMode 'each'): hands in every paper whose own
+ * end - and the grace for answers still arriving - has passed. The student's
+ * page does it at zero; this catches a closed tab. The test itself stays open
+ * until the admin's Close. A paused student's time is not running. `test`
+ * may come without its questions; they are read when a paper is handed in.
+ */
+export async function finishOwnTimes(test, atMs = Date.now()) {
+  if (!isPerStudent(test) || !test.isStarted || test.isClosed || !(Number(test.durationMinutes) > 0)) return 0;
+  // Nobody who began after this can be due: time given back only ever adds.
+  const latestStart = new Date(atMs - Number(test.durationMinutes) * 60_000 - END_GRACE_MS);
+  const candidates = await registrationsOf(test.code, { 'attempt.status': 'in_progress', 'attempt.startedAt': { $lte: latestStart } });
+  const due = candidates.filter(({ attempt }) => !attempt.pausedAt && atMs >= attemptDeadlineMs(test, attempt, atMs) + END_GRACE_MS);
+  if (!due.length) return 0;
+  const whole = test.questions ? test : await tests().findOne({ code: test.code });
+  await mapWithConcurrency(due, (registration) => finalizeAttempt(whole, registration, registration.attempt, { by: 'time' }));
+  return due.length;
+}
+
 export async function closeTest(req, code, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
   const completedAttemptCount = await finishTest(test);
@@ -1321,6 +1503,7 @@ const later = (field, ms) => ({ $cond: [{ $ifNull: [field, false] }, { $add: [fi
  */
 export async function reopenTest(req, code, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
+  refuseIfFrozen(test, 'resume the test');
   if (!test.isClosed) throw new PublicTestError(409, 'This test is not closed.');
   if (test.closedAutomatically) {
     throw new PublicTestError(409, 'This test ended because its time ran out, so there is nothing to resume. Restart quiz runs it again.');
@@ -1338,7 +1521,7 @@ export async function reopenTest(req, code, options = {}) {
     $set: {
       isClosed: false, closedAt: null, closedAutomatically: false,
       // Released marks are hidden again until it closes for real.
-      resultsReleasedAt: null,
+      resultsReleasedAt: null, releaseUnmarked: false,
       ...(timed ? { endsAt: { $add: ['$endsAt', gapMs] } } : {}),
       reopenings: { $concatArrays: [{ $ifNull: ['$reopenings', []] }, [{ closedAt: test.closedAt, reopenedAt, ms: gapMs }]] }
     }
@@ -1355,6 +1538,8 @@ export async function reopenTest(req, code, options = {}) {
       // Heard from now: the time closed is not the student leaving.
       'attempt.lastSeenAt': reopenedAt,
       'attempt.awaySince': null,
+      // Each student's own time: the time spent closed is theirs again.
+      ...(isPerStudent(test) ? { 'attempt.extraMs': { $add: [{ $ifNull: ['$attempt.extraMs', 0] }, gapMs] } } : {}),
       'attempt.answers': { $map: { input: { $ifNull: ['$attempt.answers', []] }, as: 'answer', in: { $mergeObjects: ['$$answer', { isCorrect: null }] } } },
       'attempt.strict': {
         $cond: [
@@ -1370,7 +1555,9 @@ export async function reopenTest(req, code, options = {}) {
 }
 
 export async function resetTest(req, code, options = {}) {
-  await clearTestRun(await requireOwnedTest(req, code, { withStudents: false }));
+  const test = await requireOwnedTest(req, code, { withStudents: false });
+  refuseIfFrozen(test, 'reset the test');
+  await clearTestRun(test);
   const reset = await requireOwnedTest(req, code, { withStudents: false });
   return actionResult(req, code, reset, options.compact);
 }
@@ -1390,7 +1577,7 @@ async function clearTestRun(test) {
       startMode,
       // The spread draw hands out its blocks from the start again.
       paperSlots: 0,
-      isStarted: false, startedAt: null, isClosed: false, closedAt: null, closedAutomatically: false, resultsReleasedAt: null,
+      isStarted: false, startedAt: null, isClosed: false, closedAt: null, closedAutomatically: false, resultsReleasedAt: null, releaseUnmarked: false,
       endsAt,
       outages: []
     }
@@ -1409,6 +1596,7 @@ async function clearTestRun(test) {
  */
 export async function restartQuiz(req, code, raw = {}, options = {}) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
+  refuseIfFrozen(test, 'restart the quiz');
   if (!test.isStarted && !test.isClosed) {
     throw new PublicTestError(409, 'This test has not started yet, so there is nothing to restart. Press Start instead.');
   }
@@ -1440,8 +1628,40 @@ export async function releaseResults(req, code, options = {}) {
   return actionResult(req, code, current, options.compact);
 }
 
+/**
+ * Marks shown before marking is finished: each student sees the score of what
+ * is marked so far, with their short answers still unmarked shown as not
+ * marked yet; each mark given later shows as it is given. Turning it on also
+ * releases marks held for the teacher's release. Off again, a paper with an
+ * unmarked answer waits for it as before.
+ */
+export async function setUnmarkedRelease(req, code, raw = {}, options = {}) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
+  const show = raw.show !== false;
+  const update = { releaseUnmarked: show };
+  if (show && test.resultReleaseMode === 'admin' && !test.resultsReleasedAt) update.resultsReleasedAt = now();
+  await updateTest(test.code, { $set: update });
+  const current = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, current, options.compact);
+}
+
+/**
+ * Freezes a closed test's results - its marks final (domain/freeze.js) - or
+ * unfreezes them. Only a closed test: while it runs, papers are still being
+ * handed in and marked.
+ */
+export async function setResultsFrozen(req, code, raw = {}, options = {}) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
+  const freeze = raw.frozen !== false;
+  if (freeze && !test.isClosed) throw new PublicTestError(409, 'Close the test before freezing its results: papers are still being handed in.');
+  await updateTest(test.code, { $set: { resultsFrozenAt: freeze ? (test.resultsFrozenAt || now()) : null } });
+  const current = await requireOwnedTest(req, code, { withStudents: false });
+  return actionResult(req, code, current, options.compact);
+}
+
 export async function deleteTest(req, code) {
   const test = await requireOwnedTest(req, code, { withStudents: false });
+  refuseIfFrozen(test, 'delete the test');
   await tests().deleteOne({ code: test.code });
   await invalidateTestCache(test.code);
   await deleteRegistrationsOf(test.code);

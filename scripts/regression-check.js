@@ -10,19 +10,21 @@ import { invalidateTestCache, testDocByCode } from '../src/data/test-repository.
 import { compensateForOutage } from '../src/services/outage.js';
 import { PublicTestError } from '../src/lib/errors.js';
 import { createTest, updateTestSettings } from '../src/services/test-service.js';
-import { beginGuestSession, getTest, registerForTest, studentProfile } from '../src/services/registration-service.js';
+import { beginGuestSession, getTest, myResults, registerForTest, studentProfile } from '../src/services/registration-service.js';
+import { homeSummary } from '../src/services/home-service.js';
 import {
   attemptResult, getAttempt, nextQuestion, recordFullscreenEvent, saveAnswer, startAttempt, submitAttemptForStudent
 } from '../src/services/attempt-service.js';
 import { STRICT_GRACE_MS } from '../src/domain/strict-timing.js';
 import { activityLog } from '../src/domain/activity.js';
 import {
-  adminDashboard, adminExportData, adminTests, archiveTest, bulkDecision, closeTest, decideRegistration, duplicateTest, gradeManualAnswer, releaseResults,
+  adminDashboard, adminExportData, adminTests, archiveTest, bulkDecision, closeTest, decideRegistration, duplicateTest, gradeManualAnswer, releaseResults, deleteTest, reviewData, setAnswerMarks, setResultsFrozen, setUnmarkedRelease,
   continueAttempt, pauseAttempt, reopenStudentPaper, reopenTest, setDeviceOverride, resetTest, restartAllAttempts, submitStudentPaper, restartAttempt, restartQuiz, resumeAttempt, setLocationOverride, setTestEndTime,
   startTest, updateStudentSapId, csvForAdmin, paginateDashboard
 } from '../src/services/admin-service.js';
 import { buildStudentResponseSpreadsheet, buildTestSpreadsheet } from '../src/export/spreadsheet.js';
 import { saveTestPaper, testForEditing } from '../src/services/paper-service.js';
+import { importMarks } from '../src/services/marks-import.js';
 import { userDetail, userResponseData } from '../src/services/user-service.js';
 import { config } from '../src/config.js';
 import { END_GRACE_MS } from '../src/domain/attempt-rules.js';
@@ -309,6 +311,31 @@ try {
 
   /* ------------------------------------------- marking, analysis and export */
   const shortQuestion = storedTest.questions.find((question) => question.manualGrading);
+  // Until the short answer is marked the score waits for it - unless the
+  // teacher shows marks now: the score so far, the answer not marked yet.
+  const waiting = await attemptResult(registeredStudentReq, attempt.id);
+  assert.equal(waiting.released, false, 'a paper with an unmarked short answer waits for it');
+  assert.equal(waiting.pendingManual, 1);
+  // Release marks first lists who is still waiting, as the dialog asks for them.
+  const waitingList = await adminDashboard(adminReq, code, { section: 'responses', page: '1', pageSize: '100', filters: 'marking:awaiting', sort: 'name-asc' });
+  const listed = waitingList.registrations.find((row) => row.id === registration.id);
+  assert.ok(listed, 'the release dialog lists the paper waiting');
+  assert.equal(listed.manualTotal - listed.manualGraded, 1, 'with its one answer to mark');
+  assert.equal(waitingList.pagination.total, waitingList.registrations.length);
+  const toMarkBefore = (await homeSummary(adminReq)).results.toMark;
+  assert.ok(toMarkBefore >= 1, 'the home page asks for the unmarked paper');
+  await setUnmarkedRelease(adminReq, code, { show: true });
+  assert.equal((await homeSummary(adminReq)).results.toMark, toMarkBefore - 1, 'released anyway, it is no longer asked for');
+  const early = await attemptResult(registeredStudentReq, attempt.id);
+  assert.equal(early.released, true, 'marks shown before marking is finished');
+  assert.equal(early.score, 2, 'counting only what is marked');
+  assert.equal(early.pendingManual, 1, 'with the short answer not marked yet');
+  const earlyRow = (await myResults(studentReq)).results.find((entry) => entry.code === code);
+  assert.equal(earlyRow.released, true, 'My results shows it too');
+  assert.equal(earlyRow.pendingManual, 1);
+  await setUnmarkedRelease(adminReq, code, { show: false });
+  assert.equal((await attemptResult(registeredStudentReq, attempt.id)).released, false, 'and held for marking again');
+  assert.equal((await homeSummary(adminReq)).results.toMark, toMarkBefore, 'held again, it is asked for again');
   await gradeManualAnswer(adminReq, code, registration.id, { questionId: shortQuestion.id, isCorrect: 1 });
   const result = await attemptResult(registeredStudentReq, attempt.id);
   assert.equal(result.released, true);
@@ -573,7 +600,86 @@ try {
   const noNextDoc = await testDocByCode(noNext.test.code);
   assert.equal(noNextDoc.registrations[0].attempt.windowCheck, 'declared', 'what the private-window check saw is kept');
   assert.equal((await adminDashboard(adminReq, noNext.test.code)).registrations[0].windowCheck, 'declared');
+  // Edit test on a running one-way test keeps its clock: the times and the Next button stay as they were.
+  await saveTestPaper(adminReq, noNext.test.code, {
+    questions: (await testForEditing(adminReq, noNext.test.code)).questions, applyTo: 'everyone', strictNext: true, typeSeconds: { mcq: 5, msq: 5, short: 5 }
+  });
+  const keptClock = await testDocByCode(noNext.test.code);
+  assert.equal(keptClock.strictNext, false, 'the Next button setting is fixed once started');
+  assert.deepEqual(keptClock.typeSeconds, noNextDoc.typeSeconds, 'so are the question times');
   await closeTest(adminReq, noNext.test.code);
+
+  /* ------------------------------- EACH STUDENT'S OWN TIME, FROM THEIR BEGIN ---- */
+  const ownTime = await createTest(adminReq, objectivePayload(`Own time ${identifier}`, { schedule: { startMode: 'manual', endMode: 'each', durationMinutes: 30 } }));
+  const ownCode = ownTime.test.code;
+  createdCodes.push(ownCode);
+  assert.equal(ownTime.test.endMode, 'each');
+  assert.equal(ownTime.test.endsAt, null, 'each student\'s own time has no shared end');
+  const ownSeatA = await seatStudent(ownCode);
+  const ownSecondEmail = `own-${identifier}@stu.upes.ac.in`;
+  profileEmails.push(ownSecondEmail);
+  const ownSeatB = await seatStudent(ownCode, { portalUser: { email: ownSecondEmail, displayName: 'Own Time Student', role: 'student' } }, String(Number(sapId) + 11));
+  await startTest(adminReq, ownCode);
+  assert.equal((await testDocByCode(ownCode)).endsAt ?? null, null, 'starting it fixes no end either');
+  // An hour after the start, a student beginning now still gets the whole 30 minutes.
+  await tests().updateOne({ code: ownCode }, { $set: { startedAt: new Date(Date.now() - 60 * 60_000) } });
+  await invalidateTestCache(ownCode);
+  const ownPaperA = await startAttempt(ownSeatA.studentRequest, ownCode, {});
+  assert.equal(ownPaperA.ownTime, true);
+  assert.equal(ownPaperA.durationMinutes, 30);
+  assert.equal(Date.parse(ownPaperA.deadlineAt) - Date.parse(ownPaperA.startedAt), 30 * 60_000, 'their own 30 minutes, from their own Begin');
+  await startAttempt(ownSeatB.studentRequest, ownCode, {});
+  const ownRegistrationOf = async (seat) => (await testDocByCode(ownCode)).registrations.find((entry) => entry.id === seat.registration.id);
+  const moveOwnStart = (seat, minutesAgo) => registrations().updateOne(
+    { testCode: ownCode, id: seat.registration.id }, { $set: { 'attempt.startedAt': new Date(Date.now() - minutesAgo * 60_000) } }
+  );
+  // B has one minute left; A has nearly all of theirs.
+  await moveOwnStart(ownSeatB, 29);
+  for (const view of [await adminDashboard(adminReq, ownCode, { pageSize: 25, section: 'students' }), paginateDashboard(await adminDashboard(adminReq, ownCode), { section: 'students' })]) {
+    assert.equal(view.counts.writing, 2);
+    assert.ok(Math.abs(Date.parse(view.counts.lastOwnEndAt) - Date.parse(ownPaperA.deadlineAt)) < 5_000, 'the last paper still running ends when A\'s time does');
+  }
+
+  // +10 minutes reaches everyone still writing, from their own end.
+  const ownExtended = await setTestEndTime(adminReq, ownCode, { addMinutes: 10 });
+  assert.equal(ownExtended.affectedCount, 2);
+  assert.equal((await testDocByCode(ownCode)).endsAt ?? null, null, 'still no shared end');
+  const extendedB = await ownRegistrationOf(ownSeatB);
+  assert.equal(extendedB.attempt.extraMs, 10 * 60_000);
+  await expectPublicError(() => setTestEndTime(adminReq, ownCode, { endsAt: new Date(Date.now() + 3_600_000).toISOString() }), 400);
+
+  // B's own time (and its grace) runs out: the scheduler hands B in; the test and A carry on.
+  await moveOwnStart(ownSeatB, 45);
+  const ownSweep = await runScheduleOnce();
+  assert.ok(ownSweep.handedIn >= 1);
+  const doneB = await ownRegistrationOf(ownSeatB);
+  assert.equal(doneB.attempt.status, 'submitted');
+  assert.equal(doneB.attempt.submittedBy, 'time', 'handed in because their own time was up');
+  assert.equal((await ownRegistrationOf(ownSeatA)).attempt.status, 'in_progress');
+  assert.equal((await testDocByCode(ownCode)).isClosed, false, 'the test stays open until it is closed');
+
+  // A's time has run out too, unseen: +5 counts from now, so the minutes are real.
+  await moveOwnStart(ownSeatA, 50);
+  await setTestEndTime(adminReq, ownCode, { addMinutes: 5 });
+  const lateA = (await ownRegistrationOf(ownSeatA)).attempt;
+  const lateEnd = Date.parse(lateA.startedAt) + 30 * 60_000 + lateA.extraMs;
+  assert.ok(Math.abs(lateEnd - (Date.now() + 5 * 60_000)) < 5_000, 'five minutes from now');
+
+  // Mid-test, a shared end cannot replace each student's own time.
+  await expectPublicError(() => updateTestSettings(adminReq, ownCode, { endMode: 'manual' }), 409);
+
+  // Close hands in A's paper; Resume gives it back with the time spent closed.
+  await closeTest(adminReq, ownCode);
+  const closedA = (await ownRegistrationOf(ownSeatA)).attempt;
+  assert.equal(closedA.submittedBy, 'admin');
+  // Closed for two minutes before Resume.
+  await tests().updateOne({ code: ownCode }, { $set: { closedAt: new Date(Date.now() - 2 * 60_000) } });
+  await invalidateTestCache(ownCode);
+  await reopenTest(adminReq, ownCode);
+  const resumedA = (await ownRegistrationOf(ownSeatA)).attempt;
+  assert.equal(resumedA.status, 'in_progress');
+  assert.ok(resumedA.extraMs - closedA.extraMs >= 2 * 60_000 - 5_000, 'the minutes it was closed are given back');
+  await closeTest(adminReq, ownCode);
 
   /* ------------------------ STRICT TIMING: THE CLOCK STOPS WHILE AWAY ---- */
   const paused = await createTest(adminReq, {
@@ -1320,6 +1426,14 @@ try {
   await releaseResults(adminReq, adminRelease.test.code);
   assert.equal((await attemptResult(releaseSeat.studentRequest, releaseAttempt.id)).released, true);
 
+  // Showing marks before marking is finished releases marks held for the teacher too.
+  const heldRelease = await createTest(adminReq, objectivePayload(`Held release ${identifier}`, { resultReleaseMode: 'admin' }));
+  createdCodes.push(heldRelease.test.code);
+  assert.ok((await setUnmarkedRelease(adminReq, heldRelease.test.code, { show: true }, { compact: true })).test.resultsReleasedAt, 'showing marks now releases them');
+  const heldBack = await setUnmarkedRelease(adminReq, heldRelease.test.code, { show: false }, { compact: true });
+  assert.equal(heldBack.test.releaseUnmarked, false);
+  assert.ok(heldBack.test.resultsReleasedAt, 'holding them for marking keeps the release itself');
+
   const locationTest = await createTest(adminReq, objectivePayload(`Location ${identifier}`, { locationRequired: true }));
   createdCodes.push(locationTest.test.code);
   const locationSeat = await seatStudent(locationTest.test.code);
@@ -1392,6 +1506,167 @@ try {
   await expectPublicError(() => beginGuestSession(cookieResponse(), { name: 'Walk In', testCode: guestOff.test.code }), 403);
   await expectPublicError(() => registerForTest(guestReq, cookieResponse(), guestOff.test.code, { sapId: String(Number(sapId) + 4) }), 403);
 
+  /* ------------------------------- marks per question, and marking in Excel */
+  // Each type has its marks, and a question may have its own: 2 + 3 + 4.
+  const marksTest = await createTest(adminReq, {
+    ...mixedPayload(`Marks ${identifier}`),
+    shuffleQuestions: false,
+    typeMarks: { mcq: 2, msq: 1, short: 4 },
+    questions: [
+      { prompt: 'Which structure is FIFO?', type: 'mcq', options: ['Stack', 'Queue'], correctOptions: ['1'] },
+      { prompt: 'Select the valid HTTP methods.', type: 'msq', options: ['GET', 'POST', 'FETCH'], correctOptions: ['0', '1'], marks: 3 },
+      { prompt: 'Describe why a queue is useful.', type: 'short' }
+    ]
+  });
+  const marksCode = marksTest.test.code;
+  createdCodes.push(marksCode);
+  await expectPublicError(() => createTest(adminReq, { ...mixedPayload(`Bad marks ${identifier}`), typeMarks: { mcq: 0 } }), 400);
+  const marker = { portalUser: { email: `regression-marks-${identifier}@stu.upes.ac.in`, displayName: 'Marks Student', role: 'student' } };
+  profileEmails.push(marker.portalUser.email);
+  const markerSeat = await seatStudent(marksCode, marker, String(Number(sapId) + 913).padStart(9, '0').slice(-9));
+  await startTest(adminReq, marksCode);
+  let marksAttempt = await startAttempt(markerSeat.studentRequest, marksCode);
+  assert.equal(marksAttempt.totalMarks, 9, 'a paper is worth its questions together');
+  const marksBank = new Map((await testDocByCode(marksCode)).questions.map((question) => [question.id, question]));
+  const shortQ = [...marksBank.values()].find((question) => question.manualGrading);
+  const mcqQ = [...marksBank.values()].find((question) => question.type === 'mcq' && !question.manualGrading);
+  for (const question of marksAttempt.questions) {
+    const source = marksBank.get(question.id);
+    assert.equal(question.marks, source.manualGrading ? 4 : source.type === 'msq' ? 3 : 2, 'the paper shows what each question is worth');
+    marksAttempt = await saveAnswer(markerSeat.studentRequest, marksAttempt.id, source.manualGrading
+      ? { questionId: question.id, answerText: 'It keeps arrival order.' }
+      : { questionId: question.id, selectedOptions: source.correctOptions });
+  }
+  marksAttempt = await submitAttemptForStudent(markerSeat.studentRequest, marksAttempt.id);
+  const marksRegistrationId = markerSeat.registration.id;
+  const marksNow = async () => attemptResult(markerSeat.studentRequest, marksAttempt.id);
+  assert.equal((await marksNow()).released, false, 'the short answer waits for its mark');
+
+  // Part marks by hand: from 0 to what the question is worth.
+  await expectPublicError(() => gradeManualAnswer(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, marks: 5 }), 400);
+  await gradeManualAnswer(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, marks: 2.5 });
+  let marksSeen = await marksNow();
+  assert.equal(marksSeen.released, true);
+  assert.equal(marksSeen.score, 7.5, 'right choices earn their marks, the short answer its part marks');
+  assert.equal(marksSeen.totalMarks, 9);
+  const marksRow = (await adminDashboard(adminReq, marksCode)).registrations.find((row) => row.id === marksRegistrationId);
+  assert.equal(marksRow.score, 7.5);
+  assert.equal(marksRow.totalMarks, 9);
+
+  // The export's Marks sheet: typed into, and uploaded back.
+  const marksBook = new ExcelJS.Workbook();
+  await marksBook.xlsx.load(await buildTestSpreadsheet(await adminExportData(adminReq, marksCode)));
+  const marksSheet = marksBook.getWorksheet('Marks');
+  assert.ok(marksSheet, 'the export has a Marks sheet');
+  const marksKeys = new Map();
+  marksSheet.getRow(5).eachCell((cell, column) => marksKeys.set(String(cell.value), column));
+  assert.equal(marksKeys.has(`test:${marksCode}`), true);
+  let markerRow = null;
+  const idColumn = marksKeys.get('test:' + marksCode);
+  marksSheet.eachRow((row, number) => { if (number > 5 && row.getCell(idColumn).value === marksRegistrationId) markerRow = row; });
+  assert.ok(markerRow, 'one row per handed-in paper');
+  assert.equal(markerRow.getCell(marksKeys.get(`q:${shortQ.id}`)).value, 2.5, 'the marks as they stand');
+  assert.equal(markerRow.getCell(marksKeys.get('outOf')).value, 9);
+  markerRow.getCell(marksKeys.get(`q:${shortQ.id}`)).value = 3.5;
+  const imported = await importMarks(adminReq, marksCode, Buffer.from(await marksBook.xlsx.writeBuffer()));
+  assert.equal(imported.marks, 1, 'the short answer takes the mark typed for it');
+  assert.equal(imported.students, 1);
+  assert.equal((await marksNow()).score, 8.5);
+  markerRow.getCell(marksKeys.get(`q:${shortQ.id}`)).value = 9;
+  const refused = await importMarks(adminReq, marksCode, Buffer.from(await marksBook.xlsx.writeBuffer()));
+  assert.equal(refused.invalid.count, 1, 'a mark above what the question is worth is reported');
+  assert.equal(refused.marks, 0);
+  assert.equal((await marksNow()).score, 8.5, 'and changes nothing');
+  // An older file does not undo a mark given in the app since: only the cells typed over are read.
+  const staleBook = new ExcelJS.Workbook();
+  await staleBook.xlsx.load(await buildTestSpreadsheet(await adminExportData(adminReq, marksCode)));
+  await gradeManualAnswer(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, marks: 4 });
+  const stale = await importMarks(adminReq, marksCode, Buffer.from(await staleBook.xlsx.writeBuffer()));
+  assert.equal(stale.marks, 0, 'nothing typed over, nothing changed');
+  assert.equal((await marksNow()).score, 9, 'the mark given in the app since stays');
+  await gradeManualAnswer(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, marks: 3.5 });
+  const otherTestsSheet = Buffer.from(await marksBook.xlsx.writeBuffer());
+  await expectPublicError(() => importMarks(adminReq, code, otherTestsSheet), 400);
+  await expectPublicError(() => importMarks(adminReq, marksCode, Buffer.from('not a workbook')), 400);
+
+  // Worth more now: papers re-marked, a hand-given mark keeping its share.
+  const marksEditing = await testForEditing(adminReq, marksCode);
+  assert.equal(marksEditing.questions.find((question) => question.id === mcqQ.id).marks, null, 'a question following its type has no marks of its own');
+  await saveTestPaper(adminReq, marksCode, { questions: marksEditing.questions, typeMarks: { mcq: 2, msq: 1, short: 8 }, applyTo: 'everyone' });
+  marksSeen = await marksNow();
+  assert.equal(marksSeen.totalMarks, 13, 'the short answer is worth 8 now');
+  assert.equal(marksSeen.score, 12, '3.5 of 4 becomes 7 of 8');
+
+  // Any mark can be changed by hand - a right choice answer's too - and stands through re-marking.
+  const msqQ = [...marksBank.values()].find((question) => question.type === 'msq' && !question.manualGrading);
+  const changedByHand = await setAnswerMarks(adminReq, marksCode, marksRegistrationId, { questionId: mcqQ.id, marks: 1 });
+  const handMcq = changedByHand.paper.answers.find((answer) => answer.questionId === mcqQ.id);
+  assert.equal(handMcq.marks, 1, 'a right answer given 1 of its 2 marks');
+  assert.equal(handMcq.overridden, true);
+  assert.equal(handMcq.autoMarks, 2, 'what the automatic marking would give is still known');
+  assert.equal(changedByHand.paper.score, 11);
+  await expectPublicError(() => setAnswerMarks(adminReq, marksCode, marksRegistrationId, { questionId: mcqQ.id, marks: 3 }), 400);
+  await expectPublicError(() => setAnswerMarks(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, auto: true }), 400);
+  const remarking = await testForEditing(adminReq, marksCode);
+  await saveTestPaper(adminReq, marksCode, {
+    questions: remarking.questions.map((question) => (question.id === msqQ.id ? { ...question, marks: 4 } : question)),
+    typeMarks: { mcq: 2, msq: 1, short: 8 }, applyTo: 'everyone'
+  });
+  const remarked = (await reviewData(adminReq, marksCode)).papers.find((paper) => paper.registrationId === marksRegistrationId);
+  assert.equal(remarked.answers.find((answer) => answer.questionId === mcqQ.id).marks, 1, 'the teacher\'s mark stands through re-marking');
+  assert.equal(remarked.answers.find((answer) => answer.questionId === msqQ.id).marks, 4, 'while the rest are marked again');
+  const automaticAgain = await setAnswerMarks(adminReq, marksCode, marksRegistrationId, { questionId: mcqQ.id, auto: true });
+  assert.equal(automaticAgain.paper.answers.find((answer) => answer.questionId === mcqQ.id).overridden, false);
+  assert.equal(automaticAgain.paper.score, 13, 'back to the automatic mark');
+  // From the Marks sheet too: a choice cell changed is the teacher's mark.
+  const choiceBook = new ExcelJS.Workbook();
+  await choiceBook.xlsx.load(await buildTestSpreadsheet(await adminExportData(adminReq, marksCode)));
+  const choiceSheet = choiceBook.getWorksheet('Marks');
+  const choiceKeys = new Map();
+  choiceSheet.getRow(5).eachCell((cell, column) => choiceKeys.set(String(cell.value), column));
+  let choiceRow = null;
+  choiceSheet.eachRow((row, number) => { if (number > 5 && row.getCell(choiceKeys.get('test:' + marksCode)).value === marksRegistrationId) choiceRow = row; });
+  choiceRow.getCell(choiceKeys.get('q:' + mcqQ.id)).value = 0;
+  assert.equal((await importMarks(adminReq, marksCode, Buffer.from(await choiceBook.xlsx.writeBuffer()))).marks, 1);
+  assert.equal((await marksNow()).score, 11, 'the right answer now earns 0, as typed');
+  // Typed back to its exported value, a cell reads as not typed over; a fresh export carries the 0.
+  choiceRow.getCell(choiceKeys.get('q:' + mcqQ.id)).value = 2;
+  assert.equal((await importMarks(adminReq, marksCode, Buffer.from(await choiceBook.xlsx.writeBuffer()))).marks, 0, 'the same file again changes nothing');
+  const againBook = new ExcelJS.Workbook();
+  await againBook.xlsx.load(await buildTestSpreadsheet(await adminExportData(adminReq, marksCode)));
+  const againSheet = againBook.getWorksheet('Marks');
+  againSheet.eachRow((row, number) => {
+    if (number > 5 && row.getCell(choiceKeys.get('test:' + marksCode)).value === marksRegistrationId) row.getCell(choiceKeys.get('q:' + mcqQ.id)).value = 2;
+  });
+  assert.equal((await importMarks(adminReq, marksCode, Buffer.from(await againBook.xlsx.writeBuffer()))).marks, 1);
+  const choiceBack = (await reviewData(adminReq, marksCode)).papers.find((paper) => paper.registrationId === marksRegistrationId);
+  assert.equal(choiceBack.answers.find((answer) => answer.questionId === mcqQ.id).overridden, false, 'its automatic mark typed: automatic again');
+
+  // Frozen results: final until unfrozen. Only a closed test can be frozen.
+  await expectPublicError(() => setResultsFrozen(adminReq, marksCode, { frozen: true }), 409);
+  await closeTest(adminReq, marksCode);
+  await setResultsFrozen(adminReq, marksCode, { frozen: true });
+  assert.ok((await adminTests(adminReq)).find((entry) => entry.code === marksCode).resultsFrozenAt, 'the list knows it is frozen');
+  await expectPublicError(() => gradeManualAnswer(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, marks: 1 }), 409);
+  const frozenFile = Buffer.from(await marksBook.xlsx.writeBuffer());
+  await expectPublicError(() => importMarks(adminReq, marksCode, frozenFile), 409);
+  const frozenEditing = await testForEditing(adminReq, marksCode);
+  await expectPublicError(() => saveTestPaper(adminReq, marksCode, { questions: frozenEditing.questions, applyTo: 'everyone' }), 409);
+  await expectPublicError(() => restartQuiz(adminReq, marksCode), 409);
+  await expectPublicError(() => resetTest(adminReq, marksCode), 409);
+  await expectPublicError(() => reopenTest(adminReq, marksCode), 409);
+  await expectPublicError(() => deleteTest(adminReq, marksCode), 409);
+  const frozenCopy = await duplicateTest(adminReq, marksCode);
+  createdCodes.push(frozenCopy.test.code);
+  assert.equal(frozenCopy.test.resultsFrozenAt, null, 'a copy of a frozen test starts unfrozen');
+  assert.equal(frozenCopy.test.typeMarks.short, 8, 'and keeps what its questions are worth');
+  assert.equal((await marksNow()).score, 13, 'frozen marks stay as they are');
+  assert.equal((await homeSummary(adminReq)).results.toMark >= 0, true);
+  await setResultsFrozen(adminReq, marksCode, { frozen: false });
+  await gradeManualAnswer(adminReq, marksCode, marksRegistrationId, { questionId: shortQ.id, marks: 8 });
+  assert.equal((await marksNow()).score, 14, 'unfrozen, marks can change again');
+
+
   /* ------------------------------------------------ quiz list, duplicate, archive */
   let list = await adminTests(adminReq);
   const scored = list.find((entry) => entry.code === code);
@@ -1412,6 +1687,40 @@ try {
   await archiveTest(adminReq, copy.test.code, { archived: false });
   list = await adminTests(adminReq);
   assert.equal(list.find((entry) => entry.code === copy.test.code).archivedAt, null, 'and restored');
+  assert.ok(list.every((entry) => typeof entry.toMarkCount === 'number'), 'the list counts papers still to mark');
+  assert.ok(list.every((entry) => typeof entry.notStartedCount === 'number' && entry.notStartedCount <= entry.registrationCount - entry.startedCount),
+    'and approved students who never began');
+
+  // Archived, a test leaves the student's results and the home page's counts,
+  // whatever it still has open - but stays in the teacher's own list.
+  const shownTo = async (request) => (await myResults(request)).results.some((entry) => entry.code === code);
+  assert.ok(await shownTo(studentReq), 'the student sees the test before it is archived');
+  const homeBefore = await homeSummary(adminReq);
+  await archiveTest(adminReq, code);
+  assert.equal(await shownTo(studentReq), false, 'an archived test leaves the student\'s results');
+  const homeArchived = await homeSummary(adminReq);
+  assert.ok(homeArchived.results.submitted < homeBefore.results.submitted, 'and its papers leave the home page\'s counts');
+  assert.equal(homeArchived.tests.total, homeBefore.tests.total - 1);
+  assert.ok((await adminTests(adminReq)).find((entry) => entry.code === code).archivedAt, 'the teacher still finds it, as archived');
+  await archiveTest(adminReq, code, { archived: false });
+  assert.ok(await shownTo(studentReq), 'restored, it is back in the student\'s results');
+  assert.equal((await homeSummary(adminReq)).results.submitted, homeBefore.results.submitted, 'and in the counts');
+
+  // A teacher who sits their own test finds it in their results as theirs to
+  // manage; a student never does.
+  assert.equal((await myResults(studentReq)).results.find((entry) => entry.code === code).isOwner, false, 'a student\'s test is not theirs to manage');
+  const ownTest = await createTest(adminReq, objectivePayload(`Own test ${identifier}`));
+  createdCodes.push(ownTest.test.code);
+  await registerForTest(adminReq, cookieResponse(), ownTest.test.code, {});
+  assert.equal((await myResults(adminReq)).results.find((entry) => entry.code === ownTest.test.code)?.isOwner, true, 'a teacher\'s own test opens on its manage page');
+  // A test that ends with no paper begun reads as missed, not "not started".
+  const ownRow = async () => (await myResults(adminReq)).results.find((entry) => entry.code === ownTest.test.code);
+  assert.equal((await ownRow()).testClosed, false);
+  await startTest(adminReq, ownTest.test.code);
+  await closeTest(adminReq, ownTest.test.code);
+  const missedRow = await ownRow();
+  assert.equal(missedRow.testClosed, true, 'results know the test has ended');
+  assert.equal(missedRow.attemptStatus, null, 'with no paper begun');
 
   console.log([
     'Regression check passed:',
@@ -1421,7 +1730,7 @@ try {
     'and automatic submission by the scheduler, scheduled starts, durations from the real start,',
     'strict per-question timing (forward only, server-side timeouts, auto-submit on the last question),',
     'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, reopening one handed-in paper (with minutes for that student alone), phones-only and laptops-only tests (Begin refused, the paper covered, exceptions, what the teacher sees), rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
-    'close, manual marking, analysis, Excel export, restart/reset, all result-release modes, and the quiz list (scores, duplicate, archive).'
+    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results opening on its manage page.'
   ].join(' '));
 } finally {
   if (createdCodes.length) {

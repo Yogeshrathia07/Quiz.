@@ -2,15 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { leavingStatus, leavingWarningState } from './leaving-rules.js';
 import { countdown } from '../../lib/format.js';
 import { useCountdown } from '../../lib/useCountdown.js';
+import { serverNow } from '../../lib/server-clock.js';
 
 const WARNINGS = [[300, '5 minutes left', 'Your test is submitted automatically when time runs out.'], [60, '1 minute left', 'Finish your last answer.']];
-
-/** "8h 21m" past an hour, "21:07" below it - seconds only matter near the end. */
-const readable = (seconds) => {
-  const value = Math.max(0, Math.ceil(seconds));
-  if (value < 3600) return countdown(value);
-  return `${Math.floor(value / 3600)}h ${Math.floor((value % 3600) / 60)}m`;
-};
 
 /**
  * A countdown on the server's clock that calls `onExpire` once when it runs
@@ -35,13 +29,13 @@ function useDeadline(deadlineAt, serverTime, onExpire) {
  * at, or null while they run.
  */
 function useQuestionPause(strict, serverTime, away) {
-  const offset = useRef(0);
+  const fallback = useRef(0);
   const [heldAt, setHeldAt] = useState(null);
   const serverPaused = Boolean(strict?.questionPaused);
-  useEffect(() => { if (serverTime) offset.current = Date.parse(serverTime) - Date.now(); }, [serverTime]);
+  useEffect(() => { if (serverTime) fallback.current = Date.parse(serverTime) - Date.now(); }, [serverTime]);
   // Leaving: stop here and now, before the server has heard.
   useEffect(() => {
-    if (away) setHeldAt((current) => current ?? Date.now() + offset.current);
+    if (away) setHeldAt((current) => current ?? serverNow(fallback.current));
   }, [away]);
   // Each view from the server: stopped there too, or running again - but
   // never while this page is still away.
@@ -151,34 +145,34 @@ export function ExamHeader({ attempt, strict, away = false, answeredCount, total
     }
   }, [test.known, test.secondsLeft, onWarn]);
 
-  // The main timer.
-  let primary;
-  if (strict) {
-    primary = strict.questionEndsAt
-      ? { label: 'This question', left: question.known ? question.secondsLeft : null, total: strict.questionSeconds, low: 30, critical: 10, short: true }
-      : { label: 'This question', text: 'No timer' };
+  // The main timer: this question's when it has one, else the test's (or the
+  // student's own). With no clock at all there is no timer to show.
+  const questionTimed = Boolean(strict?.questionEndsAt);
+  let primary = null;
+  if (questionTimed) {
+    primary = { label: 'This question', left: question.known ? question.secondsLeft : null, total: strict.questionSeconds, low: 30, critical: 10 };
   } else if (!attempt.untimed) {
     const windowSeconds = (Date.parse(attempt.deadlineAt) - Date.parse(attempt.startedAt)) / 1000;
-    primary = testOver ? { label: 'Time left', text: 'Time over', tone: 'is-critical' }
-      : { label: 'Time left', left: test.known ? test.secondsLeft : null, total: windowSeconds, low: 300, critical: 60 };
-  } else {
-    primary = { label: 'Time', text: 'No end time' };
+    const label = attempt.ownTime ? 'Your time left' : 'Time left';
+    primary = testOver ? { label, text: 'Time over', tone: 'is-critical' }
+      : { label, left: test.known ? test.secondsLeft : null, total: windowSeconds, low: 300, critical: 60 };
   }
-  const left = primary.left === null || primary.left === undefined ? null : Math.max(0, primary.left);
-  const tone = primary.tone || (left === null ? '' : left <= primary.critical ? 'is-critical' : left <= primary.low ? 'is-low' : '');
-  const value = primary.text || (left === null ? '—' : primary.short ? countdown(left) : readable(left));
+  const left = primary?.left === null || primary?.left === undefined ? null : Math.max(0, primary.left);
+  const tone = primary?.tone || (left === null ? '' : left <= primary.critical ? 'is-critical' : left <= primary.low ? 'is-low' : '');
+  const value = primary?.text || (left === null ? '—' : countdown(left));
   const fraction = left !== null && primary.total > 0 ? Math.min(1, left / primary.total) : null;
 
-  // The quiet line: the test's time (under strict timing), then progress.
+  // The quiet line: the test's time when the main timer is the question's, then progress.
   const parts = [];
   if (strict) {
-    if (!attempt.untimed) {
+    if (!attempt.untimed && questionTimed) {
+      // The main timer is the question's: the test's time remaining, under it.
       parts.push(testOver
-        ? { text: 'Test time is over', urgent: true }
-        : { text: `Test ends in ${test.known ? readable(test.secondsLeft) : '—'}`, urgent: test.known && test.secondsLeft <= 300 });
-    } else if (strict.paperEndsAt || strict.laterSeconds) {
+        ? { text: attempt.ownTime ? 'Your time is over' : 'Test time is over', urgent: true }
+        : { text: `${attempt.ownTime ? 'Your time left' : 'Test time left'} ${test.known ? countdown(test.secondsLeft) : '—'}`, urgent: test.known && test.secondsLeft <= 300 });
+    } else if (attempt.untimed && (strict.paperEndsAt || strict.laterSeconds)) {
       const paperLeft = strict.paperEndsAt ? (paper.known ? paper.secondsLeft : null) : strict.laterSeconds;
-      parts.push({ text: `Paper left ${paperLeft === null ? '—' : readable(paperLeft)}${strict.untimedLeft ? '+' : ''}` });
+      parts.push({ text: `Paper left ${paperLeft === null ? '—' : countdown(paperLeft)}${strict.untimedLeft ? '+' : ''}` });
     }
     parts.push({ text: `Question ${strict.index + 1} of ${strict.total}` });
   } else {
@@ -191,15 +185,17 @@ export function ExamHeader({ attempt, strict, away = false, answeredCount, total
         <h1 className="exam-heading">{attempt.title}</h1>
         <IntegrityBadge attempt={attempt}/>
       </div>
-      <div className={`exam-timer-card ${tone}`} role="timer" aria-live="off" aria-label={`${primary.label}: ${value}`}>
-        <div className="exam-timer-row">
-          <span className="exam-timer-label">{primary.label}</span>
-          <strong className="exam-timer-value">{value}</strong>
+      {primary && (
+        <div className={`exam-timer-card ${tone}`} role="timer" aria-live="off" aria-label={`${primary.label}: ${value}`}>
+          <div className="exam-timer-row">
+            <span className="exam-timer-label">{primary.label}</span>
+            <strong className="exam-timer-value">{value}</strong>
+          </div>
+          {fraction !== null && (
+            <div className="exam-timer-bar" aria-hidden="true"><span style={{ width: `${fraction * 100}%` }}/></div>
+          )}
         </div>
-        {fraction !== null && (
-          <div className="exam-timer-bar" aria-hidden="true"><span style={{ width: `${fraction * 100}%` }}/></div>
-        )}
-      </div>
+      )}
       <p className="exam-sub">
         {parts.map((part, index) => (
           <span key={index} className={part.urgent ? 'is-urgent' : ''}>{index > 0 && <span className="exam-sub-dot" aria-hidden="true">·</span>}{part.text}</span>

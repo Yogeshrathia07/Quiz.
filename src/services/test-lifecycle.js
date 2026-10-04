@@ -10,7 +10,8 @@ import { invalidateTestCache, serializeTestWrite } from '../data/test-repository
  */
 export function plannedEndsAt(test) {
   const mode = endModeOf(test);
-  if (mode === 'manual') return null;
+  // No shared end: closed by hand, or each student's own time.
+  if (mode === 'manual' || mode === 'each') return null;
   if (mode === 'duration') {
     return test.startMode === 'scheduled' && test.opensAt
       ? new Date(new Date(test.opensAt).getTime() + test.durationMinutes * 60_000)

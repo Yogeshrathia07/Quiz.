@@ -177,7 +177,11 @@ export function QuestionPaper({ question, total, onSave, flushRef, draftRef, onT
   return (
     <article className="q-card" id={`question-${question.id}`}>
       <div className="q-head">
-        <span className="q-count">Question {question.number}<span>/{total}</span></span>
+        <span className="q-count">
+          Question {question.number}<span>/{total}</span>
+          {/* What it is worth (domain/marks.js), as on a printed paper. */}
+          {question.marks ? <span className="q-marks">{question.marks} mark{question.marks === 1 ? '' : 's'}</span> : null}
+        </span>
         <SaveState question={question} connection={connection}/>
       </div>
       <RichText className="q-prompt" text={question.prompt}/>

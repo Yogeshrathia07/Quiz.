@@ -4,6 +4,9 @@
  * its options, so ticking a whole group - or everything - still shows
  * everyone (tests/filters.test.js).
  */
+import { sortBy, whenOf } from '../../lib/filters.js';
+
+export { whenOf };
 
 /** `rare`: left out of the menu while nothing matches it. */
 const option = (id, label, test, { rare = false } = {}) => ({ id, label, test, rare });
@@ -86,14 +89,6 @@ export function absentees(roster, marks) {
 /* ---------------------------------------------------------------- sorting */
 
 const byText = (value) => String(value || '').toLocaleLowerCase();
-/** Rows without the value (no SAP ID, no distance) go last either way round. */
-function compare(a, b, read, way) {
-  const [x, y] = [read(a), read(b)];
-  const missing = (x === null || x === '') - (y === null || y === '');
-  if (missing) return missing;
-  const order = typeof x === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true });
-  return way === 'desc' ? -order : order;
-}
 
 const MARK_FIELDS = {
   time: (mark) => Date.parse(mark.markedAt) || 0,
@@ -113,34 +108,11 @@ const SESSION_FIELDS = {
   present: (session) => session.presentCount
 };
 
-/** `sort` is 'field-direction'; ties keep the list's own order. */
-function sortBy(rows, sort, fields) {
-  const [field, way] = String(sort || '').split('-');
-  const read = fields[field];
-  if (!read) return rows;
-  return rows.map((row, index) => ({ row, index }))
-    .sort((a, b) => compare(a.row, b.row, read, way) || a.index - b.index)
-    .map((entry) => entry.row);
-}
-
 export const sortMarks = (marks, sort) => sortBy(marks, sort, MARK_FIELDS);
 export const sortAbsent = (people, sort) => sortBy(people, sort, ABSENT_FIELDS);
 export const sortSessions = (sessions, sort) => sortBy(sessions, sort, SESSION_FIELDS);
 
 /* --------------------------------------------------- the list of sessions */
-
-const startOfDay = (date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
-
-/** When a session was, by the calendar: 'today', 'week' (earlier this week, from Monday), 'month' (earlier this month) or 'older'. */
-export function whenOf(session, now = new Date()) {
-  const at = Date.parse(session.createdAt);
-  const today = startOfDay(now);
-  if (at >= today) return 'today';
-  const monday = today - ((now.getDay() + 6) % 7) * 86_400_000;
-  if (at >= monday) return 'week';
-  if (at >= new Date(now.getFullYear(), now.getMonth(), 1).getTime()) return 'month';
-  return 'older';
-}
 
 /** The list's groups: a Class group once there are two classes to choose between. */
 export function sessionFilters(sessions, now = new Date()) {

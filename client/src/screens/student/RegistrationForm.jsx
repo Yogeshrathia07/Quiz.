@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, post } from '../../lib/api.js';
 import { TestHeader } from './StatusScreens.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 
 const SAP_ID_LENGTH = 9;
 
@@ -68,17 +69,28 @@ export function RegistrationForm({ test, user, code, reload, showToast }) {
   return (
     <section className="join-card card">
       <TestHeader test={test}/>
-      <div className="notice">{NOTICES[accountType]}</div>
+      {/* A guest's note is a warning (signing out submits the test), so it stays in view. */}
+      {accountType === 'guest' && <div className="notice">{NOTICES.guest}</div>}
       <form onSubmit={submit}>
         <label className="field-label">Full name</label>
         <input className="text-input" readOnly value={user.name}/>
 
-        <label className="field-label">{accountType === 'guest' ? 'Account type' : 'Email'}</label>
+        <span className="field-label field-label-tip">
+          {accountType === 'guest' ? 'Account type' : 'Email'}
+          {accountType !== 'guest' && <InfoTip label="About your registration">{NOTICES[accountType]}</InfoTip>}
+        </span>
         <input className="text-input" readOnly value={accountType === 'guest' ? 'Guest test account' : user.email}/>
 
         {accountType !== 'faculty' && (
           <>
-            <label className="field-label" htmlFor="sap-id">SAP ID</label>
+            <span className="field-label field-label-tip">
+              <label htmlFor="sap-id">SAP ID</label>
+              <InfoTip label="About your SAP ID">
+                {saved ? 'Your SAP ID is saved. Only an administrator can change it.'
+                  : accountType === 'guest' ? 'Enter your 9-digit SAP ID. It is used for this test only.'
+                    : 'Enter your 9-digit SAP ID. It will be saved to your account.'}
+              </InfoTip>
+            </span>
             <input
               id="sap-id"
               className="text-input"
@@ -92,11 +104,6 @@ export function RegistrationForm({ test, user, code, reload, showToast }) {
               onChange={(event) => setSapId(event.target.value.replace(/\D/g, '').slice(0, SAP_ID_LENGTH))}
               placeholder="e.g. 500123456"
             />
-            <p className="help">
-              {saved ? 'Your SAP ID is saved. Only an administrator can change it.'
-                : accountType === 'guest' ? 'Enter your 9-digit SAP ID. It is used for this test only.'
-                  : 'Enter your 9-digit SAP ID. It will be saved to your account.'}
-            </p>
           </>
         )}
 

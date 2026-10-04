@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronDown, CircleCheck, ClipboardPaste, IdCard, Keyboard, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
-import { durationLabel, shortDateTime } from '../../lib/format.js';
+import { AlertTriangle, ChevronDown, CircleCheck, Clock, ClipboardPaste, IdCard, Keyboard, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
+import { clockTime, durationLabel, shortDateTime } from '../../lib/format.js';
 import { StatusPill } from '../../components/StatusPill.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { isGuest, venueStatus } from './student-filters.js';
@@ -18,6 +18,9 @@ export const WINDOW_TEXT = {
   unknown: 'Could not tell'
 };
 
+/** Offline periods noted rather than counted (older papers' offline leaves are left out). */
+const offlineNoted = (record) => Math.max(0, (record?.offline?.count || 0) - (record?.leaves?.offline || 0));
+
 /** A concise lifetime integrity record for the live student view. */
 export function integrityText(registration) {
   const record = registration.integrity;
@@ -29,8 +32,14 @@ export function integrityText(registration) {
     .filter(([, count]) => count > 0)
     .map(([reason, count]) => `${count} ${LEAVE_LABELS[reason] || reason}`)
     .join(', ');
+  // Offline periods are noted, never counted as leaving. Older papers counted
+  // them as leaves, and show them in the breakdown above instead.
+  const offlineCount = offlineNoted(record);
+  const offline = offlineCount ? `offline ${offlineCount}× (${Math.round((record.offline.ms || 0) / 1000)}s, not counted)` : '';
   return [
     `Left ${record.leaveCount}× · ${Math.round(record.awayMs / 1000)}s away${breakdown ? ` (${breakdown})` : ''}`,
+    offline,
+    record.lateAnswers ? `${record.lateAnswers} answer${record.lateAnswers === 1 ? '' : 's'} arrived late` : '',
     registration.overLimit ? 'Over the limit' : '',
     record.lockCount ? `Locked ${record.lockCount}×` : '',
     blocked ? `${blocked} blocked action${blocked === 1 ? '' : 's'}` : '',
@@ -63,7 +72,11 @@ export function Issue({ icon: Icon, tone = 'warn', label, children }) {
 }
 
 /** Name and SAP ID on one line; the email waits in the details. */
-export function StudentIdentity({ registration }) {
+/**
+ * `status` ({ tone, word }): where they stand, shown under the name on a phone,
+ * where the row's status column is folded away until the row is opened.
+ */
+export function StudentIdentity({ registration, status = null }) {
   const guest = isGuest(registration);
   return (
     <div className="person">
@@ -71,6 +84,7 @@ export function StudentIdentity({ registration }) {
       <div className="person-detail">
         <strong>{registration.name}</strong>
         <span className="table-subtext">{isFaculty(registration) ? 'Faculty' : registration.sapId}</span>
+        {status && <span className={`pill person-status ${status.tone}`}>{status.word}</span>}
       </div>
       <ChevronDown className="row-caret" size={16} aria-hidden="true"/>
     </div>
@@ -138,6 +152,24 @@ function venueText(registration) {
   }[venueStatus(registration)];
 }
 
+/**
+ * Why a student's page could not share a location at Begin, in a few words,
+ * so you can tell a phone that never asked from one sitting outside - and
+ * grant the exception that lets them in (the row's ⋮ menu).
+ */
+function locationProblemText(problem) {
+  if (!problem) return '';
+  return {
+    denied: problem.asked === false ? 'Location is switched off for their browser — no question was shown' : 'They did not allow location',
+    inapp: 'Opened inside another app (WhatsApp, Instagram…), which cannot share location',
+    unavailable: 'Their device could not find its location (location services off?)',
+    timeout: 'Finding their location took too long',
+    insecure: 'Opened on a link that is not secure',
+    unsupported: 'Their browser cannot share location',
+    imprecise: `Shared only an approximate location${problem.accuracyMeters ? ` (±${problem.accuracyMeters} m)` : ''}`
+  }[problem.reason] || 'Their location could not be checked';
+}
+
 const DEVICE_ICONS = { phone: Smartphone, tablet: Tablet, laptop: Laptop };
 const DEVICE_NAMES = { phone: 'Phone', tablet: 'Tablet', laptop: 'Laptop', unknown: 'Device not known' };
 const STAGE_WORDS = { join: 'on joining', begin: 'at Begin', paper: 'on the paper' };
@@ -177,7 +209,16 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
   // A paper being written now (paused or not): the ones Pause and Submit paper apply to.
   const writing = registration.attemptStatus === 'in_progress';
   const integrity = integrityText(registration);
+  // Each student's own time, still running: shown beside their status.
+  const ownEnd = test.endMode === 'each' && writing && !registration.isPaused && Boolean(registration.ownDeadlineAt);
   const serious = registration.overLimit || registration.isLocked;
+  // The same words as the status column, for the phone's folded row.
+  const phoneStatus = pending ? { tone: 'warn', word: 'Waiting for you' }
+    : registration.status === 'rejected' ? { tone: 'danger', word: 'Declined' }
+      : !registration.attemptStatus ? { tone: 'muted', word: 'Not started' }
+        : registration.isPaused && !submitted ? { tone: 'paused', word: 'Paused' }
+          : registration.isLocked ? { tone: 'danger', word: 'Locked' }
+            : submitted ? { tone: 'success', word: 'Submitted' } : { tone: 'warn', word: 'In progress' };
 
   const device = registration.device;
   const deviceWrong = device && !registration.deviceFits && !registration.deviceOverride;
@@ -194,7 +235,10 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
     test.locationRequired && (venue === 'out_of_range' || outsideNow) && (
       <Issue key="venue" icon={MapPin} tone="danger" label={outsideNow ? 'Away from the venue right now' : venueText(registration)}/>
     ),
-    test.locationRequired && venue === 'exception' && <Issue key="exception" icon={MapPin} label={venueText(registration)}/>
+    test.locationRequired && venue === 'exception' && <Issue key="exception" icon={MapPin} label={venueText(registration)}/>,
+    test.locationRequired && venue === 'not_checked' && registration.locationProblem && (
+      <Issue key="location-problem" icon={MapPinOff} tone="danger" label={`${locationProblemText(registration.locationProblem)}. To let them in: ⋮ → Allow location exception.`}/>
+    )
   ].filter(Boolean);
 
   const integritySigns = [
@@ -212,6 +256,13 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
     record?.flags?.keyboard_app > 0 && (
       <Issue key="keyboard" icon={Keyboard} tone="warn" label={`Keyboard opened another app while typing ${record.flags.keyboard_app}× (back within 15 s; not counted as leaving)`}>{record.flags.keyboard_app}</Issue>
     ),
+    // Noted to be checked, never counted as leaving: the times are in their activity log.
+    offlineNoted(record) > 0 && (
+      <Issue key="offline" icon={WifiOff} tone="warn" label={`Went offline ${offlineNoted(record)}× for ${Math.round((record.offline.ms || 0) / 1000)}s in total (not counted as leaving): see their activity log`}>{offlineNoted(record)}</Issue>
+    ),
+    record?.lateAnswers > 0 && (
+      <Issue key="late" icon={Clock} tone="warn" label={`${record.lateAnswers} answer${record.lateAnswers === 1 ? '' : 's'} arrived late, held on their device by a lost connection: see their answers`}>{record.lateAnswers}</Issue>
+    ),
     record && !record.leaveCount && !registration.isLocked && registration.attemptStatus && <Issue key="clean" icon={CircleCheck} tone="ok" label="Never left the test"/>
   ].filter(Boolean);
 
@@ -222,7 +273,7 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
       onOpenChange={onOpenChange}
       label={pending ? `${registration.name}, waiting for your decision` : registration.name}
       cells={<>
-        <td data-label="Student"><StudentIdentity registration={registration}/></td>
+        <td data-label="Student"><StudentIdentity registration={registration} status={phoneStatus}/></td>
         <td data-label="Status">
           <div className="cell-row student-status-cluster">
             <StatusPill status={registration.status}/>
@@ -231,6 +282,12 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
                   {registration.isPaused && !submitted ? 'Paused' : registration.isLocked ? 'Locked' : submitted ? 'Submitted' : 'In progress'}
                 </span>
               : <span className="pill status-pill muted">Not started</span>}
+            {/* Each student's own time: when this student's runs out. */}
+            {ownEnd && (
+              <span className="pill status-pill muted own-end" title={`Their own time ends at ${clockTime(registration.ownDeadlineAt)}`}>
+                <Clock size={12} aria-hidden="true"/>ends {clockTime(registration.ownDeadlineAt)}
+              </span>
+            )}
             {issues}
             {integritySigns}
           </div>
@@ -246,7 +303,7 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
         {registration.deviceSwitches > 0 && <Detail label="Switched browser">{registration.deviceSwitches}×</Detail>}
         {registration.attemptStatus && <Detail label={submitted ? 'Finished' : 'Started'}>{shortDateTime(submitted ? registration.submittedAt : registration.startedAt)}</Detail>}
         {writing && registration.isPaused && <Detail label="Paused since">{shortDateTime(registration.pausedAt)} — their time is stopped</Detail>}
-        {registration.extraMs > 0 && <Detail label="Extra time">{durationLabel(Math.round(registration.extraMs / 1000))} after the test&apos;s end, for pauses or a reopened paper{registration.ownDeadlineAt && writing ? ` · their paper ends at ${shortDateTime(registration.ownDeadlineAt)}` : ''}</Detail>}
+        {registration.extraMs > 0 && <Detail label="Extra time">{durationLabel(Math.round(registration.extraMs / 1000))} {test.endMode === 'each' ? 'added to their own time, for extensions, pauses or a reopened paper' : <>after the test&apos;s end, for pauses or a reopened paper</>}{registration.ownDeadlineAt && writing ? ` · their paper ends at ${shortDateTime(registration.ownDeadlineAt)}` : ''}</Detail>}
         {record && <Detail label="Leaving the test">{integrity}</Detail>}
         {registration.overLimit && (
           <Detail label="Over the limit">
@@ -273,7 +330,10 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
           </Detail>
         )}
         {test.locationRequired && (
-          <Detail label="Venue">{venueText(registration)}{registration.locationVerifiedAt ? ` · checked ${shortDateTime(registration.locationVerifiedAt)}` : ''}</Detail>
+          <Detail label="Venue">
+            {venueText(registration)}{registration.locationVerifiedAt ? ` · checked ${shortDateTime(registration.locationVerifiedAt)}` : ''}
+            {venue === 'not_checked' && registration.locationProblem ? ` · ${locationProblemText(registration.locationProblem)} (${shortDateTime(registration.locationProblem.at)})` : ''}
+          </Detail>
         )}
         {test.locationRequired && (checks.inRange || checks.outOfRange || checks.inconclusive) ? (
           <Detail label="During the test">

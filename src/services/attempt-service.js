@@ -5,9 +5,10 @@ import { asInteger, hmac, randomId, stableSort } from '../lib/crypto.js';
 import { currentMs, dateMs, now } from '../lib/time.js';
 import { selectedAttemptQuestions } from '../domain/question-bank.js';
 import { attemptView } from '../domain/presenters.js';
-import { TIME_OVER_MESSAGE, acceptsAttemptAnswers, isAttemptTimeOver, isTimeOver } from '../domain/attempt-rules.js';
+import { TIME_OVER_MESSAGE, acceptsAttemptAnswers, isAttemptTimeOver, isPerStudent, isTimeOver } from '../domain/attempt-rules.js';
 import { MAX_EVENTS, emptyIntegrity, flagReason, leaveReason, locksOnViolation, violationActionOf, warningsBeforeLockOf } from '../domain/integrity.js';
 import { ANSWER_LOG_MAX, TYPING_MERGE_MS } from '../domain/activity.js';
+import { automaticMarks, earnedMarks, paperMarks, paperScore, questionMarks } from '../domain/marks.js';
 import {
   adminEmail, attemptContext, hasRegistrationCookie, registrationFor, requireRegistration, requireTestForStudent,
   serializePaperWrite, updateAttemptWhere, updateRegistrationFields
@@ -17,8 +18,10 @@ import { deviceFromRequest, ownsTest, recordDevice } from './device-service.js';
 import { deviceRefusal, deviceVerdict } from '../domain/device.js';
 import { justWokeUp } from './outage.js';
 import {
-  EARLY_TIMEOUT_MS, STRICT_GRACE_MS, allowsNext, effectiveShownMs, emptyStrictState, isStrict, resolveStrict, strictPaper
+  EARLY_TIMEOUT_MS, STRICT_GRACE_MS, acknowledgeShown, allowsNext, clockStartOnShown, effectiveShownMs, emptyStrictState, isStrict, resolveStrict, strictPaper
 } from '../domain/strict-timing.js';
+import { lateAnswerDeadline, lateAnswerRecord } from '../domain/late-answers.js';
+import { resultsFrozen } from '../domain/freeze.js';
 
 // Faculty have no SAP ID, so their paper is seeded from their email instead.
 const attemptSeed = (test, registration) => hmac(`${test.code}:${registration.sapId || registration.collegeEmail}`, config.sessionSecret);
@@ -69,6 +72,9 @@ export function buildAttempt(existingId, test, registration) {
     events: [],
     // Every answer saved, for the activity report - see domain/activity.js.
     answerLog: [],
+    // Each student's own time: the paper's clock waits for the device to say
+    // the paper is on screen (markShown), as strict timing's questions do.
+    clockSentAt: isPerStudent(test) ? startedAt : null,
     // Strict timing: which question is open and since when - see domain/strict-timing.js.
     ...(isStrict(test) ? { strict: emptyStrictState(startedAt) } : {})
   };
@@ -111,12 +117,28 @@ export function classifyLocationCheck(test, raw) {
   return { status: 'inconclusive', distanceMeters: distance, accuracyMeters };
 }
 
+/**
+ * Why a student's page could not get their location at Begin, as the page
+ * found it (client/src/lib/geo.js) - kept on the registration so the teacher's
+ * row says why, beside the location exception that lets them in. Never the
+ * position itself: only the venue's coordinates are stored, and of a student
+ * the distance from it.
+ */
+const LOCATION_PROBLEMS = ['denied', 'inapp', 'unavailable', 'timeout', 'insecure', 'unsupported', 'imprecise'];
+const locationProblemOf = (raw) => ({
+  reason: LOCATION_PROBLEMS.includes(raw?.locationProblem?.reason) ? raw.locationProblem.reason : 'unknown',
+  // Whether the browser showed the question at all (false: refused at once).
+  asked: typeof raw?.locationProblem?.asked === 'boolean' ? raw.locationProblem.asked : null,
+  at: now()
+});
+
 async function verifyStartLocation(test, registration, raw) {
   if (!test.locationRequired) return null;
   const latitude = Number(raw?.latitude);
   const longitude = Number(raw?.longitude);
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     if (registration.locationOverride) return classifyLocationCheck(test, raw);
+    await updateRegistrationFields(test.code, registration.id, { locationProblem: locationProblemOf(raw) });
     throw new PublicTestError(403, 'Allow location access to verify that you are at the test venue.', 'LOCATION_NEEDED');
   }
   const distance = distanceMeters(Number(test.locationLatitude), Number(test.locationLongitude), latitude, longitude);
@@ -139,30 +161,41 @@ async function verifyStartLocation(test, registration, raw) {
     // a kilometre or more. "You are 1400 m away" would send them looking in
     // the wrong place: say what to change instead.
     if (!Number.isFinite(accuracy) || accuracy > LOCATION_ACCURACY_LIMIT_METERS) {
+      await updateRegistrationFields(test.code, registration.id, {
+        locationProblem: { reason: 'imprecise', asked: null, at: now(), accuracyMeters: Number.isFinite(accuracy) ? Math.round(accuracy) : null }
+      });
       throw new PublicTestError(403, `Your phone shared only an approximate location (within ${Math.round(accuracy) || 'several hundred'} m), which cannot show you are at the venue. Turn on Precise Location for your browser - on an iPhone: Settings → Privacy & Security → Location Services → Safari Websites (or Chrome) → Precise Location; on Android: Settings → Apps → Chrome → Permissions → Location → Use precise location. Indoors, also turn on Wi-Fi (no need to connect to a network): phones use it to find where they are. Then try again.`, 'LOCATION_IMPRECISE');
     }
     // A good reading just past the edge, its margin reaching into the area:
     // the checks during the paper decide, as they would for this reading.
   }
-  await updateRegistrationFields(test.code, registration.id, { locationVerifiedAt: now(), locationDistanceMeters: distance });
+  await updateRegistrationFields(test.code, registration.id, { locationVerifiedAt: now(), locationDistanceMeters: distance, locationProblem: null });
   return classifyLocationCheck(test, raw);
 }
 
 export const PAUSED_MESSAGE = 'Your teacher has paused your test. Your time is stopped - you carry on from here when they continue it.';
 
+/**
+ * Marks a paper's answers: each choice question right or wrong - its marks
+ * (domain/marks.js) or 0 - and each short answer as the teacher marked it. A
+ * mark the teacher gave a choice answer by hand (`marksOverride`) stands.
+ */
 export function gradeAnswers(test, attempt) {
   return (attempt.answers || []).map((answer) => {
     const question = (test.questions || []).find((entry) => entry.id === answer.questionId);
     if (!question) return answer;
+    const marks = questionMarks(test, question);
+    // A mark above what the question is now worth comes down to it.
+    const capped = earnedMarks(answer) !== null && earnedMarks(answer) > marks ? { ...answer, isCorrect: marks } : answer;
     if (question.manualGrading) {
       // Left blank: nothing for the admin to mark, so it scores 0 now rather
       // than holding the student's marks back until someone "marks" nothing.
       // The admin can still change it.
-      return !answer.answeredAt && answer.isCorrect === null ? { ...answer, isCorrect: 0 } : answer;
+      if (!answer.answeredAt && answer.isCorrect === null) return { ...answer, isCorrect: 0 };
+      return capped;
     }
-    const correct = (question.correctOptions || []).map(String).sort();
-    const selected = (answer.selectedOptions || []).map(String).sort();
-    return { ...answer, isCorrect: Number(correct.length === selected.length && correct.every((item, index) => item === selected[index])) };
+    if (answer.marksOverride) return capped;
+    return { ...answer, isCorrect: automaticMarks(test, question, answer) };
   });
 }
 
@@ -213,8 +246,10 @@ async function ownedAttempt(req, attemptId) {
   return context;
 }
 
+// Coded, so the paper keeps an answer queued through a lock rather than
+// taking it as refused for good: it goes once the paper is revived.
 function requireWritableAttempt(attempt) {
-  if (attempt.isLocked) throw new PublicTestError(423, 'This test attempt is locked. It unlocks automatically after a short wait.');
+  if (attempt.isLocked) throw new PublicTestError(423, 'This test attempt is locked. It unlocks automatically after a short wait.', 'LOCKED');
   return attempt;
 }
 
@@ -230,7 +265,7 @@ async function syncStrict(test, registration, attempt, atMs = Date.now()) {
   if (!state.changed) return attempt;
   const storedIndex = attempt.strict?.index ?? 0;
   const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', 'strict.index': storedIndex }, {
-    $set: { 'strict.index': state.index, 'strict.shownAt': state.shownAt, 'strict.pausedSince': state.pausedSince },
+    $set: { 'strict.index': state.index, 'strict.shownAt': state.shownAt, 'strict.sentAt': state.sentAt, 'strict.pausedSince': state.pausedSince },
     ...(state.closed.length ? { $push: { 'strict.log': { $each: state.closed } } } : {})
   });
   const fresh = (await attemptContext(attempt.id))?.attempt || attempt;
@@ -466,6 +501,9 @@ export async function saveAnswer(req, attemptId, raw) {
  * request, without loading the paper twice.
  */
 async function writeAnswer(test, registration, owned, raw) {
+  // Handed in (by the clock or the test's Close) while this device was
+  // offline: only an answer held back by the connection may still come.
+  if (owned.status === 'submitted') return (await takeLateAnswer(test, registration, owned, owned, raw)) || owned;
   const closed = venueClosed(test, registration, owned);
   if (closed) {
     throw new PublicTestError(403, closed.reason === 'outside'
@@ -473,22 +511,37 @@ async function writeAnswer(test, registration, owned, raw) {
       : 'Your location could not be checked. Allow location access and stay at the venue to carry on.', 'VENUE_CLOSED');
   }
   // Answers queued while offline arrive here first when the connection comes
-  // back: the offline gap is judged before any of them is accepted.
+  // back: the offline period is noted (never counted as leaving) first.
   const checked = await checkIn(test, registration, owned);
   requireWritableAttempt(checked);
-  if (checked.status === 'submitted') return checked;
+  if (checked.status === 'submitted') return (await takeLateAnswer(test, registration, owned, checked, raw)) || checked;
 
   const questionId = asInteger(raw?.questionId, 1, Number.MAX_SAFE_INTEGER);
   const assigned = (checked.questions || []).find((entry) => entry.questionId === questionId);
   const question = assigned && (test.questions || []).find((entry) => entry.id === questionId);
   if (!question) throw new PublicTestError(404, 'That question is not on your paper.');
 
-  if (test.isClosed) throw new PublicTestError(409, 'This test is closed, so answers can no longer be saved.', 'TIME_OVER');
+  if (test.isClosed || (!checked.pausedAt && !acceptsAttemptAnswers(test, checked))) {
+    const late = await takeLateAnswer(test, registration, owned, checked, raw);
+    if (late) return late;
+    throw new PublicTestError(409, test.isClosed ? 'This test is closed, so answers can no longer be saved.' : TIME_OVER_MESSAGE, 'TIME_OVER');
+  }
   if (checked.pausedAt) throw new PublicTestError(423, PAUSED_MESSAGE, 'PAUSED');
-  if (!acceptsAttemptAnswers(test, checked)) throw new PublicTestError(409, TIME_OVER_MESSAGE, 'TIME_OVER');
   // Strict timing: the paper as synced (the open question's clock may just
-  // have started), so what is returned carries that too.
-  const strictOpen = isStrict(test) ? await refuseUnlessOpenQuestion(test, registration, checked, questionId) : null;
+  // have started), so what is returned carries that too. A question that
+  // closed while this device was offline may still take the answer made on it.
+  let strictOpen = null;
+  if (isStrict(test)) {
+    try {
+      strictOpen = await refuseUnlessOpenQuestion(test, registration, checked, questionId);
+    } catch (error) {
+      if (error?.code !== 'QUESTION_CLOSED') throw error;
+      const latest = (await attemptContext(checked.id))?.attempt || checked;
+      const late = await takeLateAnswer(test, registration, owned, latest, raw);
+      if (late) return late;
+      throw error;
+    }
+  }
   const strictIndex = strictOpen ? strictOpen.index : null;
   const attempt = strictOpen ? strictOpen.attempt : checked;
 
@@ -540,6 +593,77 @@ async function writeAnswer(test, registration, owned, raw) {
     ? { ...entry, selectedOptions, answerText, answeredAt }
     : entry);
   return { ...attempt, answers };
+}
+
+/**
+ * An answer made on the device before its time ran out but held there by a
+ * lost connection (domain/late-answers.js): taken now, marked "arrived late"
+ * with when the device says it was made and when it came, and on the
+ * timeline for the teacher. Null when it may not be taken - the caller then
+ * refuses it as before. `owned` is the paper as read before this request
+ * checked in, which says when the server last heard from it.
+ */
+async function takeLateAnswer(test, registration, owned, current, raw) {
+  const lateMs = (Number(config.lateAnswerMinutes) || 0) * 60_000;
+  const questionId = asInteger(raw?.questionId, 1, Number.MAX_SAFE_INTEGER);
+  const madeAtMs = Number(raw?.madeAt);
+  if (!lateMs || !questionId || !Number.isFinite(madeAtMs) || !current) return null;
+  // Marks made final are not changed by anything, this included.
+  if (current.status === 'submitted' && resultsFrozen(test)) return null;
+  if (current.status === 'in_progress' && (current.isLocked || current.pausedAt)) return null;
+  const atMs = Date.now();
+  const deadlineMs = lateAnswerDeadline(test, current, questionId, atMs, lateMs);
+  if (deadlineMs === null) return null;
+  const record = lateAnswerRecord({
+    deadlineMs,
+    madeAtMs,
+    startedMs: dateMs(current.startedAt),
+    lastSeenMs: owned.lastSeenAt ? dateMs(owned.lastSeenAt) : NaN,
+    events: current.events || [],
+    atMs
+  });
+  if (!record) return null;
+  const assigned = (current.questions || []).find((entry) => entry.questionId === questionId);
+  const question = assigned && (test.questions || []).find((entry) => entry.id === questionId);
+  if (!question) return null;
+  const { answerText, selectedOptions } = readAnswerPayload(question, assigned, raw);
+  const stored = (current.answers || []).find((entry) => entry.questionId === questionId) || { questionId };
+  // Sent again because the reply to the first send was lost: already taken.
+  if (stored.late && stored.answerText === answerText && JSON.stringify(stored.selectedOptions || []) === JSON.stringify(selectedOptions)) return current;
+
+  const hasContent = question.manualGrading ? answerText.length > 0 : selectedOptions.length > 0;
+  const late = { madeAt: record.madeAt, arrivedAt: record.arrivedAt };
+  const set = {
+    'answers.$[ans].selectedOptions': selectedOptions,
+    'answers.$[ans].answerText': answerText,
+    'answers.$[ans].answeredAt': hasContent ? record.madeAt : null,
+    'answers.$[ans].late': late
+  };
+  if (current.status === 'submitted') {
+    // Marked as any handed-in answer is: worked out now, or left for the
+    // teacher. A mark given by hand was for the answer this one replaces.
+    const [graded] = gradeAnswers(test, { answers: [{ ...stored, selectedOptions, answerText, answeredAt: hasContent ? record.madeAt : null, isCorrect: null, marksOverride: false }] });
+    set['answers.$[ans].isCorrect'] = graded.isCorrect;
+    set['answers.$[ans].marksOverride'] = false;
+  }
+  const number = assigned.questionIndex + 1;
+  const update = {
+    $set: set,
+    $inc: { 'integrity.lateAnswers': 1 },
+    $push: {
+      answerLog: { $each: [{ questionId, at: record.arrivedAt, selectedOptions, textLength: answerText.length, cleared: !hasContent, late }], $slice: -ANSWER_LOG_MAX },
+      events: { $each: [{ type: 'late_answer', createdAt: record.arrivedAt, durationMs: null, detail: `Q${number}`, note: `Q${number}: made ${seconds(atMs - madeAtMs)} s before it arrived` }], $slice: -MAX_EVENTS }
+    }
+  };
+  const expect = current.status === 'submitted'
+    ? { id: current.id, status: 'submitted' }
+    : { id: current.id, status: 'in_progress', isLocked: { $ne: true } };
+  const applied = await serializePaperWrite(test.code, registration.id,
+    () => updateAttemptWhere(test.code, registration.id, expect, update, { arrayFilters: [{ 'ans.questionId': questionId }] }));
+  const latest = (await attemptContext(current.id))?.attempt;
+  if (applied) return latest || current;
+  // Handed in by the clock in the same moment: judged again on the paper as it now is.
+  return latest && latest.status !== current.status ? takeLateAnswer(test, registration, owned, latest, raw) : null;
 }
 
 /**
@@ -612,19 +736,62 @@ export async function nextQuestion(req, attemptId, raw = {}) {
   const how = open.seconds > 0 && closedAt.getTime() >= endsMs - EARLY_TIMEOUT_MS ? 'time' : 'next';
   const closing = { questionId: open.questionId, shownAt, closedAt, how };
   const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', 'strict.index': index }, {
-    $set: { 'strict.index': nextIndex, 'strict.shownAt': done ? null : closedAt, 'strict.pausedSince': pausedSince },
+    $set: { 'strict.index': nextIndex, 'strict.shownAt': done ? null : closedAt, 'strict.sentAt': done ? null : closedAt, 'strict.pausedSince': pausedSince },
     $push: { 'strict.log': closing }
   });
   // Written only over what was read, so when it lands the paper as it now
   // stands is known without reading it back. Otherwise something else moved
   // it (another tab, the clock): read what that left.
   const fresh = applied
-    ? { ...attempt, strict: { ...attempt.strict, index: nextIndex, shownAt: done ? null : closedAt, pausedSince, log: [...(attempt.strict?.log || []), closing] } }
+    ? { ...attempt, strict: { ...attempt.strict, index: nextIndex, shownAt: done ? null : closedAt, sentAt: done ? null : closedAt, pausedSince, log: [...(attempt.strict?.log || []), closing] } }
     : (await attemptContext(attempt.id))?.attempt || attempt;
   if (applied && done) {
     return studentView(test, registration, await finalizeAttempt(test, registration, fresh, { by: how === 'time' ? 'time' : 'student' }));
   }
   return studentView(test, registration, fresh);
+}
+
+const shownGraceMs = () => Math.max(0, Number(config.shownGraceSeconds) || 0) * 1000;
+
+/**
+ * The student's device says what it was sent is now on screen: the paper (on
+ * each student's own time, `paper: true`) and, under strict timing, the open
+ * question (`questionId`). Each clock still waiting for that starts now, but
+ * no later than the shown grace after it was sent (domain/strict-timing.js
+ * clockStartOnShown). So the seconds a weak connection spends delivering it
+ * are given back, and holding this back gains a tampered page at most the
+ * grace. Once per clock: a repeat, or one past the grace, changes nothing.
+ */
+export async function markShown(req, attemptId, raw = {}) {
+  const { test, registration, attempt: owned } = await ownedAttempt(req, attemptId);
+  if (owned.status !== 'in_progress' || owned.pausedAt) return studentView(test, registration, owned);
+  const checked = await checkIn(test, registration, owned);
+  if (checked.status !== 'in_progress' || checked.isLocked) return studentView(test, registration, checked);
+  const atMs = Date.now();
+  const graceMs = shownGraceMs();
+  const expect = { id: checked.id, status: 'in_progress' };
+  const set = {};
+  if (raw.paper === true && checked.clockSentAt) {
+    const start = clockStartOnShown(dateMs(checked.clockSentAt), dateMs(checked.startedAt), atMs, graceMs);
+    if (start !== null) set.startedAt = new Date(start);
+    set.clockSentAt = null;
+    expect.clockSentAt = checked.clockSentAt;
+  }
+  const questionId = asInteger(raw.questionId, 1, Number.MAX_SAFE_INTEGER);
+  const open = isStrict(test) && checked.strict ? strictPaper(test, checked)[checked.strict.index ?? 0] : null;
+  if (open && questionId === open.questionId) {
+    const shown = acknowledgeShown(checked.strict, atMs, graceMs);
+    if (shown) {
+      set['strict.shownAt'] = shown.shownAt;
+      set['strict.sentAt'] = null;
+      expect['strict.index'] = checked.strict.index ?? 0;
+      expect['strict.sentAt'] = checked.strict.sentAt;
+    }
+  }
+  if (!Object.keys(set).length) return studentView(test, registration, checked);
+  // Conditional on what was read, so two of these crossing land once.
+  await updateAttemptWhere(test.code, registration.id, expect, { $set: set });
+  return studentView(test, registration, (await attemptContext(checked.id))?.attempt || checked);
 }
 
 export async function submitAttemptForStudent(req, attemptId) {
@@ -881,12 +1048,14 @@ async function autoUnlock(test, registration, attempt) {
 }
 
 /**
- * Every request from the paper checks in here. The paper polls every 10-15
+ * Every request from the paper checks in here. The paper polls every 30-40
  * seconds, so a silence longer than the offline limit means the student was
- * disconnected - Wi-Fi off, data off, laptop asleep. That counts as ONE exit,
- * with the whole silence as time away, and can lock the attempt like any
- * other exit. A student already recorded as away is not counted twice: their
- * return reports how long they were gone.
+ * disconnected - Wi-Fi off, data off, laptop asleep. That is NOTED for the
+ * teacher - from when, for how long - and never counts as leaving the test:
+ * it is not an exit, adds no time away and cannot lock the paper. Whatever
+ * the student did meanwhile (switched app, left fullscreen) the page still
+ * saw, kept on the device, and reports now. A student already recorded as
+ * away is not noted twice: their return says how long they were gone.
  */
 async function checkIn(test, registration, attempt) {
   if (!attempt || attempt.status !== 'in_progress') return attempt;
@@ -897,29 +1066,21 @@ async function checkIn(test, registration, attempt) {
 
   if (lastSeenMs !== null && lastSeenMs >= SERVER_STARTED_MS && !justWokeUp() && gapMs > OFFLINE_MS() && !current.isLocked && !current.awaySince) {
     const durationMs = Math.min(DAY_MS, gapMs);
-    const seenAt = new Date(atMs);
-    const applied = await updateAttemptWhere(
+    await updateAttemptWhere(
       test.code,
       registration.id,
       { id: current.id, status: 'in_progress', lastSeenAt: current.lastSeenAt, awaySince: null },
       {
-        $set: { lastSeenAt: seenAt },
-        $inc: {
-          fullscreenExitCount: 1, fullscreenTotalAbsenceMs: durationMs,
-          'integrity.leaveCount': 1, 'integrity.leaves.offline': 1, 'integrity.awayMs': durationMs
-        },
-        $max: { 'integrity.longestAwayMs': durationMs },
-        $push: { events: { $each: [
-          { type: 'fullscreen_exit', createdAt: new Date(lastSeenMs), durationMs: null, detail: 'offline' },
-          { type: 'fullscreen_return', createdAt: seenAt, durationMs, detail: 'offline' }
-        ], $slice: -MAX_EVENTS } }
+        $set: { lastSeenAt: new Date(atMs) },
+        $inc: { 'integrity.offlineCount': 1, 'integrity.offlineMs': durationMs },
+        $max: { 'integrity.longestOfflineMs': durationMs },
+        // From when the server last heard from the paper, which it refreshes
+        // only every SEEN_REFRESH_MS: so "about" this long.
+        $push: logEvent({ type: 'connection_lost', createdAt: new Date(lastSeenMs), durationMs, detail: null })
       }
     );
-    if (applied) {
-      const stored = (await attemptContext(current.id))?.attempt || current;
-      return enforceLimits(test, registration, stored, `offline:${lastSeenMs}`);
-    }
-    return (await attemptContext(current.id))?.attempt || current;
+    current = (await attemptContext(current.id))?.attempt || current;
+    return resumeQuestionClock(test, registration, current);
   }
 
   // Also covers attempts started before "last seen" existed: they start
@@ -1030,16 +1191,19 @@ export const responsesAvailable = (test, attempt) => attempt?.status === 'submit
   && Boolean(test.isClosed) && resultRelease(test).released;
 
 /**
- * What a student may see of a submitted attempt's marks: the score only once
- * the test's release policy allows it and every short answer has been marked.
- * Shared by the results page and the student's dashboard.
+ * What a student may see of a submitted attempt's marks: the score once the
+ * test's release policy allows it and every short answer has been marked - or,
+ * once the teacher has chosen to show marks before marking is finished
+ * (releaseUnmarked), the score of what is marked so far, with the number of
+ * short answers still unmarked. Shared by the results page and the student's
+ * dashboard.
  */
 export function resultSummary(test, attempt) {
   const release = resultRelease(test);
   if (!release.released) return { released: false, releaseMode: test.resultReleaseMode, message: release.message, canDownload: false };
   const canDownload = responsesAvailable(test, attempt);
   const pendingManual = pendingManualCount(test, attempt);
-  if (pendingManual) {
+  if (pendingManual && !test.releaseUnmarked) {
     return {
       released: false, releaseMode: 'manual', message: 'Your short-answer response is awaiting manual marking.', pendingManual, canDownload
     };
@@ -1047,8 +1211,11 @@ export function resultSummary(test, attempt) {
   return {
     released: true,
     releaseMode: test.resultReleaseMode,
-    score: (attempt.answers || []).reduce((total, answer) => total + (Number(answer.isCorrect) || 0), 0),
+    // Marks earned out of the paper's full marks; an unmarked answer counts nothing until it is marked.
+    score: paperScore(attempt),
+    totalMarks: paperMarks(test, attempt),
     answered: (attempt.answers || []).filter((answer) => answer.answeredAt).length,
+    pendingManual,
     canDownload
   };
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, post } from '../lib/api.js';
 import { Modal } from './Modal.jsx';
+import { InfoTip } from './InfoTip.jsx';
 
 /**
  * A signed-in user changes their own password. The current one is asked for
@@ -38,7 +39,10 @@ export function ChangePasswordModal({ onClose, showToast }) {
         <form className="email-sign-in" onSubmit={save}>
           {hasPassword ? (
             <>
-              <label className="field-label" htmlFor="current-password">Current password</label>
+              <span className="field-label-row">
+                <label className="field-label" htmlFor="current-password">Current password</label>
+                <InfoTip label="Forgot your password?">Forgot it? Log out and use “Forgot password?” on the login page.</InfoTip>
+              </span>
               <input id="current-password" className="text-input" type="password" required autoComplete="current-password" value={current} onChange={(event) => setCurrent(event.target.value)}/>
             </>
           ) : (
@@ -51,7 +55,6 @@ export function ChangePasswordModal({ onClose, showToast }) {
           <div className="modal-actions">
             <button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Saving…' : hasPassword ? 'Change password' : 'Set password'}</button>
           </div>
-          {hasPassword && <p className="help">Forgot it? Log out and use “Forgot password?” on the login page.</p>}
         </form>
       )}
     </Modal>

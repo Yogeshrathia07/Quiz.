@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Download } from 'lucide-react';
 import { downloadFile } from '../../lib/api.js';
 import { Modal } from '../../components/Modal.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { plural } from './attendance-paths.js';
 
 const dayOf = (value) => {
@@ -87,15 +88,17 @@ export function AttendanceExportModal({ sessions, filtered = false, onClose, sho
             <input className="text-input" type="date" value={to} min={from || undefined} onChange={(event) => setTo(event.target.value)}/>
           </label>
         </div>
-        <label className="att-export-min">
-          <span className="field-label">Minimum attendance</span>
+        <div className="att-export-min">
+          <span className="field-label-row">
+            <label className="field-label" htmlFor="att-export-min">Minimum attendance</label>
+            <InfoTip label="About the minimum">Totals under it show in red, and those students get a sheet of their own.</InfoTip>
+          </span>
           <span className="input-with-unit">
-            <input className="text-input" type="number" min="1" max="100" step="1" inputMode="numeric" value={min}
-              onChange={(event) => setMin(event.target.value)} aria-describedby="att-export-min-help"/>
+            <input id="att-export-min" className="text-input" type="number" min="1" max="100" step="1" inputMode="numeric" value={min}
+              onChange={(event) => setMin(event.target.value)}/>
             <span aria-hidden="true">%</span>
           </span>
-          <small id="att-export-min-help" className="help">Totals under it show in red, and those students get a sheet of their own.</small>
-        </label>
+        </div>
         <p className="help att-export-summary">
           {picked.length
             ? `${plural(picked.length, 'session')} · ${niceDay(dates[0])}${niceDay(dates[0]) === niceDay(dates.at(-1)) ? '' : ` to ${niceDay(dates.at(-1))}`}`

@@ -1,11 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, Copy, Download } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
-import { localDateTime } from '../../lib/format.js';
+import { copyText, localDateTime } from '../../lib/format.js';
+import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { ApplyChoiceModal } from './ApplyChoiceModal.jsx';
 import {
-  DEFAULT_TYPE_SECONDS, clampMix, estimateSeconds, mixTotal, newQuestion, poolCounts, strictEstimateSeconds
+  DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, clampMix, estimateSeconds, followTypeDefault, mixTotal, newQuestion, poolCounts, strictEstimateSeconds, timerCoverage,
+  hasQuestionTimers, NO_TYPE_SECONDS
 } from '../../lib/quiz.js';
+import { QuestionMarksFields } from '../../components/QuestionMarksFields.jsx';
 import { QuestionTimingFields } from '../../components/QuestionTimingFields.jsx';
 import { QuestionDrawField } from '../../components/QuestionDrawField.jsx';
 import { QuestionMixPicker } from '../../components/QuestionMixPicker.jsx';
@@ -13,6 +16,7 @@ import { TestWindowFields, estimateMinutes, scheduleProblem, suggestedEndsAt } f
 import { nowValue } from '../../components/DateTimeField.jsx';
 import { QuestionEditor } from './QuestionEditor.jsx';
 import { VenueFields } from '../../components/VenueFields.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import {
   ChoiceCards, DEVICE_OPTIONS, FormGroupTitle, IntegrityFields, LAYOUT_OPTIONS, MARKS_OPTIONS, SwitchRow
 } from '../../components/FormControls.jsx';
@@ -32,7 +36,11 @@ export function initialDetails() {
     questionLayout: 'one',
     strictTiming: false,
     strictNext: true,
+    // Form only: whether a one-way paper has question timers. Off, it is sent
+    // with no times at all; the times set stay here for turning it back on.
+    questionTimers: false,
     typeSeconds: { ...DEFAULT_TYPE_SECONDS },
+    typeMarks: { ...DEFAULT_TYPE_MARKS },
     questionDraw: 'spread',
     fullscreenExitLimit: 3,
     fullscreenAbsenceLimitSeconds: 60,
@@ -50,6 +58,9 @@ export function initialDetails() {
   };
 }
 
+/** The form's details as the test's settings: without what only the form uses. */
+const settingsOf = ({ questionTimers: _formOnly, ...settings }) => settings;
+
 /** Everything below the questions that both this form and the edit modal share. */
 export function numericTestSettings(details) {
   return {
@@ -58,9 +69,10 @@ export function numericTestSettings(details) {
     endMode: details.endMode,
     untimed: details.endMode === 'manual',
     endsAt: details.endMode === 'at' ? new Date(details.endsAt).toISOString() : null,
-    durationMinutes: details.endMode === 'duration' ? Number(details.durationMinutes) : null,
+    durationMinutes: details.endMode === 'duration' || details.endMode === 'each' ? Number(details.durationMinutes) : null,
     strictTiming: details.strictTiming === true,
     typeSeconds: Object.fromEntries(Object.entries(details.typeSeconds || DEFAULT_TYPE_SECONDS).map(([type, seconds]) => [type, Number(seconds) || 0])),
+    typeMarks: Object.fromEntries(Object.entries({ ...DEFAULT_TYPE_MARKS, ...(details.typeMarks || {}) }).map(([type, marks]) => [type, Number(marks) || 1])),
     fullscreenExitLimit: Number(details.fullscreenExitLimit),
     fullscreenAbsenceLimitSeconds: Number(details.fullscreenAbsenceLimitSeconds),
     warningsBeforeLock: Number(details.warningsBeforeLock),
@@ -85,6 +97,7 @@ function detailsFromTest(test) {
     strictTiming: test.strictTiming === true,
     strictNext: test.strictNext !== false,
     typeSeconds: test.typeSeconds || { ...DEFAULT_TYPE_SECONDS },
+    typeMarks: { ...DEFAULT_TYPE_MARKS, ...(test.typeMarks || {}) },
     questionDraw: test.questionDraw || 'random',
     fullscreenExitLimit: test.fullscreenExitLimit,
     fullscreenAbsenceLimitSeconds: test.fullscreenAbsenceLimitSeconds,
@@ -122,12 +135,50 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
   const pool = useMemo(() => poolCounts(questions), [questions]);
   useEffect(() => { setMix((current) => clampMix(current, poolCounts(questions))); }, [questions]);
 
-  // Under strict timing the paper takes as long as its questions' timers allow.
-  const estimatedSeconds = useMemo(() => (details.strictTiming
-    ? strictEstimateSeconds(questions, mix, details.typeSeconds) || estimateSeconds(mix)
-    : estimateSeconds(mix)), [details.strictTiming, details.typeSeconds, questions, mix]);
+  // Under strict timing the paper takes as long as its questions' timers allow
+  // (0: none of them has a timer, so the usual estimate stands).
+  const timed = details.strictTiming && details.questionTimers;
+  const timedSeconds = useMemo(() => (timed ? strictEstimateSeconds(questions, mix, details.typeSeconds) : 0),
+    [timed, details.typeSeconds, questions, mix]);
+  const estimatedSeconds = timedSeconds || estimateSeconds(mix);
+  const timers = useMemo(() => (timed ? timerCoverage(questions, mix, details.typeSeconds) : 'none'),
+    [timed, details.typeSeconds, questions, mix]);
 
   const detail = (name, value) => setDetails((current) => ({ ...current, [name]: value }));
+
+  // A type's default time or marks changed: every question of that type that
+  // held the old default as its own follows the new one (followTypeDefault), so
+  // the default and the questions always agree. "The old default" is the one
+  // before this run of typing or clicking - typing 25 passes through 2, and a
+  // question deliberately worth 2 must not be taken for one that followed it.
+  // A pause ends the run; the default then becomes the one to compare with.
+  const defaultsBefore = useRef({});
+  const defaultsSettle = useRef(null);
+  const typeDefault = (name, next) => {
+    const field = name === 'typeSeconds' ? 'timeSeconds' : 'marks';
+    defaultsBefore.current[name] ??= { ...(details[name] || {}) };
+    const before = defaultsBefore.current[name];
+    setQuestions((current) => Object.keys(next).reduce((list, type) => (
+      next[type] !== '' && Number(next[type]) !== Number(before[type]) ? followTypeDefault(list, field, type, before[type]) : list
+    ), current));
+    window.clearTimeout(defaultsSettle.current);
+    defaultsSettle.current = window.setTimeout(() => { defaultsBefore.current = {}; }, 1200);
+    detail(name, next);
+  };
+  useEffect(() => () => window.clearTimeout(defaultsSettle.current), []);
+  const timingField = (name, value) => {
+    if (name === 'typeSeconds') return typeDefault(name, value);
+    // Timers turned on with every type at 0 start from the usual times; a
+    // question's own "no limit" stays as it is.
+    if (name === 'questionTimers') {
+      return setDetails((current) => ({
+        ...current,
+        questionTimers: value,
+        typeSeconds: value && !hasQuestionTimers(current.typeSeconds) ? { ...DEFAULT_TYPE_SECONDS } : current.typeSeconds
+      }));
+    }
+    return detail(name, value);
+  };
 
   // The end time and the duration follow the estimate until the admin sets
   // one of their own, so the common case needs no thought and the unusual
@@ -149,7 +200,7 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     if (!editCode) return;
     api(`/api/admin/tests/${encodeURIComponent(editCode)}/paper`)
       .then((data) => {
-        setDetails(detailsFromTest(data.test));
+        setDetails({ ...detailsFromTest(data.test), questionTimers: hasQuestionTimers(data.test.typeSeconds, data.questions) });
         setQuestions(data.questions);
         setMix(data.test.questionMix || { mcq: data.questions.length, msq: 0, short: 0 });
         setEndTimeTouched(true);
@@ -170,7 +221,7 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
       const importedPool = poolCounts(imported.questions);
       setQuestions(imported.questions);
       setQuestionsOpen(false);
-      setDetails(imported.details);
+      setDetails({ ...imported.details, questionTimers: hasQuestionTimers(imported.details.typeSeconds, imported.questions) });
       if (imported.hasEndTime) setEndTimeTouched(true);
       setMix(clampMix(imported.questionMix || { mcq: imported.questions.length, msq: 0, short: 0 }, importedPool));
       showToast(`${imported.questions.length} questions imported. Review them before creating the test.`);
@@ -206,14 +257,18 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
   ]));
   const questionsChanged = () => questionKey(questions) !== questionKey(editing.questions);
 
+  // One way with no timers: no type has a time and no question one of its own.
+  const untimed = details.strictTiming && !details.questionTimers;
   const payload = () => ({
-    ...details,
+    ...settingsOf(details),
     ...numericTestSettings(details),
+    ...(untimed ? { typeSeconds: { ...NO_TYPE_SECONDS } } : {}),
     questionMix: mix,
     questions: questions.map(({ onPapers, ...question }) => ({
       ...question,
       correctOptions: question.correctOptions.map(String),
-      timeSeconds: question.timeSeconds === '' || question.timeSeconds === undefined ? null : question.timeSeconds
+      timeSeconds: question.timeSeconds === '' || question.timeSeconds === undefined || (untimed && Number(question.timeSeconds) > 0) ? null : question.timeSeconds,
+      marks: question.marks === '' || question.marks === undefined || question.marks === null ? null : Number(question.marks)
     }))
   });
 
@@ -243,6 +298,25 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     showToast('Some questions are not finished. They are shown below.');
   };
 
+  // The JSON template: saved as a file, or copied as text - to paste wherever
+  // the questions are written, then imported with Import JSON.
+  const downloadTemplate = () => {
+    const link = document.createElement('a');
+    link.href = '/quiz-template.json';
+    link.download = 'quiz-template.json';
+    link.click();
+  };
+  const copyTemplate = async () => {
+    try {
+      const response = await fetch('/quiz-template.json', { cache: 'no-cache' });
+      if (!response.ok) throw new Error('The template could not be loaded.');
+      await copyText(await response.text());
+      showToast('Template copied.', 'success');
+    } catch (error) {
+      showToast(error.message.startsWith('This browser blocked') ? 'This browser blocked copying. Use Download template instead.' : error.message);
+    }
+  };
+
   if (editCode && !editing) return <div className="empty card">Loading the test…</div>;
 
   return (
@@ -257,14 +331,20 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
         <div className="json-import-actions">
           <label className="button button-secondary button-small" htmlFor="quiz-json">Import JSON</label>
           <input id="quiz-json" className="sr-only" type="file" accept="application/json,.json" onChange={importJson}/>
-          <a className="link-button creator-template" href="/quiz-template.json" download>Template</a>
+          <ActionMenu label="Template" align="right" items={[
+            { label: 'Download template', icon: Download, onSelect: downloadTemplate },
+            { label: 'Copy template', icon: Copy, onSelect: copyTemplate }
+          ]}/>
         </div>
         )}
       </section>
       {started && (
         <p className="notice editing-note">
-          This test has started. Questions, answer keys, times and settings can still change — you choose who the changes reach when you save.
-          The start time, the timer on every question, how questions are picked and shuffling are fixed; change the end time with Extend time on the dashboard.
+          <span>This test has started — you choose who your changes reach when you save.</span>
+          <InfoTip label="What can still change">
+            Questions, answer keys, times and settings can still change. The start time, whether it goes one way only (no Previous)
+            with a timer on each question, how questions are picked and shuffling are fixed; change the end time with Extend time on the dashboard.
+          </InfoTip>
         </p>
       )}
 
@@ -305,19 +385,24 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
               </p>
             </div>
             {!started && <QuestionDrawField value={details.questionDraw} onChange={(value) => detail('questionDraw', value)} pool={pool} mix={mix} idPrefix="create"/>}
-            <QuestionTimingFields values={details} onChange={detail} idPrefix="create" estimatedSeconds={estimatedSeconds} locked={started}/>
-            {!started && !details.strictTiming && (
+            <QuestionMarksFields values={details} onChange={typeDefault} idPrefix="create"/>
+            {!started && (
               <div className="form-wide">
                 <ChoiceCards
                   label="Question layout"
                   idPrefix="create-layout"
-                  value={details.questionLayout}
-                  onChange={(value) => detail('questionLayout', value)}
+                  value={details.strictTiming ? 'one' : details.questionLayout}
+                  // All on one page has no Previous or Next to take away.
+                  onChange={(value) => setDetails((current) => ({ ...current, questionLayout: value, strictTiming: value === 'all' ? false : current.strictTiming }))}
                   options={LAYOUT_OPTIONS}
                 />
               </div>
             )}
-            {!started && <div className="form-wide">
+            {/* One at a time: the Previous and Next buttons, and the timers when it goes one way only. */}
+            {(started || details.strictTiming || details.questionLayout !== 'all') && (
+              <QuestionTimingFields values={details} onChange={timingField} idPrefix="create" estimatedSeconds={timedSeconds} timers={timers} locked={started}/>
+            )}
+            {!started && <div className="form-wide pill-switches">
               <SwitchRow
                 checked={details.shuffleQuestions}
                 onChange={(value) => detail('shuffleQuestions', value)}
@@ -352,11 +437,8 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
                 value={details.devices}
                 onChange={(value) => detail('devices', value)}
                 options={DEVICE_OPTIONS}
+                more={<>Try any phone or laptop on the <a href="/?page=window-check" target="_blank" rel="noreferrer">browser check page</a>: it shows what the check decides there, and why.</>}
               />
-              <p className="help">
-                Try any phone or laptop on the <a href="/?page=window-check" target="_blank" rel="noreferrer">browser check page</a>:
-                it shows what the check decides there, and why.
-              </p>
             </div>
             <div className="form-wide">
               <SwitchRow
@@ -408,8 +490,9 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
               canRemove={questions.length > 1}
               onChange={updateQuestion}
               onRemove={removeQuestion}
-              strict={details.strictTiming}
+              strict={timed}
               typeSeconds={details.typeSeconds}
+              typeMarks={details.typeMarks}
               onPapers={question.onPapers || 0}
             />
           ))}

@@ -14,10 +14,12 @@ import {
   loadDurableCache, mergeAnswerAcknowledgement, mergeAttemptState, retryDelay, saveCache
 } from '../../lib/offline-answers.js';
 import { setExamInProgress } from '../../lib/useAppUpdate.js';
+import { serverNow } from '../../lib/server-clock.js';
 import { useKeepAwake } from '../../lib/keep-awake.js';
 import { useExtensionWatch } from '../../lib/extension-watch.js';
 import { getBrowserLocation } from '../../lib/geo.js';
 import { LocationHelp } from '../../components/LocationCheck.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { QuestionPalette } from './QuestionPalette.jsx';
 import { QuestionPaper } from './QuestionPaper.jsx';
 import { QuestionList } from './QuestionList.jsx';
@@ -59,11 +61,21 @@ const KEYBOARD_GRACE_MS = 15_000;
 const KEYBOARD_NOTES_MAX = 3;
 /** Avoid every timed paper opening one connection on the exact same millisecond. */
 const AUTO_SUBMIT_JITTER_MS = 8_000;
+/**
+ * Strict timing: moving on waits this long for an answer before asking again.
+ * A reply stuck on a weak connection used to hold the next question back for
+ * the browser's 25 seconds - while its clock ran on the server.
+ */
+const MOVE_TIMEOUT_MS = 8_000;
+/** Telling the server the paper is on screen is worth this long, a few times, within the shown grace. */
+const SHOWN_TIMEOUT_MS = 6_000;
 /** Worth trying again: the connection dropped, or the server was momentarily overloaded. */
 const isRetryable = (error) => isOffline(error) || isSignedOut(error) || error.status >= 500 || error.status === 429 || error.status === 408;
 // These events change what a student is permitted to see or do. Activity
 // frames (answer_saved, location, integrity) are for the administrator only;
 // re-fetching a complete paper for each of those was needless traffic.
+/** These change what a handed-in paper's result shows: its marks released, or a mark given. */
+const RESULT_REFRESH_EVENTS = new Set(['results_released', 'marks_updated']);
 const PAPER_REFRESH_EVENTS = new Set([
   'resync', 'stream_reconnected', 'time_changed', 'test_settings_changed', 'test_closed', 'test_reopened',
   'quiz_restarted', 'test_reset', 'attempts_restarted', 'attempts_bulk_updated',
@@ -169,7 +181,7 @@ function TimeUpGate({ unsent, answered, total, online }) {
         <p>The test time has ended, so your paper is being submitted automatically with the {answered} of {total} answers you gave.</p>
         <p className="help">
           {!online
-            ? 'The server can’t be reached right now. Your answers are safe on this device — keep this page open and it finishes by itself.'
+            ? 'The server can’t be reached right now. Your answers are safe on this device, are sent as soon as the connection is back, and still count. Keep this page open.'
             : unsent > 0
               ? `${unsent} answer${unsent === 1 ? ' is' : 's are'} still being sent from this device — keep this page open.`
               : 'Keep this page open. Your result appears here in a moment.'}
@@ -269,10 +281,12 @@ function AwayGate({ attempt, split, starting, needsFullscreen, refusals = 0, onR
           ? <p className="eyebrow away-warning">Warning · over the limit</p>
           : <p className="eyebrow">Paper hidden</p>}
         <h2 id="away-gate-title">{needsFullscreen ? 'Return to fullscreen to continue' : 'Tap to continue your test'}</h2>
-        <p>{pastLimit(attempt)
-          ? `You have left the test ${attempt.timesLeft} times, more than the ${attempt.fullscreenExitLimit} allowed. Your administrator can see every exit.`
-          : 'You left the test. This has been recorded, and your administrator can see it.'}</p>
-        {line && <p className="help">{line}</p>}
+        <p className="away-gate-line">
+          <span>{pastLimit(attempt)
+            ? `You have left the test ${attempt.timesLeft} times, more than the ${attempt.fullscreenExitLimit} allowed.`
+            : 'You left the test. This is recorded.'}</span>
+          {line && <InfoTip label="Your leaving allowance">{line}</InfoTip>}
+        </p>
         {pausedNote(attempt)}
         {refused}
         <button className="button button-primary button-wide" type="button" onClick={onResume}>
@@ -306,8 +320,9 @@ function VenueGate({ venue, radiusMeters, checking, problem, onCheck }) {
             : 'Your device has stopped telling us where it is. Allow location access, and keep this page open at the venue.'}
         </p>
         <LocationHelp problem={problem}/>
-        <p className="help">
-          The check runs again every few seconds. Your paper and your answers are safe, your time keeps running, and this is recorded for your administrator.
+        <p className="away-gate-line help">
+          <span>Your answers are safe.</span>
+          <InfoTip label="About the venue check">The check runs again every few seconds. Your paper and your answers are safe, your time keeps running, and this is recorded for your administrator.</InfoTip>
         </p>
         <button className="button button-primary button-wide" type="button" disabled={checking} onClick={onCheck}>
           {checking ? 'Checking…' : 'Check my location now'}
@@ -375,6 +390,19 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   const loadAgain = useRef(false);
   const usedInitialAttempt = useRef(Boolean(initialAttempt));
   const durableWriter = useRef(null);
+  // Strict timing: the move to the next question that could not reach the
+  // server yet ({ questionId, auto }), tried again as soon as it can be.
+  const pendingMove = useRef(null);
+  const moveRetryTimer = useRef(null);
+  const moveRetryRound = useRef(0);
+  const retryMove = useRef(null);
+  // Strict timing: the question whose time ran out on this screen. It is
+  // final from here on, even while the move waits for the connection.
+  const [expiredId, setExpiredId] = useState(null);
+  // The venue check, for code above where it is defined.
+  const checkLocationRef = useRef(null);
+  // Answers this device still held for the paper, put back after a reload.
+  const [restoredId, setRestoredId] = useState(null);
   const clearDurable = useCallback(() => {
     const writer = durableWriter.current;
     return writer ? writer.clear() : clearDurableCache(durableStorage, code);
@@ -490,6 +518,8 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       const events = liveEventsFromPayload(payload);
       if (events.some((event) => event?.kind === 'device_override' || event?.kind === 'test_settings_changed')) setDeviceRefresh((value) => value + 1);
       if (events.some((event) => PAPER_REFRESH_EVENTS.has(event?.kind))) void loadAttempt();
+      // A handed-in paper: marks released, or a mark given, show at once.
+      if (attempt?.status === 'submitted' && events.some((event) => RESULT_REFRESH_EVENTS.has(event?.kind))) void loadResult(attempt.id);
     },
     Boolean(attempt?.id)
   );
@@ -507,12 +537,50 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
     try { storage?.removeItem(`quiz-skipped:${attempt.id}`); } catch { /* storage blocked */ }
   }, [attempt?.id]);
 
-  // Persist the paper and anything unsent on every change.
+  // Answers still unsent when the page was reloaded - or the phone put it
+  // away and opened it again - are on this device: put them back in the
+  // queue, so they are sent rather than forgotten. Anything changed since
+  // the reload is newer and stays.
   useEffect(() => {
-    if (!attempt?.id || attempt.status === 'submitted') return;
+    if (!attempt?.id || restoredId === attempt.id) return undefined;
+    const id = attempt.id;
+    let cancelled = false;
+    const restore = (found) => {
+      if (cancelled) return;
+      // A restart keeps the paper's id: answers from before it are not for this paper.
+      const gap = Math.abs(Date.parse(found?.attempt?.startedAt || '') - Date.parse(attemptRef.current?.startedAt || ''));
+      if (found?.attempt?.id === id && found.pending?.size && !(gap > 30_000)) {
+        setPending((current) => {
+          const next = new Map(found.pending);
+          current.forEach((payload, questionId) => next.set(questionId, payload));
+          return next;
+        });
+      }
+      setRestoredId(id);
+    };
+    const cached = loadCache(storage, id);
+    if (cached) restore(cached);
+    else loadDurableCache(durableStorage, code).then(restore, () => restore(null));
+    return () => { cancelled = true; };
+  }, [attempt?.id, restoredId, code]);
+
+  // Persist the paper and anything unsent on every change - once what this
+  // device held from before has been put back, or it would be overwritten.
+  // A paper handed in (by the clock, say, while this device was offline) is
+  // kept until its last answer held here has gone (domain/late-answers.js).
+  useEffect(() => {
+    if (!attempt?.id || restoredId !== attempt.id) return;
+    if (attempt.status === 'submitted') {
+      if (pending.size) saveCache(storage, attempt.id, attempt, pending);
+      else {
+        clearCache(storage, attempt.id);
+        void clearDurable();
+      }
+      return;
+    }
     saveCache(storage, attempt.id, attempt, pending);
     durableWriter.current?.schedule(attempt, pending);
-  }, [attempt, pending, code]);
+  }, [attempt, pending, code, restoredId, clearDurable]);
 
   /* ------------------------------------------------- sending queued answers */
 
@@ -556,6 +624,12 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
           if (isSignedOut(error)) { setSignedOut(error.message); queueAnswerRetry(); break; }
           // Paused by the teacher: keep it, and send it once they continue.
           if (error.code === 'PAUSED') { await loadAttempt(); break; }
+          // Locked: kept too, and sent once the paper is revived. (It used to
+          // be taken as refused for good and dropped from this device.)
+          if (error.code === 'LOCKED') { await loadAttempt(); queueAnswerRetry(); break; }
+          // The venue check went quiet while offline: check now, and send it
+          // once the paper is open again. Never dropped for that.
+          if (error.code === 'VENUE_CLOSED') { void checkLocationRef.current?.('blocked'); queueAnswerRetry(); break; }
           if (isPermanentRejection(error.status)) {
             // The server will keep refusing this one: drop it and take its truth.
             setPending((current) => {
@@ -584,8 +658,8 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
     const timer = window.setTimeout(() => { flush().finally(() => setSaving(false)); }, 250);
     return () => window.clearTimeout(timer);
   }, [flush, pending.size, answerRetrySignal]);
-  // Continued after a pause: answers held back by it go now.
-  useEffect(() => { if (attempt && !attempt.paused) flush(); }, [attempt?.paused]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Continued after a pause, or revived after a lock: answers held back by it go now.
+  useEffect(() => { if (attempt && !attempt.paused && !attempt.isLocked) flush(); }, [attempt?.paused, attempt?.isLocked]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => {
     if (answerRetryTimer.current) window.clearTimeout(answerRetryTimer.current);
   }, []);
@@ -654,7 +728,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   // Retry when the browser says the connection is back, and on a slow beat in
   // case that never fires (captive portals, flaky mobile data).
   useEffect(() => {
-    const goOnline = () => { setOnline(true); flush(); flushPresence(); };
+    const goOnline = () => { setOnline(true); flush(); flushPresence(); void loadAttempt(); retryMove.current?.(); };
     const goOffline = () => setOnline(false);
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
@@ -674,12 +748,14 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       window.clearTimeout(timer);
       window.clearTimeout(presenceFlushTimer.current);
     };
-  }, [flush, flushPresence, pending.size]);
+  }, [flush, flushPresence, pending.size, loadAttempt]);
 
   const saveAnswer = useCallback(async (payload) => {
     const { questionId, ...rest } = payload;
     // Show it at once and keep it on this device; the queue does the rest.
-    setPending((current) => new Map(current).set(questionId, { questionId, ...rest }));
+    // When it was made, on the server's clock: an answer held here by a lost
+    // connection is still taken after its time, marked late (late-answers.js).
+    setPending((current) => new Map(current).set(questionId, { questionId, ...rest, madeAt: Math.round(serverNow()) }));
     setSaving(true);
   }, []);
 
@@ -703,6 +779,54 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
     timer = window.setTimeout(tick, attemptPollDelay(attemptRef.current));
     return () => window.clearTimeout(timer);
   }, [attempt?.id, attempt?.status, attempt?.isLocked, attempt?.paused, loadAttempt]);
+
+  // Strict timing moved on while an answer was on its way: the question held
+  // here is not the open one any more, so fetch the paper as it now stands.
+  useEffect(() => { if (attempt?.questionsStale) void loadAttempt(); }, [attempt?.questionsStale, loadAttempt]);
+
+  // The paper - or, under strict timing, the open question - is on this
+  // screen: tell the server, whose clock for it starts now rather than when
+  // it was sent, so a slow connection does not eat the time (markShown). The
+  // server allows this only a few seconds after sending, so it is tried a few
+  // times, quickly, and then left.
+  const shownSent = useRef('');
+  const shownQuestion = attempt?.strict?.shownPending ? attempt.questions?.[0]?.id ?? null : null;
+  const shownPaper = Boolean(attempt?.clockPending);
+  useEffect(() => {
+    const attemptId = attempt?.id;
+    if (!attemptId || attempt?.status !== 'in_progress' || (!shownQuestion && !shownPaper)) return undefined;
+    const key = `${attemptId}:${shownQuestion ?? ''}:${shownPaper}`;
+    if (shownSent.current === key) return undefined;
+    shownSent.current = key;
+    let cancelled = false;
+    (async () => {
+      for (let round = 0; round < 3 && !cancelled; round += 1) {
+        try {
+          const response = await post(`/api/test-attempts/${attemptId}/shown`, {
+            ...(shownQuestion ? { questionId: shownQuestion } : {}), ...(shownPaper ? { paper: true } : {})
+          }, { timeoutMs: SHOWN_TIMEOUT_MS });
+          const fresh = response?.attempt;
+          if (!fresh || cancelled) return;
+          // Only its clocks: anything else may have moved on while this was on its way.
+          setAttempt((current) => (current?.id !== fresh.id ? current : {
+            ...current,
+            startedAt: fresh.startedAt,
+            deadlineAt: fresh.deadlineAt,
+            timeOver: fresh.timeOver,
+            clockPending: fresh.clockPending,
+            serverTime: fresh.serverTime,
+            revision: undefined,
+            ...(current.strict && fresh.strict && current.strict.index === fresh.strict.index ? { strict: fresh.strict } : {})
+          }));
+          return;
+        } catch (error) {
+          if (isSignedOut(error) || !isRetryable(error)) return;
+          await wait(1_500);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [attempt?.id, attempt?.status, shownQuestion, shownPaper]);
 
   const attemptId = attempt?.id;
   // The admin turned on "Private window only" and this is a normal window:
@@ -766,6 +890,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       setCheckingNow(false);
     }
   }, [attempt?.locationRequired]);
+  checkLocationRef.current = checkLocation;
 
   const venueClosed = attempt?.venueClosed || null;
   useEffect(() => {
@@ -1017,8 +1142,21 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
         setTimeUp(false);
         return;
       }
+      // Answers still on this device go first: the server takes them for 90
+      // seconds after the end. Handing the paper in over them would leave
+      // them out - so if they cannot go by then, the server hands the paper
+      // in after its grace instead, and they follow it (late-answers.js).
+      const until = Date.now() + 75_000;
       await flush();
+      while (pendingRef.current.size && Date.now() < until && attemptRef.current?.status === 'in_progress') {
+        await wait(3_000);
+        await flush();
+      }
       flushPresence();
+      if (pendingRef.current.size) {
+        await loadAttempt();
+        return;
+      }
       for (let round = 0; round < 4; round += 1) {
         try {
           const response = await post(`/api/test-attempts/${attemptIdRef.current}/submit`);
@@ -1046,17 +1184,23 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   // id tells the server which one we mean, so a repeat never skips one.
   const moving = useRef(false);
   const [movingOn, setMovingOn] = useState(false);
-  const goNext = useCallback(async (questionId, { auto = false } = {}) => {
+  // A move that has not reached the server yet: it goes by itself (below).
+  const [moveWaiting, setMoveWaiting] = useState(false);
+  const goNext = useCallback(async (questionId, { auto = false, retry = false } = {}) => {
     if (moving.current || !attemptIdRef.current) return;
     moving.current = true;
     setMovingOn(true);
+    window.clearTimeout(moveRetryTimer.current);
     // The answer on screen goes with the move itself - one request, not a
     // save and then a move. A save already on its way lands first, so it can
     // never arrive after the question has closed.
     for (const until = Date.now() + 3_000; flushing.current && Date.now() < until;) await wait(25);
     const typed = paperDraft.current?.();
+    // Its time is up on this screen: the answer is final from here on, also
+    // while the move waits for the connection.
+    if (auto) setExpiredId(questionId);
     const queued = pendingRef.current.get(questionId);
-    const carried = typed ? { questionId, ...typed } : queued || null;
+    const carried = typed ? { questionId, ...typed, madeAt: Math.round(serverNow()) } : queued || null;
     if (queued) {
       setPending((current) => {
         if (current.get(questionId) !== queued) return current;
@@ -1066,8 +1210,23 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       });
     }
     try {
-      const response = await post(`/api/test-attempts/${attemptIdRef.current}/next`, carried ? { questionId, answer: carried } : { questionId });
-      if (response.attempt.status === 'submitted') {
+      const url = `/api/test-attempts/${attemptIdRef.current}/next`;
+      const body = carried ? { questionId, answer: carried } : { questionId };
+      // Asking again for the same question is safe - the server never skips
+      // one - so a reply stuck on a weak connection is not waited out.
+      let response;
+      for (let round = 0; !response; round += 1) {
+        try {
+          response = await post(url, body, { timeoutMs: MOVE_TIMEOUT_MS });
+        } catch (error) {
+          if (isOffline(error) || isSignedOut(error) || !isRetryable(error) || round >= 2) throw error;
+          await wait(retryDelay(round) / 2);
+        }
+      }
+      pendingMove.current = null;
+      moveRetryRound.current = 0;
+      setMoveWaiting(false);
+      if (response.attempt.status === 'submitted' && !pendingRef.current.size) {
         clearCache(storage, attemptIdRef.current);
         void clearDurable();
         writePresence(attemptIdRef.current, []);
@@ -1082,17 +1241,54 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       }
     } catch (error) {
       // Not delivered: the answer goes back in the queue, so it is not lost.
-      if (carried && (isRetryable(error) || isSignedOut(error))) {
+      if (carried && (isRetryable(error) || isSignedOut(error) || ['LOCKED', 'PAUSED', 'VENUE_CLOSED'].includes(error.code))) {
         setPending((current) => (current.has(questionId) ? current : new Map(current).set(questionId, carried)));
       }
+      // The connection, or this screen's clock a moment ahead of the
+      // server's: the move goes again by itself - soon, and at once when the
+      // connection is back - rather than waiting for the next refresh.
+      const waitsToGo = isRetryable(error) || (auto && error.code === 'QUESTION_OPEN');
+      if (waitsToGo) {
+        pendingMove.current = { questionId, auto };
+        setMoveWaiting(true);
+        const round = moveRetryRound.current;
+        moveRetryRound.current += 1;
+        moveRetryTimer.current = window.setTimeout(() => retryMove.current?.(), error.code === 'QUESTION_OPEN' ? 1_500 : retryDelay(round));
+      }
       if (isSignedOut(error)) setSignedOut(error.message);
-      else if (isOffline(error)) showToast('Your test moves on as soon as it is back.', 'warn', { title: 'No connection' });
-      else { showToast(error.message); await loadAttempt(); }
+      else if (error.code === 'QUESTION_OPEN') void loadAttempt();
+      else if (waitsToGo) {
+        if (!retry) showToast('Your test moves on as soon as it is back.', 'warn', { title: 'No connection' });
+      } else { showToast(error.message); await loadAttempt(); }
     } finally {
       moving.current = false;
       setMovingOn(false);
     }
   }, [code, loadAttempt, showToast, clearDurable]);
+  retryMove.current = () => {
+    const move = pendingMove.current;
+    if (move) void goNext(move.questionId, { auto: move.auto, retry: true });
+  };
+
+  // The server moved on by itself (a refresh shows another question, or the
+  // paper handed in): the move that was waiting is done.
+  // Or it says the question still has time (its clock was moved on - a pause,
+  // say - and this screen ran out early): the question opens again here.
+  useEffect(() => {
+    const move = pendingMove.current;
+    if (!move || !attempt) return;
+    const openId = attempt.questions?.[0]?.id;
+    const endsAt = Date.parse(attempt.strict?.questionEndsAt || '');
+    const timeLeft = move.auto && openId === move.questionId && Number.isFinite(endsAt) && endsAt - serverNow() > 2_000;
+    if (attempt.status !== 'in_progress' || (attempt.strict && openId !== undefined && openId !== move.questionId) || timeLeft) {
+      pendingMove.current = null;
+      moveRetryRound.current = 0;
+      window.clearTimeout(moveRetryTimer.current);
+      setMoveWaiting(false);
+      if (timeLeft) setExpiredId(null);
+    }
+  }, [attempt]);
+  useEffect(() => () => window.clearTimeout(moveRetryTimer.current), []);
 
   const signedBackIn = async () => {
     setSignedOut('');
@@ -1120,10 +1316,12 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   useEffect(() => { if (attempt?.status === 'submitted') loadResult(attempt.id); }, [attempt?.id, attempt?.status, loadResult]);
   // Checked until the marks arrive - and, for a paper the teacher's Close
   // handed in, a little longer, in case the Close was a mistake and they resume.
+  // Marks released before marking was done keep being checked until every
+  // answer is marked (live events bring them sooner).
   const closedByTeacher = result?.submittedBy === 'admin';
   useEffect(() => {
     if (!attempt?.id || attempt.status !== 'submitted' || result?.wasReset) return undefined;
-    if (result?.released && !closedByTeacher) return undefined;
+    if (result?.released && !closedByTeacher && !(result.pendingManual > 0)) return undefined;
     const timer = window.setInterval(() => loadResult(attempt.id), result?.released ? 15_000 : 7_000);
     return () => window.clearInterval(timer);
   }, [attempt?.id, attempt?.status, result, closedByTeacher, loadResult]);
@@ -1181,6 +1379,13 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
         : <QuestionPalette questions={questions} currentIndex={showAll ? -1 : current.index} onSelect={showAll ? scrollToQuestion : selectQuestion}/>}
 
       <div className="exam-notices">
+        {strict && moveWaiting && !movingOn && (
+          <p className="notice" role="status">
+            {expiredId === current.id
+              ? 'Time is up for this question. The next one opens as soon as the connection is back. Your answer is kept on this device.'
+              : 'Waiting for the connection to open the next question. Your answer is kept on this device.'}
+          </p>
+        )}
         {extensionSeen && (
           <p className="notice danger" role="status">
             <strong>A browser extension is changing this page.</strong> Turn extensions off, or take the test in a private (Incognito) window. This is recorded.
@@ -1211,7 +1416,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
         )}
         {showAll
           ? <QuestionList questions={questions} onSave={saveAnswer} onTextBurst={onTextBurst} connection={connection}/>
-          : <QuestionPaper key={current.id} question={current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} onTextBurst={onTextBurst} connection={connection}/>}
+          : <QuestionPaper key={current.id} question={strict && current.id === expiredId ? { ...current, locked: true } : current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} onTextBurst={onTextBurst} connection={connection}/>}
         {strict && movingOn && (
           <div className="strict-switching" role="status">{isLastStrict ? 'Submitting your paper…' : 'Opening the next question…'}</div>
         )}

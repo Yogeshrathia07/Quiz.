@@ -3,11 +3,19 @@ import { config } from '../config.js';
 import { describeEvent, integrityRecord, integritySummary, locksOnViolation, violationActionOf, warningsBeforeLockOf, warnsOnViolation } from './integrity.js';
 import { activityLog } from './activity.js';
 import { activeQuestions, questionPoolCounts, questionType } from './question-bank.js';
-import { attemptDeadlineMs, endModeOf, isAnswered, isAttemptTimeOver, isTimeOver, isUntimed, startModeOf } from './attempt-rules.js';
+import { attemptDeadlineMs, endModeOf, isAnswered, isAttemptTimeOver, isPerStudent, isTimeOver, isUntimed, startModeOf } from './attempt-rules.js';
 import { DEFAULT_TYPE_SECONDS, allowsNext, isStrict, openQuestionEndsAt, questionSeconds, strictPaper } from './strict-timing.js';
 import { DEVICE_NOTES, deviceRuleOf, kindWord } from './device.js';
+import { DEFAULT_TYPE_MARKS, earnedMarks, paperMarks, paperScore, questionMarks, roundMarks } from './marks.js';
 
 const lockWaitMs = () => (Number(config.lockWaitSeconds) || 0) * 1000;
+/**
+ * A clock sent at `sentAt` still waits for the device to say it is on screen
+ * (attempt-service markShown) - until the shown grace is up, when saying so
+ * could no longer move it.
+ */
+const waitsForShown = (sentAt, atMs) => Boolean(sentAt)
+  && atMs < dateMs(sentAt) + Math.max(0, Number(config.shownGraceSeconds) || 0) * 1000;
 
 /** How long a submitted paper took, start to submit; null until it is submitted. */
 export const timeTakenSeconds = (attempt) => (attempt?.startedAt && attempt?.submittedAt
@@ -44,13 +52,21 @@ export function publicTest(doc) {
     devices: deviceRuleOf(doc),
     questionLayout: doc.questionLayout === 'all' ? 'all' : 'one',
     strictTiming: isStrict(doc),
+    // One way only, and whether any question has a timer - with none, it is just "no going back".
+    strictTimed: isStrict(doc) && activeQuestions(doc).some((question) => questionSeconds(doc, question) > 0),
     strictNext: allowsNext(doc),
     questionDraw: doc.questionDraw === 'spread' ? 'spread' : 'random',
     typeSeconds: doc.typeSeconds || DEFAULT_TYPE_SECONDS,
+    // What each question type is worth unless a question says otherwise (domain/marks.js).
+    typeMarks: { ...DEFAULT_TYPE_MARKS, ...(doc.typeMarks || {}) },
     locationRequired: Boolean(doc.locationRequired),
     locationRadiusMeters: doc.locationRadiusMeters || null,
     resultReleaseMode: doc.resultReleaseMode,
     resultsReleasedAt: iso(doc.resultsReleasedAt),
+    // Marks shown before marking is finished, unmarked answers as not marked yet.
+    releaseUnmarked: Boolean(doc.releaseUnmarked),
+    // Marks final: nothing changes them until unfrozen (domain/freeze.js).
+    resultsFrozenAt: iso(doc.resultsFrozenAt),
     isStarted: Boolean(doc.isStarted),
     startedAt: iso(doc.startedAt),
     isClosed: Boolean(doc.isClosed),
@@ -86,7 +102,9 @@ function paperQuestion(test, attempt, assigned, atMs) {
     answered: isAnswered(answer),
     // Once time is up nothing on the paper changes: it is being submitted.
     locked: isAttemptTimeOver(test, attempt, atMs),
-    timeSeconds: isStrict(test) ? questionSeconds(test, question) || null : null
+    timeSeconds: isStrict(test) ? questionSeconds(test, question) || null : null,
+    // What it is worth, shown on the paper.
+    marks: questionMarks(test, question)
   };
 }
 
@@ -115,6 +133,8 @@ function strictView(test, attempt, atMs) {
       // Stopped while the student is away (or locked): the times above are then
       // as if they came back now, and the page holds them still.
       questionPaused: Boolean(state.pausedSince),
+      // Sent, and its clock waits for this device to say it is on screen.
+      shownPending: Boolean(open) && Boolean(state.shownAt) && waitsForShown(state.sentAt, atMs),
       paperEndsAt: endsAt ? iso(new Date(endsAt.getTime() + laterSeconds * 1000)) : null,
       laterSeconds,
       untimedLeft,
@@ -144,13 +164,19 @@ export function attemptView(test, attempt, atMs = currentMs(), { venue = null } 
     submittedAt: iso(attempt.submittedAt),
     submittedBy: attempt.submittedBy || null,
     untimed: isUntimed(test),
-    // This student's own end: the test's, plus any time their teacher paused them for.
+    // Each student's own time: so many minutes from their own Begin, not one end for everybody.
+    ownTime: isPerStudent(test),
+    durationMinutes: isPerStudent(test) ? Number(test.durationMinutes) || null : null,
+    // This student's own end: the test's (or their own time's), plus any time given back.
     deadlineAt: isUntimed(test) || !Number.isFinite(attemptDeadlineMs(test, attempt, atMs)) ? null : new Date(attemptDeadlineMs(test, attempt, atMs)).toISOString(),
     serverTime: new Date(atMs).toISOString(),
     timeOver: isAttemptTimeOver(test, attempt, atMs),
+    // Each student's own time: the paper's clock waits for this device to say it is on screen.
+    clockPending: attempt.status === 'in_progress' && waitsForShown(attempt.clockSentAt, atMs),
     // Paused by the teacher: no paper on screen, no answers taken, and the clock stopped.
     paused: Boolean(attempt.pausedAt),
     totalQuestions: attempt.questions?.length || test.questionCount,
+    totalMarks: paperMarks(test, attempt),
     questionLayout: test.questionLayout === 'all' ? 'all' : 'one',
     answeredQuestionCount: answers.filter(isAnswered).length,
     isLocked: Boolean(attempt.isLocked),
@@ -237,6 +263,8 @@ export function responseDetails(test, registration) {
       if (!question) return null;
       const answer = answers.get(assigned.questionId) || {};
       const manualGrading = Boolean(question.manualGrading);
+      const maxMarks = questionMarks(test, question);
+      const marks = earnedMarks(answer);
       return {
         questionId: question.id,
         questionNumber: assigned.questionIndex + 1,
@@ -246,9 +274,19 @@ export function responseDetails(test, registration) {
         correctAnswer: manualGrading ? '' : optionText(question, question.correctOptions),
         answeredAt: iso(answer.answeredAt),
         answered: isAnswered(answer),
-        isCorrect: answer.isCorrect === null || answer.isCorrect === undefined ? null : Boolean(answer.isCorrect),
+        // Marks earned (null while unmarked) out of what the question is worth.
+        marks,
+        maxMarks,
+        // Right means full marks; a short answer can also earn part of them.
+        isCorrect: marks === null ? null : marks >= maxMarks,
+        partial: marks !== null && marks > 0 && marks < maxMarks,
+        // A choice answer's mark the teacher changed by hand (domain/marks.js automaticMarks).
+        overridden: Boolean(answer.marksOverride),
         manualGrading,
         textBursts: bursts.get(question.id) || [],
+        // Made in time on the device but held there by a lost connection
+        // (domain/late-answers.js): when it says it was made, and when it came.
+        late: answer.late ? { madeAt: iso(answer.late.madeAt), arrivedAt: iso(answer.late.arrivedAt) } : null,
         // Strict timing: how long the question was open, and whether its time ran out.
         ...strictTimes(test, attempt, question.id)
       };
@@ -310,21 +348,25 @@ export function studentResponseData(test, registration) {
     answers,
     summary: {
       total: answers.length,
-      score: answers.reduce((total, answer) => total + (answer.isCorrect ? 1 : 0), 0),
+      score: roundMarks(answers.reduce((total, answer) => total + (answer.marks || 0), 0)),
+      totalMarks: roundMarks(answers.reduce((total, answer) => total + answer.maxMarks, 0)),
       correct: answers.filter((answer) => answer.isCorrect === true).length,
-      incorrect: answers.filter((answer) => answer.answered && answer.isCorrect === false).length,
+      partial: answers.filter((answer) => answer.partial).length,
+      incorrect: answers.filter((answer) => answer.answered && answer.isCorrect === false && !answer.partial).length,
       unanswered: answers.filter((answer) => !answer.answered).length,
       ungraded: answers.filter((answer) => answer.manualGrading && answer.answered && answer.isCorrect === null).length
     }
   };
 }
 
-export function scoreSummary(registration) {
+/** A paper's marks: earned, out of its full marks (domain/marks.js); its questions and how many were answered; and how many answers wait for a mark. */
+export function scoreSummary(registration, test) {
   const answers = registration.attempt?.answers || [];
   return {
-    total: answers.length,
+    total: paperMarks(test, registration.attempt),
+    questions: registration.attempt?.questions?.length || answers.length,
     answered: answers.filter(isAnswered).length,
-    score: answers.reduce((total, answer) => total + (Number(answer.isCorrect) || 0), 0),
+    score: paperScore(registration.attempt),
     manualTotal: answers.filter((answer) => answer.isCorrect === null).length
   };
 }

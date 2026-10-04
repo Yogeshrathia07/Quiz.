@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { post } from '../../lib/api.js';
 import { AuthForm } from '../../components/AuthForm.jsx';
 import { TestHeader } from './StatusScreens.jsx';
@@ -18,8 +19,10 @@ function GuestForm({ code, onSignedIn, showToast }) {
 
   return (
     <div className="guest-sign-in">
-      <h2 className="auth-title">Continue as guest</h2>
-      <p className="help">Use a temporary name. Approval is still required, and signing out submits your test.</p>
+      <h2 className="auth-title">
+        Continue as guest{' '}
+        <InfoTip label="About guest accounts">Use a temporary name. Approval is still required, and signing out submits your test.</InfoTip>
+      </h2>
       <form onSubmit={continueAsGuest}>
         <label className="field-label" htmlFor="guest-name">Display name</label>
         <input

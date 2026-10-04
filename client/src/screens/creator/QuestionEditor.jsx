@@ -1,24 +1,33 @@
 import { useState } from 'react';
+import { Clock, Star } from 'lucide-react';
 import { ChoiceCards } from '../../components/FormControls.jsx';
 import { PromptField } from './PromptField.jsx';
-import { QUESTION_TYPES, questionSecondsFor, secondsLabel } from '../../lib/quiz.js';
+import { QUESTION_TYPES, marksLabel, questionMarksFor, questionSecondsFor, secondsLabel } from '../../lib/quiz.js';
 
 const TYPE_TITLES = { mcq: 'Single choice', msq: 'Multiple choice', short: 'Short answer' };
+const TYPE_ABOUT = {
+  mcq: 'One correct option; marked automatically.',
+  msq: 'One or more correct options; right only when exactly those are picked. Marked automatically.',
+  short: 'Students write their answer; you mark it yourself.'
+};
 const TIME_CHOICES = [0, 15, 20, 30, 45, 60, 90, 120, 180, 300];
+const MARK_CHOICES = [0.5, 1, 2, 3, 4, 5, 10];
+const hasOwn = (value) => value !== undefined && value !== null && value !== '';
 
 /**
  * Strict timing: this question's own time. "Default" follows the test's time
- * for its type, so changing that default later still reaches this question.
+ * for its type, so changing that default later still reaches this question -
+ * and so does picking the default's own value: that is following it too.
  */
 function QuestionTime({ question, typeSeconds, onChange }) {
   const own = question.timeSeconds;
-  const hasOwn = own !== undefined && own !== null && own !== '';
-  const [custom, setCustom] = useState(hasOwn && !TIME_CHOICES.includes(Number(own)));
-  const choice = !hasOwn ? 'default' : custom ? 'custom' : String(own);
+  const fallback = questionSecondsFor({ type: question.type }, typeSeconds);
+  const [custom, setCustom] = useState(hasOwn(own) && !TIME_CHOICES.includes(Number(own)));
+  const choice = !hasOwn(own) ? 'default' : custom ? 'custom' : String(own);
   const pick = (value) => {
     if (value === 'default') { setCustom(false); onChange(null); }
-    else if (value === 'custom') { setCustom(true); onChange(hasOwn ? Number(own) : 60); }
-    else { setCustom(false); onChange(Number(value)); }
+    else if (value === 'custom') { setCustom(true); onChange(hasOwn(own) ? Number(own) : 60); }
+    else { setCustom(false); onChange(Number(value) === fallback ? null : Number(value)); }
   };
   return (
     <div className="question-time">
@@ -40,7 +49,43 @@ function QuestionTime({ question, typeSeconds, onChange }) {
   );
 }
 
-export function QuestionEditor({ question, index, canRemove, onChange, onRemove, strict = false, typeSeconds, onPapers = 0 }) {
+/**
+ * What this question is worth. "Default" follows the test's marks for its
+ * type, so changing that default later still reaches this question - and so
+ * does picking the default's own value.
+ */
+function QuestionMarks({ question, typeMarks, onChange }) {
+  const own = question.marks;
+  const fallback = questionMarksFor({ type: question.type }, typeMarks);
+  const [custom, setCustom] = useState(hasOwn(own) && !MARK_CHOICES.includes(Number(own)));
+  const choice = !hasOwn(own) ? 'default' : custom ? 'custom' : String(Number(own));
+  const pick = (value) => {
+    if (value === 'default') { setCustom(false); onChange(null); }
+    else if (value === 'custom') { setCustom(true); onChange(hasOwn(own) ? Number(own) : fallback); }
+    else { setCustom(false); onChange(Number(value) === fallback ? null : Number(value)); }
+  };
+  return (
+    <div className="question-time">
+      <label className="field-label">Marks for this question</label>
+      <div className="question-time-row">
+        <select className="select" value={choice} onChange={(event) => pick(event.target.value)}>
+          <option value="default">Default for {TYPE_TITLES[question.type]} ({marksLabel(fallback)})</option>
+          {MARK_CHOICES.map((marks) => <option key={marks} value={String(marks)}>{marksLabel(marks)}</option>)}
+          <option value="custom">Custom…</option>
+        </select>
+        {choice === 'custom' && (
+          <label className="question-time-custom">
+            <input className="text-input" type="number" min="0.01" max="100" step="any" value={own ?? ''}
+              onChange={(event) => onChange(event.target.value === '' ? '' : Math.min(100, Math.max(0, Number(event.target.value))))}/>
+            <span>marks</span>
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function QuestionEditor({ question, index, canRemove, onChange, onRemove, strict = false, typeSeconds, typeMarks, onPapers = 0 }) {
   const update = (patch) => onChange(index, { ...question, ...patch });
 
   const changeType = (type) => update(type === 'short'
@@ -66,6 +111,17 @@ export function QuestionEditor({ question, index, canRemove, onChange, onRemove,
         <strong>
           Question {index + 1}
           {onPapers > 0 && <span className="pill warn on-papers" title="Students already have this question on their paper">On {onPapers} paper{onPapers === 1 ? '' : 's'}</span>}
+          {/* Set apart from its type's default: a small sign, so it is seen without opening anything. */}
+          {hasOwn(question.marks) && (
+            <span className="pill own-value" title={`Its own marks - the default for ${TYPE_TITLES[question.type]} is ${marksLabel(questionMarksFor({ type: question.type }, typeMarks))}`}>
+              <Star size={12} aria-hidden="true"/>{marksLabel(question.marks)}
+            </span>
+          )}
+          {strict && hasOwn(question.timeSeconds) && (
+            <span className="pill own-value" title={`Its own time - the default for ${TYPE_TITLES[question.type]} is ${secondsLabel(questionSecondsFor({ type: question.type }, typeSeconds))}`}>
+              <Clock size={12} aria-hidden="true"/>{secondsLabel(question.timeSeconds)}
+            </span>
+          )}
         </strong>
         {canRemove && (
           <button className="button button-danger button-small" type="button" onClick={() => onRemove(index)}>
@@ -81,14 +137,15 @@ export function QuestionEditor({ question, index, canRemove, onChange, onRemove,
         idPrefix={`question-${index}-type`}
         value={question.type}
         onChange={changeType}
-        options={QUESTION_TYPES.map((type) => ({ value: type, title: TYPE_TITLES[type] }))}
+        options={QUESTION_TYPES.map((type) => ({ value: type, title: TYPE_TITLES[type], description: TYPE_ABOUT[type] }))}
       />
 
-      {strict && <QuestionTime question={question} typeSeconds={typeSeconds} onChange={(timeSeconds) => update({ timeSeconds })}/>}
+      <div className="question-settings">
+        <QuestionMarks question={question} typeMarks={typeMarks} onChange={(marks) => update({ marks })}/>
+        {strict && <QuestionTime question={question} typeSeconds={typeSeconds} onChange={(timeSeconds) => update({ timeSeconds })}/>}
+      </div>
 
-      {question.type === 'short' ? (
-        <p className="help">Students write their answer; you mark it yourself.</p>
-      ) : (
+      {question.type === 'short' ? null : (
         <div className="option-editor">
           {question.options.map((option, optionIndex) => (
             <label key={optionIndex} className="option-edit-row">

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { InfoTip } from './InfoTip.jsx';
 import { post } from '../lib/api.js';
 
 function MicrosoftMark() {
@@ -179,7 +180,12 @@ export function AuthForm({ microsoft = null, returnTo = '/', onSignedIn, showToa
       {mode !== 'login' && codeSent && (
         <form className="email-sign-in" onSubmit={submit}>
           {emailField}
-          <label className="field-label" htmlFor="auth-code">Code from the email</label>
+          <span className="field-label-row">
+            <label className="field-label" htmlFor="auth-code">Code from the email</label>
+            <InfoTip label="No code yet?">
+              Not there yet? Check Junk or Spam: the email can take a few minutes. If you press Resend, the code from either email works.
+            </InfoTip>
+          </span>
           <input
             id="auth-code"
             className="text-input otp-input"
@@ -193,10 +199,6 @@ export function AuthForm({ microsoft = null, returnTo = '/', onSignedIn, showToa
             onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
             placeholder="000000"
           />
-          <p className="help">
-            Not there yet? Check Junk or Spam: the email can take a few minutes. If you press Resend, the code
-            from either email works.
-          </p>
           {mode === 'signup' && (
             <>
               <label className="field-label" htmlFor="auth-name">Full name</label>
