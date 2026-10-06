@@ -1,21 +1,59 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { SESSION_ENDED_EVENT, api, isRetryable, post } from './lib/api.js';
 import { useAppUpdate, useExamInProgress } from './lib/useAppUpdate.js';
+import { clearCache, dropCached } from './lib/cache.js';
+import { prefetchRoute, preloadScreens, rememberRole, rememberedRole, watchLinks } from './lib/prefetch.js';
+import { reloadFresh } from './lib/app-shell.js';
+import { lazyScreen, screens } from './screens/loaders.js';
 import { SiteHeader } from './components/SiteHeader.jsx';
+import { HoverTips } from './components/HoverTips.jsx';
 import { TOAST_FADE_MS, Toast, toastDuration } from './components/Toast.jsx';
 import { pageTitle } from './brand.js';
 
-// Each area is downloaded only when it is opened. Most students never need
-// the creator, attendance admin and spreadsheet UI; keeping those modules out
-// of the first bundle materially improves first load on a classroom phone.
-const namedLazy = (load, name) => lazy(() => load().then((module) => ({ default: module[name] })));
-const ChangePasswordModal = namedLazy(() => import('./components/ChangePasswordModal.jsx'), 'ChangePasswordModal');
-const AdminScreen = namedLazy(() => import('./screens/admin/AdminScreen.jsx'), 'AdminScreen');
-const HomeScreen = namedLazy(() => import('./screens/HomeScreen.jsx'), 'HomeScreen');
-const MyResultsScreen = namedLazy(() => import('./screens/student/MyResultsScreen.jsx'), 'MyResultsScreen');
-const StudentScreen = namedLazy(() => import('./screens/student/StudentScreen.jsx'), 'StudentScreen');
-const AttendanceScreen = namedLazy(() => import('./screens/attendance/AttendanceScreen.jsx'), 'AttendanceScreen');
-const WindowCheckScreen = namedLazy(() => import('./screens/WindowCheckScreen.jsx'), 'WindowCheckScreen');
+// Each area is downloaded only when it is opened - most students never need
+// the creator, attendance admin and spreadsheet UI, and keeping them out of
+// the first bundle matters on a classroom phone - and fetched ahead in quiet
+// moments once the first page is up (lib/prefetch.js preloadScreens).
+const ChangePasswordModal = lazyScreen(screens.changePassword, 'ChangePasswordModal');
+const AdminScreen = lazyScreen(screens.admin, 'AdminScreen');
+const HomeScreen = lazyScreen(screens.home, 'HomeScreen');
+const MyResultsScreen = lazyScreen(screens.myResults, 'MyResultsScreen');
+const ResultDetailScreen = lazyScreen(screens.resultDetail, 'ResultDetailScreen');
+const StudentScreen = lazyScreen(screens.student, 'StudentScreen');
+const AttendanceScreen = lazyScreen(screens.attendance, 'AttendanceScreen');
+const WindowCheckScreen = lazyScreen(screens.windowCheck, 'WindowCheckScreen');
+
+/** Who is signed in, as one string: when it changes, nothing held for the last account may show. */
+const accountOf = (status) => (status?.user ? `${status.user.role}:${status.user.email || status.user.name || ''}` : '');
+
+/**
+ * A screen whose code could not be downloaded (no connection, or a file an
+ * update removed and the one reload did not bring back): a way to try again
+ * instead of a blank page.
+ */
+class ScreenBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { failed: false };
+  }
+
+  static getDerivedStateFromError() { return { failed: true }; }
+
+  componentDidUpdate(previous) {
+    if (this.state.failed && previous.route !== this.props.route) this.setState({ failed: false });
+  }
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <section className="card empty empty-state">
+        <strong>This page did not load</strong>
+        <p>Check your connection, then try again.</p>
+        <button className="button button-primary" type="button" onClick={() => { void reloadFresh(); }}>Try again</button>
+      </section>
+    );
+  }
+}
 
 const SESSION_SIGNAL = 'test-portal-session-changed';
 
@@ -25,7 +63,9 @@ function currentRoute() {
     test: query.get('test')?.toUpperCase() || null,
     attend: query.get('attend')?.toUpperCase() || null,
     admin: query.get('admin') || null,
-    page: query.get('page') || null
+    page: query.get('page') || null,
+    // One handed-in test's result, found by the account (ResultDetailScreen).
+    result: query.get('result')?.toUpperCase() || null
   };
 }
 
@@ -44,10 +84,26 @@ export default function App() {
     toastCount.current += 1;
     setToast({ id: toastCount.current, text: String(message), tone, title, leaving: false });
   }, []);
-  const refreshAuth = useCallback(async () => setAuth(await api('/api/auth/status')), []);
+  // The account the held replies belong to (lib/cache.js): another one, and they are all forgotten.
+  const account = useRef(null);
+  const roleRef = useRef(rememberedRole());
+  const refreshAuth = useCallback(async () => {
+    const next = await api('/api/auth/status');
+    const signedIn = accountOf(next);
+    if (account.current !== null && account.current !== signedIn) clearCache();
+    account.current = signedIn;
+    roleRef.current = next?.user?.role || null;
+    rememberRole(roleRef.current);
+    setAuth(next);
+  }, []);
+  // A new page draws as soon as its code is here, the old one staying until
+  // then (a thin line along the top says it is on its way), and what it needs
+  // is asked for in the same moment, not after it has drawn.
+  const [navigating, startNavigation] = useTransition();
   const go = useCallback((url) => {
+    prefetchRoute(url, roleRef.current);
     window.history.pushState({}, '', url);
-    setRoute(currentRoute());
+    startNavigation(() => setRoute(currentRoute()));
   }, []);
   // Tell other open tabs the account changed, then pick it up here.
   const onSignedIn = useCallback(async () => {
@@ -59,12 +115,17 @@ export default function App() {
     if (auth?.user?.isGuest && !window.confirm('Signing out submits your test as it stands, and you will need to start again to retake it. Sign out?')) return;
     try {
       await post('/api/auth/logout');
+      clearCache();
+      account.current = '';
       setAuth((current) => ({ ...current, user: null }));
       try { window.localStorage.setItem(SESSION_SIGNAL, String(Date.now())); } catch { /* storage may be blocked */ }
       go('/');
     } catch (error) { showToast(error.message); }
   }, [auth, go, showToast]);
 
+  // The first page's replies are asked for alongside the account check, not after it.
+  useEffect(() => { prefetchRoute(window.location.href, roleRef.current); }, []);
+  useEffect(() => watchLinks(() => roleRef.current), []);
   useEffect(() => {
     refreshAuth().catch((error) => {
       // Offline on a test link (a reload mid-test): the paper this device
@@ -86,7 +147,7 @@ export default function App() {
   }, [auth?.offline, refreshAuth]);
 
   useEffect(() => {
-    const onPopState = () => setRoute(currentRoute());
+    const onPopState = () => startNavigation(() => setRoute(currentRoute()));
     // Another tab signed in or out: re-read the session rather than leaving a
     // stale account rendered here.
     const onStorage = (event) => {
@@ -136,6 +197,21 @@ export default function App() {
 
   const { updateAvailable, applyUpdate } = useAppUpdate();
 
+  // Once someone is signed in and the first page is up: the other screens' code, in quiet moments.
+  const preloadedFor = useRef('');
+  const role = auth?.user?.role || '';
+  useEffect(() => {
+    if (!role || preloadedFor.current === role) return;
+    preloadedFor.current = role;
+    preloadScreens(role);
+  }, [role]);
+
+  // Opening a test or a register can change what My results says (joined,
+  // begun, handed in): it is asked again, not shown from before.
+  useEffect(() => {
+    if (route.test || route.attend) dropCached('/api/me/results');
+  }, [route.test, route.attend]);
+
   // Signed out by a login on another device: outside a test, show the login
   // page with the reason. During a test the paper handles it itself - it must
   // stay mounted so its unsent answers are kept.
@@ -143,6 +219,8 @@ export default function App() {
   useEffect(() => {
     const onEnded = (event) => {
       if (sittingRef.current) return;
+      clearCache();
+      account.current = '';
       setAuth((current) => (current?.user ? { ...current, user: null, signedOutElsewhere: /another device/.test(event.detail || '') } : current));
     };
     window.addEventListener(SESSION_ENDED_EVENT, onEnded);
@@ -179,6 +257,7 @@ export default function App() {
     if (route.attend) return <AttendanceScreen code={route.attend} auth={auth} refreshAuth={onSignedIn} go={go} showToast={showToast}/>;
     if (route.test) return <StudentScreen code={route.test} auth={auth} refreshAuth={onSignedIn} go={go} showToast={showToast}/>;
     if (route.page === 'results' && auth.user && !auth.user.isGuest) return <MyResultsScreen go={go} showToast={showToast} isStudent={auth.user.role === 'student'}/>;
+    if (route.result && auth.user && !auth.user.isGuest) return <ResultDetailScreen code={route.result} go={go} showToast={showToast} isStudent={auth.user.role === 'student'}/>;
     if (route.admin && !auth.user) return <HomeScreen auth={auth} onSignedIn={onSignedIn} go={go} showToast={showToast}/>;
     if (route.admin || auth.user?.role === 'admin') {
       return <AdminScreen code={route.admin || 'portal'} auth={auth} go={go} showToast={showToast}/>;
@@ -192,13 +271,16 @@ export default function App() {
 
   return (
     <>
+      <div className={`nav-progress${navigating ? ' is-active' : ''}`} aria-hidden="true"/>
       <div className={`shell${sitting ? ' is-exam' : ''}`}>
         {/* A test in progress has the whole screen: no header, no way out but Submit. */}
         {!sitting && (
           <SiteHeader auth={auth} route={route} go={go} onChangePassword={() => setChangingPassword(true)} onSignOut={signOut}/>
         )}
         <main className={`main${isWideScreen ? ' main-wide' : ''}`} aria-live="polite">
-          <Suspense fallback={<div className="empty card">Loading…</div>}>{screen}</Suspense>
+          <ScreenBoundary route={route}>
+            <Suspense fallback={<div className="empty card">Loading…</div>}>{screen}</Suspense>
+          </ScreenBoundary>
         </main>
       </div>
       {updateAvailable && (
@@ -209,6 +291,7 @@ export default function App() {
       )}
       {changingPassword && <Suspense fallback={null}><ChangePasswordModal onClose={closePasswordModal} showToast={showToast}/></Suspense>}
       {toast && <Toast key={toast.id} toast={toast}/>}
+      <HoverTips/>
     </>
   );
 }

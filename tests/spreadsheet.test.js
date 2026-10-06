@@ -91,12 +91,26 @@ test('a student downloading their own paper gets only their responses and their 
 test('the Users page audit download adds the complete activity, integrity and location evidence', async () => {
   const workbook = await load(await buildStudentResponseSpreadsheet(onePaper(), { audit: true }));
   assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name), [
-    'My responses', 'Test record', 'Activity log', 'Integrity log', 'Location checks'
+    'My responses', 'Test record', 'Activity log', 'Integrity log', 'Location checks', 'Locations'
   ]);
   assert.ok(rowWith(workbook.getWorksheet('Test record'), 'Test date'));
   assert.ok(rowWith(workbook.getWorksheet('Test record'), 'Copy, cut, paste or drag attempts'));
-  assert.ok(rowWith(workbook.getWorksheet('Test record'), 'Text that appeared all at once'));
+  assert.ok(!rowWith(workbook.getWorksheet('Test record'), 'Text that appeared all at once'), 'a check taken out (RETIRED_FLAGS) has no row');
   assert.equal(workbook.getWorksheet('Activity log').getCell('B5').value, 'Answered Q1');
   assert.equal(workbook.getWorksheet('Integrity log').getCell('C5').value, 'fullscreen_exit');
   assert.equal(workbook.getWorksheet('Location checks').getCell('B5').value, 3);
+});
+
+test('the audit download lists every location reading, with a map link', async () => {
+  const data = onePaper();
+  data.locationTrail = [
+    { at: '2026-10-05T04:30:00.000Z', trigger: 'start', status: 'inRange', latitude: 30.3166, longitude: 78.0322, accuracyMeters: 15, distanceMeters: 11 },
+    { at: '2026-10-05T04:31:00.000Z', trigger: 'timer', status: 'inconclusive', latitude: null, longitude: null, accuracyMeters: null, distanceMeters: null }
+  ];
+  const sheet = (await load(await buildStudentResponseSpreadsheet(data, { audit: true }))).getWorksheet('Locations');
+  assert.deepEqual([sheet.getCell('B5').value, sheet.getCell('C5').value, sheet.getCell('F5').value, sheet.getCell('G5').value], [30.3166, 78.0322, 'At the venue', 'Began']);
+  assert.equal(sheet.getCell('H5').value.hyperlink, 'https://www.google.com/maps?q=30.3166,78.0322');
+  assert.equal(sheet.getCell('H6').value, 'No reading');
+  // A student's own download has none of it.
+  assert.equal((await load(await buildStudentResponseSpreadsheet(data))).getWorksheet('Locations'), undefined);
 });

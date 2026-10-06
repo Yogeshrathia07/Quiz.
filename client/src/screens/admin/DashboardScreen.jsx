@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useLiveUpdate } from '../../lib/live-updates.js';
-import { api, downloadSpreadsheet, post } from '../../lib/api.js';
+import { downloadSpreadsheet, post } from '../../lib/api.js';
+import { loadCached, peekCached, prefetch, updateCached, useCached } from '../../lib/cache.js';
+import { dashboardPath, recordPath, wholeClassPath } from '../../lib/dashboard-paths.js';
+import { paginateDashboard } from '../../../../src/domain/dashboard-view.js';
 import { clockTime, countdown, durationLabel, shortDateTime } from '../../lib/format.js';
 import { useCountdown } from '../../lib/useCountdown.js';
 import { Skeleton } from '../../components/Skeleton.jsx';
 import { usePageTitle } from '../../brand.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import {
-  ArrowDownAZ, BadgeCheck, CheckCheck, ClipboardCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, EyeOff, FileCheck2, FileCog, FileSpreadsheet, FileUp, LayoutDashboard,
-  LocateOff, Lock, LockOpen, MapPin, MapPinOff, MoreHorizontal, Pause, Pencil, PenLine, Play, RotateCcw, Search, Send, ShieldCheck, TimerOff, Undo2, UserCheck,
+  ArrowDownAZ, BadgeCheck, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, EyeOff, FileCheck2, FileCog, FileSpreadsheet, FileUp, LayoutDashboard,
+  LocateOff, Lock, LockOpen, MapPin, MapPinOff, MoreVertical, Pause, Pencil, PenLine, Play, RotateCcw, Search, Send, ShieldCheck, TimerOff, Undo2, UserCheck,
   UserCog, UserRound, UserX, Users
 } from 'lucide-react';
-import { StudentRow } from './StudentRow.jsx';
+import { SIGN_LEGEND, STATE_LEGEND, StateChip, StudentIdentity, StudentRow, StudentWindow, statesOf } from './StudentRow.jsx';
+import { Modal } from '../../components/Modal.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { RESULT_FILTERS, awaitingMarking, studentFilters } from './student-filters.js';
 import { ResponseRow } from './ResponseRow.jsx';
@@ -340,7 +346,7 @@ function TestSection({ test, serverTime, counts, isBusy, act, onOpenSetup, onOpe
           </button>
           <ActionMenu
             label="More"
-            icon={MoreHorizontal}
+            icon={MoreVertical}
             align="right"
             disabled={isBusy}
             items={[
@@ -456,8 +462,120 @@ function PageControls({ pagination, onPage }) {
   );
 }
 
+/**
+ * The search at the top of a student's window: it is the list's own search,
+ * and as it narrows the list it drops down the students it matches, to pick
+ * one. Arrow keys move through them, Enter opens one, Escape folds it away.
+ */
+function StudentPicker({ rows, current, query, setQuery, onPick }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const holder = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (event) => { if (!holder.current?.contains(event.target)) setOpen(false); };
+    document.addEventListener('pointerdown', onDown, true);
+    return () => document.removeEventListener('pointerdown', onDown, true);
+  }, [open]);
+  useEffect(() => { setActive(0); }, [query]);
+  const pick = (row) => { onPick(row.id); setOpen(false); };
+  const onKeyDown = (event) => {
+    if (event.key === 'ArrowDown') { event.preventDefault(); setOpen(true); setActive((value) => Math.min(rows.length - 1, value + 1)); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); setActive((value) => Math.max(0, value - 1)); }
+    else if (event.key === 'Enter' && open && rows[active]) { event.preventDefault(); pick(rows[active]); }
+    else if (event.key === 'Escape' && open) { event.stopPropagation(); setOpen(false); }
+  };
+  return (
+    <div className="student-picker" ref={holder}>
+      <Search size={15} aria-hidden="true"/>
+      <input className="text-input" type="search" role="combobox" aria-expanded={open} aria-controls="student-picker-list" aria-autocomplete="list"
+        aria-label="Search students" placeholder="Search name or SAP ID" value={query}
+        onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={onKeyDown}/>
+      {open && (
+        <ul id="student-picker-list" className="student-picker-list" role="listbox" aria-label="Students">
+          {rows.length === 0 && <li className="student-picker-empty">No students match</li>}
+          {rows.map((row, index) => (
+            <li key={row.id} role="option" aria-selected={row.id === current?.id}
+              className={`${index === active ? 'is-active' : ''}${row.id === current?.id ? ' is-current' : ''}`}
+              onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActive(index)} onClick={() => pick(row)}>
+              <StudentIdentity registration={row}/>
+              <span className="student-picker-states">{statesOf(row).map((state) => <StateChip key={state} state={state}/>)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The top of a student's window: the one before and the one after - in the
+ * list's own order, search and filter - the search to pick any of them, and
+ * the list's Filter & sort. Changed here, the list behind changes with it.
+ */
+function StudentNavigator({ rows, current, onPick, query, setQuery, filterMenu }) {
+  const index = current ? rows.findIndex((row) => row.id === current.id) : -1;
+  const previous = index > 0 ? rows[index - 1] : null;
+  const next = index >= 0 && index < rows.length - 1 ? rows[index + 1] : null;
+  const step = (row, word) => (
+    <button className={`button icon-button student-nav-step is-${word === 'Previous' ? 'prev' : 'next'}`} type="button" disabled={!row} onClick={() => onPick(row.id)}
+      aria-label={row ? `${word}: ${row.name}` : `No ${word.toLowerCase()} student`} title={row ? `${word}: ${row.name}` : `No ${word.toLowerCase()} student`}>
+      {word === 'Previous' ? <ChevronLeft size={18} aria-hidden="true"/> : <ChevronRight size={18} aria-hidden="true"/>}
+    </button>
+  );
+  return (
+    <nav className="student-nav" aria-label="Students">
+      {step(previous, 'Previous')}
+      <StudentPicker rows={rows} current={current} query={query} setQuery={setQuery} onPick={onPick}/>
+      {step(next, 'Next')}
+      {filterMenu}
+      <span className="student-nav-count">{index >= 0 ? `${index + 1} of ${rows.length}` : `${rows.length} student${rows.length === 1 ? '' : 's'}`}</span>
+    </nav>
+  );
+}
+
 function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, act, onOpenSapId, onOpenReopen }) {
-  const [openRegistrationId, setOpenRegistrationId] = useState(null);
+  // The student open in the window, and the part of them open (kept moving from one student to the next).
+  const [openId, setOpenId] = useState(null);
+  const [part, setPart] = useState('details');
+  const current = openId ? rows.find((row) => row.id === openId) || null : null;
+  const index = current ? rows.indexOf(current) : -1;
+  const openStudent = (id) => { setPart('details'); setOpenId(id); };
+  // The open student left the list - filtered out, or approved off a list of
+  // those waiting: the window moves on to the first one still in it.
+  useEffect(() => {
+    if (openId && !current && rows.length) setOpenId(rows[0].id);
+  }, [openId, current, rows]);
+  // The open student's log and readings - and the students either side of
+  // them - fetched ahead, so Log, Location and ‹ › open at once.
+  const previousId = rows[index - 1]?.id;
+  const nextId = rows[index + 1]?.id;
+  useEffect(() => {
+    if (!openId) return;
+    for (const id of [openId, previousId, nextId]) {
+      if (id) prefetch(`${recordPath(test.code, id)}/analysis`, { maxAgeMs: 15_000 });
+    }
+  }, [openId, previousId, nextId, test.code]);
+  // ← and → step through the students, unless a box or menu has the keys.
+  useEffect(() => {
+    if (!openId) return undefined;
+    const onKey = (event) => {
+      if (!['ArrowLeft', 'ArrowRight'].includes(event.key) || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.target.closest?.('input, textarea, select, [contenteditable="true"], .filter-panel, .menu-floating')) return;
+      const target = rows[index + (event.key === 'ArrowLeft' ? -1 : 1)];
+      if (target) { event.preventDefault(); setOpenId(target.id); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [openId, rows, index]);
+  const filterMenu = (
+    <FilterMenu
+      groups={studentFilters(test)} rows={pool} selected={filters} onChange={setFilters} icons={FILTER_ICONS}
+      title="Sort & filter students" allLabel="Everyone" counts={filterCounts}
+      total={pagination?.unfilteredTotal} shown={pagination?.total}
+      sorts={STUDENT_SORTS} sort={sort} onSort={setSort}
+    />
+  );
   return (
     <section className="card students-card is-compact">
       <TableToolbar
@@ -475,7 +593,28 @@ function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, s
           <thead>
             <tr>
               <th>Student</th>
-              <th>Status</th>
+              <th>
+                <span className="th-with-tip">
+                  Status
+                  {/* What each status icon means; each also says so on hover. */}
+                  <InfoTip label="What the status icons mean">
+                    <p className="state-legend-title">Where they stand</p>
+                    <ul className="state-legend">
+                      {STATE_LEGEND.map(([id, look]) => <li key={id}><StateChip state={id}/>{look.label}</li>)}
+                    </ul>
+                    <p className="state-legend-title">Signs beside it</p>
+                    <ul className="state-legend">
+                      {SIGN_LEGEND.map((sign) => (
+                        <li key={sign.label}>
+                          <span className={`issue is-${sign.tone}`} aria-hidden="true"><sign.icon size={14}/>{sign.text}</span>
+                          {sign.label}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="state-legend-note">Hover any icon in a row for what it means for that student.</p>
+                  </InfoTip>
+                </span>
+              </th>
               <th className="cell-num col-answered">Answered</th>
               <th className="column-actions"><span className="sr-only">Actions</span></th>
             </tr>
@@ -490,9 +629,7 @@ function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, s
                 isBusy={isBusy}
                 openSapId={onOpenSapId}
                 openReopen={onOpenReopen}
-                columns={4}
-                open={openRegistrationId === registration.id}
-                onOpenChange={(nextOpen) => setOpenRegistrationId(nextOpen ? registration.id : null)}
+                onOpen={() => openStudent(registration.id)}
               />
             ))}
           </tbody>
@@ -502,6 +639,21 @@ function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, s
         )}
       </div>
       <PageControls pagination={pagination} onPage={onPage}/>
+      {openId && createPortal(
+        <Modal label={current ? `${current.name}: details` : 'Students'} onClose={() => setOpenId(null)} className="student-modal">
+          <StudentNavigator rows={rows} current={current} onPick={setOpenId} query={query} setQuery={setQuery} filterMenu={filterMenu}/>
+          {current ? (
+            <StudentWindow test={test} registration={current} act={act} isBusy={isBusy} openSapId={onOpenSapId} openReopen={onOpenReopen} part={part} onPart={setPart}/>
+          ) : (
+            <div className="student-modal-empty">
+              <strong>No students match</strong>
+              <p>Nobody is left in the list with this search and filter.</p>
+              <button className="button button-secondary" type="button" onClick={() => { setQuery(''); setFilters([]); }}>Show everyone</button>
+            </div>
+          )}
+        </Modal>,
+        document.body
+      )}
     </section>
   );
 }
@@ -616,8 +768,69 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
   );
 }
 
+/**
+ * An action's reply - only the changed test or student, not the class - laid
+ * onto a dashboard: that row replaced, the test's fields brought up to date.
+ */
+function withActionResult(current, response) {
+  if (!current) return current;
+  const registrations = response.registration
+    ? current.registrations.map((entry) => (entry.id === response.registration.id ? response.registration : entry))
+    : current.registrations;
+  return {
+    ...current,
+    ...(response.serverTime ? { serverTime: response.serverTime } : {}),
+    ...(response.test ? { test: { ...current.test, ...response.test } } : {}),
+    registrations
+  };
+}
+
+/**
+ * Actions shown on the list the moment they are pressed - a decision, an
+ * exception - and put back if the server refuses. Each gives the students it
+ * changes and what changes; the server's reply then replaces those rows.
+ * Anything that touches a paper (pause, hand in, restart…) waits for the server.
+ */
+const QUICK_ACTIONS = [
+  [/^registrations\/([^/]+)\/approve$/, ([, id]) => ({ ids: [id], patch: { status: 'approved' } })],
+  [/^registrations\/([^/]+)\/reject$/, ([, id]) => ({ ids: [id], patch: { status: 'rejected' } })],
+  [/^registrations\/bulk\/approve$/, (_match, body, rows) => ({
+    ids: body?.registrationIds || rows.filter((row) => row.status === 'pending').map((row) => row.id), patch: { status: 'approved' }
+  })],
+  [/^registrations\/bulk\/reject$/, (_match, body) => ({ ids: body?.registrationIds || [], patch: { status: 'rejected' } })],
+  [/^registrations\/([^/]+)\/location-override$/, ([, id], body) => ({ ids: [id], patch: { locationOverride: Boolean(body?.enabled) } })],
+  [/^registrations\/([^/]+)\/device-override$/, ([, id], body) => ({ ids: [id], patch: { deviceOverride: Boolean(body?.enabled) } })]
+];
+function quickAction(path, body, rows) {
+  for (const [pattern, change] of QUICK_ACTIONS) {
+    const match = pattern.exec(path);
+    if (match) {
+      const quick = change(match, body, rows);
+      return quick.ids.length ? quick : null;
+    }
+  }
+  return null;
+}
+/** `rows` with the students in `ids` changed by `change(row)`. */
+const changeRows = (ids, change) => (current) => (current ? {
+  ...current,
+  registrations: current.registrations.map((row) => (ids.has(row.id) ? { ...row, ...change(row) } : row))
+} : current);
+
 export function DashboardScreen({ code, go, showToast }) {
-  const [dashboard, setDashboard] = useState(null);
+  // A class that fits in one reply (most do) is fetched whole, once, and kept
+  // (lib/cache.js): every tab, search, filter, order and page is then worked
+  // out here with the server's own rules (domain/dashboard-view.js) - no
+  // request, no wait. A bigger class is paged by the server as before.
+  const wholePath = wholeClassPath(code);
+  const whole = useCached(wholePath);
+  // null until the first reply says; then whether the whole class came.
+  const fits = whole.data ? (Number(whole.data.pagination?.pages) || 1) <= 1 : null;
+  const fitsRef = useRef(fits);
+  fitsRef.current = fits;
+  const [serverPage, setServerPage] = useState(null);
+  // Decisions and exceptions shown before the server has answered (QUICK_ACTIONS).
+  const [quickActions, setQuickActions] = useState(0);
   // ?tab=responses opens straight on a tab - the quiz list's "View results" does.
   const [tab, setTab] = useState(() => (TABS.includes(fromAddress('tab')) ? fromAddress('tab') : 'test'));
   const [query, setQuery] = useState(() => fromAddress('q'));
@@ -658,17 +871,23 @@ export function DashboardScreen({ code, go, showToast }) {
   const sortKey = tabSort !== USUAL_SORT ? tabSort : '';
   useEffect(() => { setPage(1); }, [tab, debouncedQuery, filterKey, sortKey]);
 
-  // Only the newest request may paint the screen. A search typed while a live
-  // refresh for the old one was still on its way used to be overwritten by
-  // that refresh landing late: the old list flashed back - the flicker.
+  // The whole class: as it stands now, asked for again.
+  const loadWhole = useCallback(async (silent = false) => {
+    try { return await loadCached(wholePath, { force: true }); }
+    catch (error) { if (!silent) showToast(error.message); return null; }
+  }, [wholePath, showToast]);
+  const wholeFailed = !whole.data && whole.error;
+  useEffect(() => { if (wholeFailed) showToast(wholeFailed.message); }, [wholeFailed, showToast]);
+
+  // A bigger class: the page on screen, from the server. Only the newest
+  // request may paint the screen. A search typed while a live refresh for the
+  // old one was still on its way used to be overwritten by that refresh
+  // landing late: the old list flashed back - the flicker.
+  const pagePath = dashboardPath(code, { section: tab, page, search: debouncedQuery, filters: filterKey, sort: sortKey });
   const latestRequest = useRef(0);
   const inFlightLoad = useRef(null);
-  const load = useCallback(async (silent = false) => {
-    const params = new URLSearchParams({ section: tab, page: String(page), pageSize: '100' });
-    if (debouncedQuery) params.set('search', debouncedQuery);
-    if (filterKey) params.set('filters', filterKey);
-    if (sortKey) params.set('sort', sortKey);
-    const path = `/api/admin/tests/${encodeURIComponent(code)}?${params}`;
+  const loadPage = useCallback(async (silent = false) => {
+    const path = pagePath;
     // Events, the fallback timer and a button can all ask for the same page
     // at once. Share that one request instead of making MongoDB build the
     // same dashboard three times.
@@ -677,9 +896,9 @@ export function DashboardScreen({ code, go, showToast }) {
     const request = latestRequest.current;
     const promise = (async () => {
       try {
-        const next = await api(path);
+        const next = await loadCached(path, { force: true });
         if (request !== latestRequest.current) return null;
-        setDashboard(next);
+        setServerPage(next);
         return next;
       }
       catch (error) { if (!silent && request === latestRequest.current) showToast(error.message); }
@@ -690,28 +909,27 @@ export function DashboardScreen({ code, go, showToast }) {
     })();
     inFlightLoad.current = { path, promise };
     return promise;
-  }, [code, tab, page, debouncedQuery, filterKey, sortKey, showToast]);
+  }, [pagePath, showToast]);
+  const load = useCallback((silent = false) => (fitsRef.current === false ? loadPage(silent) : loadWhole(silent)), [loadPage, loadWhole]);
   const loadRef = useRef(load);
   loadRef.current = load;
+
+  // What is on screen: worked out here for a class that came whole (as fast
+  // as the teacher types or ticks), else the server's page.
+  const searchNow = query.trim();
+  const view = useMemo(() => (whole.data && fits
+    ? paginateDashboard(whole.data, { section: tab, page, pageSize: 100, search: searchNow, filters: filterKey, sort: sortKey })
+    : null), [whole.data, fits, tab, page, searchNow, filterKey, sortKey]);
+  const dashboard = fits ? view : fits === false ? serverPage : null;
 
   // Admin mutation endpoints return only the changed test/row, not a full
   // class table. Paint that immediately, then reconcile counts and rows that
   // are not on this page in the background.
   const applyActionResult = useCallback((response) => {
     if (!response?.test && !response?.registration) return;
-    setDashboard((current) => {
-      if (!current) return current;
-      const registrations = response.registration
-        ? current.registrations.map((entry) => (entry.id === response.registration.id ? response.registration : entry))
-        : current.registrations;
-      return {
-        ...current,
-        ...(response.serverTime ? { serverTime: response.serverTime } : {}),
-        ...(response.test ? { test: { ...current.test, ...response.test } } : {}),
-        registrations
-      };
-    });
-  }, []);
+    updateCached(wholePath, (current) => withActionResult(current, response));
+    setServerPage((current) => withActionResult(current, response));
+  }, [wholePath]);
   const reconcileTimer = useRef(null);
   const scheduleReconcile = useCallback((delay = 900) => {
     window.clearTimeout(reconcileTimer.current);
@@ -722,13 +940,21 @@ export function DashboardScreen({ code, go, showToast }) {
   }, []);
   useEffect(() => () => window.clearTimeout(reconcileTimer.current), []);
 
-  useEffect(() => { load(); }, [load]);
+  // A bigger class: its page as soon as the search, filter, order or page
+  // changes - the one held from before at once, if there is one. A class that
+  // came whole needs nothing here.
+  useEffect(() => {
+    if (fits !== false) return;
+    const held = peekCached(pagePath);
+    if (held) setServerPage(held);
+    void loadPage();
+  }, [fits, pagePath, loadPage]);
 
   // Live: new registrations, answers and exits appear without reloading. The
   // refresh is silent, and it waits while a dialog is open or an action runs
   // so nothing changes under the admin's hand. A hidden tab does not poll.
   const busyRef = useRef(false);
-  busyRef.current = Boolean(modal || actionPath);
+  busyRef.current = Boolean(modal || actionPath || quickActions);
   // Mid-typing, a refresh would show a list the next keystroke replaces.
   const typingRef = useRef(false);
   typingRef.current = query.trim() !== debouncedQuery;
@@ -783,9 +1009,38 @@ export function DashboardScreen({ code, go, showToast }) {
     };
   }, [load]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Shown on the list at once, put back if the server refuses (QUICK_ACTIONS).
+  const actQuickly = async (path, body, { ids, patch }) => {
+    const wanted = new Set(ids);
+    const fields = Object.keys(patch);
+    const rows = (fitsRef.current ? whole.data?.registrations : serverPage?.registrations) || [];
+    const before = new Map(rows.filter((row) => wanted.has(row.id)).map((row) => [row.id, Object.fromEntries(fields.map((field) => [field, row[field]]))]));
+    const show = changeRows(wanted, () => patch);
+    updateCached(wholePath, show);
+    setServerPage(show);
+    setQuickActions((count) => count + 1);
+    try {
+      const next = await post(`/api/admin/tests/${encodeURIComponent(code)}/${path}`, body);
+      applyActionResult(next);
+      scheduleReconcile();
+      showToast(typeof next?.affectedCount === 'number'
+        ? `${next.affectedCount} student${next.affectedCount === 1 ? '' : 's'} updated.`
+        : 'Dashboard updated.');
+    } catch (error) {
+      const undo = changeRows(wanted, (row) => before.get(row.id) || {});
+      updateCached(wholePath, undo);
+      setServerPage(undo);
+      showToast(error.message);
+    } finally {
+      setQuickActions((count) => count - 1);
+    }
+  };
+
   const act = async (path, confirmText, body) => {
     if (actionPath) return;
     if (confirmText && !window.confirm(confirmText)) return;
+    const quick = quickAction(path, body, (fitsRef.current ? whole.data?.registrations : serverPage?.registrations) || []);
+    if (quick) return actQuickly(path, body, quick);
     setActionPath(path);
     try {
       const next = await post(`/api/admin/tests/${encodeURIComponent(code)}/${path}`, body);

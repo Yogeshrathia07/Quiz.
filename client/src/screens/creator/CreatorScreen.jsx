@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Copy, Download } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
+import { dropCached } from '../../lib/cache.js';
 import { copyText, localDateTime } from '../../lib/format.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { ApplyChoiceModal } from './ApplyChoiceModal.jsx';
 import {
-  DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, clampMix, estimateSeconds, followTypeDefault, mixTotal, newQuestion, poolCounts, strictEstimateSeconds, timerCoverage,
+  DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, clampMix, estimateSeconds, followTypeDefault, mixTotal, mixWithAdded, newQuestion, poolCounts, strictEstimateSeconds, timerCoverage,
   hasQuestionTimers, NO_TYPE_SECONDS
 } from '../../lib/quiz.js';
 import { QuestionMarksFields } from '../../components/QuestionMarksFields.jsx';
@@ -209,7 +210,13 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
       .catch((error) => showToast(error.message));
   }, [editCode, showToast]);
 
-  const updateQuestion = (index, value) => setQuestions((current) => current.map((question, i) => (i === index ? value : question)));
+  // A question that changes type, or a new one, counts towards its type's
+  // questions per student (mixWithAdded); the type it left is trimmed by clampMix above.
+  const updateQuestion = (index, value) => {
+    const before = questions[index];
+    if (before && value.type !== before.type) setMix((current) => mixWithAdded(current, pool, value.type));
+    setQuestions((current) => current.map((question, i) => (i === index ? value : question)));
+  };
   const removeQuestion = (index) => setQuestions((current) => current.filter((_question, i) => i !== index));
 
   const importJson = async (event) => {
@@ -246,14 +253,19 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     }
     setCreating(true);
     try {
-      onCreated(await post('/api/tests', payload()));
+      const created = await post('/api/tests', payload());
+      // The quiz lists and home no longer say what they held (lib/cache.js).
+      dropCached('/api/admin/');
+      onCreated(created);
       showToast('Test created.', 'success');
     } catch (error) { showToast(error.message); setCreating(false); }
   };
 
   const questionKey = (list) => JSON.stringify(list.map((question) => [
     question.id ?? null, question.prompt, question.type, question.options || [], (question.correctOptions || []).map(String),
-    question.timeSeconds === '' || question.timeSeconds === undefined ? null : question.timeSeconds
+    question.timeSeconds === '' || question.timeSeconds === undefined ? null : question.timeSeconds,
+    // A picture added, changed or taken off is a change to the question.
+    question.image?.id ?? null
   ]));
   const questionsChanged = () => questionKey(questions) !== questionKey(editing.questions);
 
@@ -279,6 +291,7 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
         method: 'PUT',
         body: JSON.stringify({ ...payload(), ...(applyTo ? { applyTo } : {}) })
       });
+      dropCached('/api/admin/');
       const summary = saved.paperSummary;
       const parts = [
         summary?.edited && `${summary.edited} edited`,
@@ -504,8 +517,9 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
             type="button"
             onClick={() => {
               setQuestionsOpen(true);
-              setQuestions((current) => [...current, newQuestion()]);
-              setMix((current) => ({ ...current, mcq: current.mcq + 1 }));
+              const added = newQuestion();
+              setMix((current) => mixWithAdded(current, pool, added.type));
+              setQuestions((current) => [...current, added]);
             }}
           >
             + Add question

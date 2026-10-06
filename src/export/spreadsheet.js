@@ -633,7 +633,7 @@ function recordSection(sheet, rowNumber, title, rows) {
  * again after marking brings them in.
  */
 export async function buildStudentResponseSpreadsheet(data, { audit = false } = {}) {
-  const { test, student, registration = {}, attempt, integrity, activity = [], location, device = null, answers, summary } = data;
+  const { test, student, registration = {}, attempt, integrity, activity = [], location, locationTrail = [], device = null, answers, summary } = data;
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Quiz';
   workbook.created = new Date();
@@ -734,7 +734,6 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
       ...(audit ? [
         ['Longest time away', lasted((integrity.longestAwayMs || 0) / 1000)],
         ['Copy, cut, paste or drag attempts', (integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)],
-        ['Text that appeared all at once', integrity.flags?.text_burst || 0],
         ['Keyboard opened another app while typing (not counted as leaving)', integrity.flags?.keyboard_app || 0],
         ['Screenshot, print or developer-tools attempts', (integrity.flags?.screenshot || 0) + (integrity.flags?.print || 0) + (integrity.flags?.devtools || 0)],
         ['Attempt locked now', attempt.locked ? 'Yes' : 'No'],
@@ -744,12 +743,12 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
   }
   record.pageSetup.orientation = 'portrait';
 
-  if (audit) auditSheets(workbook, { test, student, integrity, activity, location });
+  if (audit) auditSheets(workbook, { test, student, integrity, activity, location, locationTrail });
   return Buffer.from(await workbook.xlsx.writeBuffer());
 }
 
 /** The Users page's audit download: the evidence behind the mark, event by event. */
-function auditSheets(workbook, { test, student, integrity, activity, location }) {
+function auditSheets(workbook, { test, student, integrity, activity, location, locationTrail = [] }) {
   const activitySheet = sheetTitle(workbook, 'Activity log', `${test.title} — ${student.name}'s activity`, test);
   activitySheet.getRow(4).values = ['When', 'What happened', 'Type', 'Details', 'Away (seconds)'];
   styleHeader(activitySheet.getRow(4));
@@ -805,5 +804,34 @@ function auditSheets(workbook, { test, student, integrity, activity, location })
   locationSheet.getColumn(1).width = 42;
   locationSheet.getColumn(2).width = 48;
   [12, 16].forEach((rowNumber) => { locationSheet.getCell(`B${rowNumber}`).numFmt = 'yyyy-mm-dd hh:mm:ss'; });
+
+  // Every reading taken while the paper was open, with where it was and a map link.
+  if (!location && !locationTrail.length) return;
+  const readingsSheet = sheetTitle(workbook, 'Locations', `${test.title} — ${student.name}'s location readings`, test);
+  readingsSheet.getRow(4).values = ['When', 'Latitude', 'Longitude', 'Accuracy (m)', 'From the venue (m)', 'Reading', 'Taken when', 'Map'];
+  styleHeader(readingsSheet.getRow(4));
+  if (locationTrail.length) {
+    locationTrail.forEach((reading) => {
+      const known = reading.latitude !== null && reading.longitude !== null;
+      const row = readingsSheet.addRow([
+        asDate(reading.at), known ? reading.latitude : '', known ? reading.longitude : '',
+        reading.accuracyMeters ?? '', reading.distanceMeters ?? '',
+        READING_WORDS[reading.status] || reading.status, TRIGGER_WORDS[reading.trigger] || reading.trigger || '',
+        known ? { text: 'Open map', hyperlink: `https://www.google.com/maps?q=${reading.latitude},${reading.longitude}` } : 'No reading'
+      ]);
+      if (known) row.getCell(8).font = { color: { argb: 'FF1598D1' }, underline: true };
+    });
+    styleDataRows(readingsSheet, 5, locationTrail.length);
+  } else {
+    emptyNote(readingsSheet, 'No readings were kept for this paper.');
+  }
+  [22, 14, 14, 14, 18, 22, 22, 14].forEach((width, index) => { readingsSheet.getColumn(index + 1).width = width; });
+  readingsSheet.getColumn(1).numFmt = 'yyyy-mm-dd hh:mm:ss';
+  readingsSheet.getColumn(2).numFmt = '0.000000';
+  readingsSheet.getColumn(3).numFmt = '0.000000';
+  readingsSheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 7 } };
 }
+
+const READING_WORDS = { inRange: 'At the venue', outOfRange: 'Away from the venue', inconclusive: 'Could not tell' };
+const TRIGGER_WORDS = { start: 'Began', timer: 'Regular check', question: 'Changed question', manual: 'Checked again', blocked: 'While shut out', submit: 'At submit' };
 

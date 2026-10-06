@@ -48,12 +48,6 @@ export const FLAG_REASONS = Object.freeze({
   screenshot: 'Tried to take a screenshot',
   print: 'Tried to print',
   devtools: 'Tried to open developer tools',
-  // Seen on the page itself: an element an extension added, or its mark.
-  extension: 'A browser extension changed the test page',
-  // Text that landed in an answer all at once - most likely pasted from a phone
-  // keyboard's clipboard, which sends no paste event. Voice typing does it too,
-  // so it is recorded, never blocked.
-  text_burst: 'Text appeared all at once',
   // Left the page while typing an answer and back within moments: on an
   // iPhone, a keyboard's own button (voice typing on Gboard or SwiftKey, its
   // settings) opens that keyboard's app. Noted, not counted - see
@@ -90,6 +84,19 @@ export const warningsBeforeLockOf = (test) => (violationActionOf(test) === 'warn
   : 0);
 /** Whether the student's screen warns them on each exit: "warn only" and "warn, then lock". */
 export const warnsOnViolation = (test) => ['warn', 'warn_lock'].includes(violationActionOf(test));
+
+/**
+ * Checks taken out because they were guesses that misfired: a translator, a
+ * password manager or the phone browser's own additions to the page passed for
+ * a browser extension, and voice typing or a keyboard's suggestion passed for
+ * pasted text. Never recorded again - a page still open from before may send
+ * them, and they are dropped - and those already on a paper are left out of
+ * every count (`integritySummary` counts FLAG_REASONS only), log and report.
+ */
+export const RETIRED_FLAGS = Object.freeze(['extension', 'text_burst']);
+const isRetiredFlag = (event) => event?.type === 'integrity_flag' && RETIRED_FLAGS.includes(event.detail);
+/** A paper's event log, without the retired checks. */
+export const keptEvents = (events) => (events || []).filter((event) => !isRetiredFlag(event));
 
 export const leaveReason = (value) => (Object.hasOwn(LEAVE_REASONS, value) ? value : 'fullscreen');
 export const flagReason = (value) => (Object.hasOwn(FLAG_REASONS, value) ? value : null);
@@ -209,7 +216,7 @@ export const integrityHeaders = [
   'Times left the test (total)', 'Time away in total (seconds)', 'Longest time away (seconds)',
   'Left fullscreen', 'Switched app or tab', 'Window lost focus', 'Reloaded the page', 'Not in fullscreen', 'Went offline',
   'Copy / cut / paste / drag attempts', 'Times locked', 'Screenshot / print / developer-tools attempts', 'Used split screen',
-  'Browser extension seen', 'Text appeared all at once', 'Time offline in total (seconds, not counted as leaving)', 'Answers that arrived late'
+  'Time offline in total (seconds, not counted as leaving)', 'Answers that arrived late'
 ];
 
 export const integrityCells = (summary) => (summary
@@ -218,6 +225,6 @@ export const integrityCells = (summary) => (summary
     summary.leaves.fullscreen, summary.leaves.tab_switch, summary.leaves.focus_lost, summary.leaves.reload,
     summary.leaves.not_fullscreen, summary.offline?.count ?? summary.leaves.offline, summary.flags.copy + summary.flags.cut + summary.flags.paste + summary.flags.drop, summary.lockCount,
     summary.flags.screenshot + summary.flags.print + summary.flags.devtools, summary.leaves.split_screen,
-    summary.flags.extension, summary.flags.text_burst, Math.round((summary.offline?.ms || 0) / 1000), summary.lateAnswers || 0
+    Math.round((summary.offline?.ms || 0) / 1000), summary.lateAnswers || 0
   ]
   : integrityHeaders.map(() => ''));

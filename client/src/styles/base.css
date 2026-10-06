@@ -215,8 +215,11 @@ html{scroll-padding-top:72px}
 @media (max-width:760px){.dashboard-head{top:52px}}
 /* `overflow-x:hidden` on html/body (above) turns body into a scroll box of its
    own, which stops `position:sticky` from working. `clip` hides sideways
-   overflow the same way without that, so the dashboard head can stay pinned. */
-html:has(.dashboard-head),html:has(.dashboard-head) body{overflow-x:clip}
+   overflow the same way without that, so the dashboard head, a result's score
+   card and the results list's numbers can stay pinned. */
+html:has(.dashboard-head),html:has(.dashboard-head) body,
+html:has(.result-page),html:has(.result-page) body,
+html:has(.my-tests),html:has(.my-tests) body{overflow-x:clip}
 
 /* Phones:`100vh` is the screen height with the browser's address bar hidden,
    so while the bar shows, a page of min-height 100vh is ~56px taller than

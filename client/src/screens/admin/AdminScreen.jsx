@@ -1,13 +1,13 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
+import { lazyScreen, screens } from '../loaders.js';
 
-const namedLazy = (load, name) => lazy(() => load().then((module) => ({ default: module[name] })));
-const CreatorScreen = namedLazy(() => import('../creator/CreatorScreen.jsx'), 'CreatorScreen');
-const DashboardScreen = namedLazy(() => import('./DashboardScreen.jsx'), 'DashboardScreen');
-const TestListScreen = namedLazy(() => import('./TestListScreen.jsx'), 'TestListScreen');
-const FacultyHome = namedLazy(() => import('./FacultyHome.jsx'), 'FacultyHome');
-const UsersScreen = namedLazy(() => import('./UsersScreen.jsx'), 'UsersScreen');
-const AttendanceListScreen = namedLazy(() => import('../attendance/AttendanceListScreen.jsx'), 'AttendanceListScreen');
-const AttendanceSessionScreen = namedLazy(() => import('../attendance/AttendanceSessionScreen.jsx'), 'AttendanceSessionScreen');
+const CreatorScreen = lazyScreen(screens.creator, 'CreatorScreen');
+const DashboardScreen = lazyScreen(screens.dashboard, 'DashboardScreen');
+const TestListScreen = lazyScreen(screens.testList, 'TestListScreen');
+const FacultyHome = lazyScreen(screens.facultyHome, 'FacultyHome');
+const UsersScreen = lazyScreen(screens.users, 'UsersScreen');
+const AttendanceListScreen = lazyScreen(screens.attendanceList, 'AttendanceListScreen');
+const AttendanceSessionScreen = lazyScreen(screens.attendanceSession, 'AttendanceSessionScreen');
 
 /**
  * `code` is the admin route: 'portal' for the home page, 'tests' for the quiz

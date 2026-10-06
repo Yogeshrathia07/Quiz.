@@ -3,7 +3,8 @@ import { config } from '../config.js';
 import { PublicTestError } from '../lib/errors.js';
 import { asInteger } from '../lib/crypto.js';
 import { dateMs, iso, now } from '../lib/time.js';
-import { publicTest, responseDetails, scoreSummary, timeTakenSeconds } from '../domain/presenters.js';
+import { locationTrailOf, publicTest, responseDetails, scoreSummary, studentResponseData, timeTakenSeconds } from '../domain/presenters.js';
+import { imageView } from '../domain/question-image.js';
 import { isGuestAccount } from '../auth/portal-auth.js';
 import { questionType } from '../domain/question-bank.js';
 import { automaticMarks, earnedMarks, paperMarks, paperScore, questionMarks, roundMarks } from '../domain/marks.js';
@@ -12,9 +13,12 @@ import { END_GRACE_MS, attemptDeadlineMs, endModeOf, isPerStudent, isTimeOver, i
 import { isStrict } from '../domain/strict-timing.js';
 import { DEVICE_KINDS, DEVICE_NOTES, deviceFactLine, deviceFits, deviceRuleOf, kindWord } from '../domain/device.js';
 import {
-  MAX_EVENTS, describeEvent, integrityCells, integrityHeaders, integrityRecord, integritySummary, locksOnViolation, violationActionOf
+  MAX_EVENTS, describeEvent, integrityCells, integrityHeaders, integrityRecord, integritySummary, keptEvents, locksOnViolation, violationActionOf
 } from '../domain/integrity.js';
 import { endTimeMs, normalizeSapId } from '../domain/test-builder.js';
+import {
+  FILTER_GROUPS, RESULT_SORTS, STUDENT_SORTS, dashboardCounts, paginateDashboard, rankRegistration, resultSort, sortFor
+} from '../domain/dashboard-view.js';
 import {
   deleteRegistrationsOf, invalidateTestCache, publicCode, registrationsOf, requireOwnedRegistration, requireOwnedTest, serializeTestWrite,
   testDocByCode, updateAttemptWhere, updateRegistration, updateRegistrationFields, updateRegistrationsWhere, updateTest
@@ -63,7 +67,7 @@ export async function adminTests(req) {
   const students = docs.length
     ? await registrationsCollection().find(
       { testCode: { $in: docs.map((test) => test.code) } },
-      { projection: { _id: 0, testCode: 1, status: 1, 'attempt.status': 1, 'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1 } }
+      { projection: { _id: 0, testCode: 1, status: 1, 'attempt.status': 1, 'attempt.isLocked': 1, 'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1 } }
     ).toArray()
     : [];
   return docs.map((test) => {
@@ -82,6 +86,8 @@ export async function adminTests(req) {
       // Approved but never began: not started yet while it runs, missed once it has ended.
       notStartedCount: registrations.filter((entry) => entry.status === 'approved' && !entry.attempt).length,
       submittedCount: submitted.length,
+      // Locked papers still being written, waiting to be revived (the home page's Live now).
+      lockedCount: registrations.filter((entry) => entry.attempt?.status === 'in_progress' && entry.attempt.isLocked).length,
       // Handed in with a written answer nobody has marked yet (as on the home page).
       toMarkCount: submitted.filter((entry) => (entry.attempt.answers || []).some((answer) => answer.isCorrect === null && answer.answeredAt)).length,
       // Marks still to be given by hand count as zero until they are.
@@ -169,7 +175,6 @@ const dashboardStatusRank = {
   }
 };
 
-const rankRegistration = (status) => (status === 'pending' ? 0 : status === 'approved' ? 1 : 2);
 const dashboardManualQuestionIds = (test) => (test.questions || []).filter((question) => question.manualGrading).map((question) => question.id);
 
 /**
@@ -320,30 +325,6 @@ export async function adminDashboard(req, code, pageOptions = null) {
   return dashboardShell(test, registrations, manualQuestionIds);
 }
 
-const FILTER_GROUPS = {
-  pending: 'registration', approved: 'registration', rejected: 'registration',
-  'paper:not_started': 'paper', 'paper:in_progress': 'paper', 'paper:paused': 'paper', 'paper:locked': 'paper', 'paper:submitted': 'paper',
-  verified: 'account', guest: 'account',
-  'venue:in_range': 'venue', 'venue:out_of_range': 'venue', 'venue:exception': 'venue', 'venue:not_checked': 'venue',
-  'device:phone': 'device', 'device:tablet': 'device', 'device:laptop': 'device', 'device:unknown': 'device',
-  'devicecheck:ok': 'devicecheck', 'devicecheck:disagree': 'devicecheck', 'devicecheck:exception': 'devicecheck',
-  'marking:awaiting': 'marking', 'marking:done': 'marking',
-  'finish:student': 'finish', 'finish:time': 'finish', 'finish:admin': 'finish', 'finish:teacher': 'finish', 'finish:unknown': 'finish'
-};
-
-/**
- * The orders the Students and Results lists can be read in: a field and a
- * direction, each either way round. The usual one, 'order-asc', is waiting
- * for a decision first, then as they registered. Sorted in the database, so
- * the order holds across every page, not just the one shown.
- */
-export const RESULT_SORTS = ['order-asc', 'order-desc', 'submitted-desc', 'submitted-asc', 'score-desc', 'score-asc', 'name-asc', 'name-desc'];
-export const STUDENT_SORTS = ['order-asc', 'order-desc', 'name-asc', 'name-desc', 'sap-asc', 'sap-desc', 'answered-desc', 'answered-asc'];
-/** Links saved before an order could be reversed. */
-const LEGACY_SORTS = { order: 'order-asc', latest: 'submitted-desc', 'score-high': 'score-desc', 'score-low': 'score-asc', name: 'name-asc' };
-export const resultSort = (raw) => (RESULT_SORTS.includes(raw) ? raw : LEGACY_SORTS[raw] || 'order-asc');
-const sortFor = (section, raw) => (section === 'responses' ? resultSort(raw)
-  : section === 'students' && STUDENT_SORTS.includes(raw) ? raw : 'order-asc');
 const answeredExpression = {
   $size: { $filter: { input: { $ifNull: ['$attempt.answers', []] }, as: 'answer', cond: { $ne: [{ $ifNull: ['$$answer.answeredAt', null] }, null] } } }
 };
@@ -600,6 +581,9 @@ function asDashboardCounts(result = {}, test = null) {
   };
 }
 
+// Kept importable from here as before: the tests and the regression check read them from this module.
+export { RESULT_SORTS, STUDENT_SORTS, dashboardCounts, paginateDashboard, resultSort };
+
 async function pagedAdminDashboard(test, rawPage, manualQuestionIds) {
   const page = dashboardPageOptions(rawPage);
   const emptyPage = page.section === 'test';
@@ -634,98 +618,6 @@ async function pagedAdminDashboard(test, rawPage, manualQuestionIds) {
   };
 }
 
-function dashboardFilter(row, id) {
-  if (['pending', 'approved', 'rejected'].includes(id)) return row.status === id;
-  if (id === 'paper:not_started') return !row.attemptStatus;
-  if (id === 'paper:submitted') return row.attemptStatus === 'submitted';
-  if (id === 'paper:paused') return row.attemptStatus === 'in_progress' && row.isPaused;
-  if (id === 'paper:locked') return row.attemptStatus === 'in_progress' && !row.isPaused && row.isLocked;
-  if (id === 'paper:in_progress') return row.attemptStatus === 'in_progress' && !row.isPaused && !row.isLocked;
-  if (id === 'guest') return row.accountType === 'guest' || String(row.email || '').endsWith('@guest.test');
-  if (id === 'verified') return !dashboardFilter(row, 'guest');
-  if (id === 'venue:exception') return row.locationOverride;
-  if (id === 'venue:in_range') return !row.locationOverride && Boolean(row.locationVerifiedAt);
-  if (id === 'venue:out_of_range') return !row.locationOverride && !row.locationVerifiedAt && row.locationDistanceMeters !== null && row.locationDistanceMeters !== undefined;
-  if (id === 'venue:not_checked') return !row.locationOverride && !row.locationVerifiedAt && (row.locationDistanceMeters === null || row.locationDistanceMeters === undefined);
-  if (id.startsWith('device:')) return (row.device?.kind || 'unknown') === id.slice(7);
-  if (id === 'devicecheck:exception') return row.deviceOverride;
-  if (id === 'devicecheck:disagree') return !row.deviceOverride && Boolean(row.device?.suspicious);
-  if (id === 'devicecheck:ok') return !row.deviceOverride && !row.device?.suspicious;
-  if (id === 'marking:awaiting') return row.manualTotal > row.manualGraded;
-  if (id === 'marking:done') return row.manualTotal <= row.manualGraded;
-  if (id.startsWith('finish:')) {
-    const value = id.slice(7);
-    return value === 'unknown'
-      ? !['student', 'time', 'admin', 'teacher'].includes(row.submittedBy)
-      : row.submittedBy === value;
-  }
-  return true;
-}
-
-export function dashboardCounts(rows, perStudent = false) {
-  const ends = rows.filter((row) => row.attemptStatus === 'in_progress' && row.ownDeadlineAt).map((row) => Date.parse(row.ownDeadlineAt));
-  return {
-    writing: rows.filter((row) => row.attemptStatus === 'in_progress').length,
-    lastOwnEndAt: perStudent && ends.length ? new Date(Math.max(...ends)).toISOString() : null,
-    total: rows.length,
-    pending: rows.filter((row) => row.status === 'pending').length,
-    started: rows.filter((row) => row.attemptStatus).length,
-    submitted: rows.filter((row) => row.attemptStatus === 'submitted').length,
-    awaitingMarking: rows.filter((row) => row.attemptStatus === 'submitted' && row.manualTotal > row.manualGraded).length,
-    owedTime: rows.filter((row) => row.attemptStatus === 'in_progress' && (row.isPaused || row.extraMs > 0)).length,
-    handedInByClose: rows.filter((row) => row.attemptStatus === 'submitted' && row.submittedBy === 'admin').length
-  };
-}
-
-/** Server-side search/filter/page: the browser receives at most one table page. */
-export function paginateDashboard(dashboard, raw = {}) {
-  const all = dashboard.registrations || [];
-  const section = raw.section === 'responses' ? 'responses' : raw.section === 'students' ? 'students' : 'test';
-  const pageSize = Math.min(200, Math.max(25, Number(raw.pageSize) || 100));
-  const search = String(raw.search || '').trim().toLowerCase().slice(0, 120);
-  const selected = [...new Set(Array.isArray(raw.filters) ? raw.filters : String(raw.filters || '').split(',').filter(Boolean))]
-    .filter((id) => FILTER_GROUPS[id]);
-  const base = section === 'responses' ? all.filter((row) => row.attemptStatus === 'submitted') : section === 'students' ? all : [];
-  const searched = search
-    ? base.filter((row) => `${row.name || ''} ${row.sapId || ''} ${row.email || ''}`.toLowerCase().includes(search))
-    : base;
-  const groups = Object.values(selected.reduce((result, id) => {
-    (result[FILTER_GROUPS[id]] ||= []).push(id);
-    return result;
-  }, {}));
-  const filtered = groups.length
-    ? searched.filter((row) => groups.every((ids) => ids.some((id) => dashboardFilter(row, id))))
-    : searched;
-  const sort = sortFor(section, raw.sort);
-  if (sort !== 'order-asc') {
-    const [field, way] = sort.split('-');
-    const direction = way === 'desc' ? -1 : 1;
-    const submitted = (row) => Date.parse(row.submittedAt || 0) || 0;
-    const orders = {
-      order: (a, b) => rankRegistration(a.status) - rankRegistration(b.status) || (Date.parse(a.requestedAt || 0) - Date.parse(b.requestedAt || 0)) * direction,
-      sap: (a, b) => String(a.sapId || '').localeCompare(String(b.sapId || '')) * direction,
-      answered: (a, b) => ((Number(a.answeredCount) || 0) - (Number(b.answeredCount) || 0)) * direction || (Date.parse(b.requestedAt || 0) - Date.parse(a.requestedAt || 0)) * direction,
-      submitted: (a, b) => (submitted(a) - submitted(b)) * direction,
-      name: (a, b) => String(a.name || '').toLowerCase().localeCompare(String(b.name || '').toLowerCase()) * direction,
-      score: (a, b) => ((Number(a.score) || 0) - (Number(b.score) || 0)) * direction || (submitted(b) - submitted(a)) * direction
-    };
-    filtered.sort(orders[field]);
-  }
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
-  const page = Math.min(pages, Math.max(1, Number(raw.page) || 1));
-  const start = (page - 1) * pageSize;
-  const relevantIds = section === 'responses'
-    ? Object.keys(FILTER_GROUPS).filter((id) => id.startsWith('marking:') || id.startsWith('finish:'))
-    : Object.keys(FILTER_GROUPS).filter((id) => !id.startsWith('marking:') && !id.startsWith('finish:'));
-  return {
-    ...dashboard,
-    registrations: filtered.slice(start, start + pageSize),
-    counts: dashboardCounts(all, dashboard.test?.endMode === 'each'),
-    filterCounts: Object.fromEntries(relevantIds.map((id) => [id, searched.filter((row) => dashboardFilter(row, id)).length])),
-    pagination: { page, pageSize, total: filtered.length, unfilteredTotal: base.length, pages, section }
-  };
-}
-
 export async function adminExportData(req, code) {
   const test = await requireOwnedTest(req, code);
   const dashboard = await adminDashboard(req, code);
@@ -756,7 +648,7 @@ export async function adminExportData(req, code) {
       ? ''
       : (question.correctOptions || []).map((id) => question.options?.[Number(id)]).filter((text) => text !== undefined).join(' • ')
   }));
-  const integrityLog = (test.registrations || []).flatMap((registration) => (registration.attempt?.events || []).map((event) => ({
+  const integrityLog = (test.registrations || []).flatMap((registration) => keptEvents(registration.attempt?.events).map((event) => ({
     studentName: registration.fullName,
     email: registration.collegeEmail,
     sapId: registration.sapId,
@@ -808,6 +700,16 @@ export function csvForAdmin(dashboard) {
   return rows.map((row) => row.map(quote).join(',')).join('\r\n');
 }
 
+/**
+ * One student's whole record on your test, for the Excel download beside
+ * their activity log: answers, activity, integrity, venue and device - the
+ * same file the Users page gives, from the test's own dashboard.
+ */
+export async function registrationRecord(req, code, registrationId) {
+  const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+  return studentResponseData(test, registration);
+}
+
 export async function registrationAnalysis(req, code, registrationId) {
   const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
   return analysisOf(test, registration);
@@ -843,11 +745,12 @@ function analysisOf(test, registration) {
         isLocked: Boolean(attempt.isLocked),
         lockReason: attempt.lockReason || null,
         limits: { exits: test.fullscreenExitLimit || 0, awaySeconds: test.fullscreenAbsenceLimitSeconds || 0 },
-        timeline: (attempt.events || []).map((event) => ({ ...describeEvent(event), createdAt: iso(event.createdAt) })),
+        timeline: keptEvents(attempt.events).map((event) => ({ ...describeEvent(event), createdAt: iso(event.createdAt) })),
         activity: activityLog(test, registration)
       }
       : null,
     location: attempt?.locationChecks || null,
+    locationTrail: locationTrailOf(attempt),
     answers: responseDetails(test, registration)
   };
 }
@@ -1082,6 +985,7 @@ export async function reviewData(req, code) {
         number,
         type: questionType(question),
         prompt: question.prompt,
+        image: imageView(question.image),
         options: question.options || [],
         correctOptions: (question.correctOptions || []).map(String),
         manualGrading: Boolean(question.manualGrading),

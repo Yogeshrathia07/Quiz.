@@ -57,7 +57,6 @@ export async function copyText(value) {
   field.setAttribute('readonly', '');
   field.style.position = 'fixed';
   field.style.top = '-1000px';
-  field.dataset.portal = '';
   document.body.append(field);
   field.select();
   const copied = document.execCommand?.('copy');

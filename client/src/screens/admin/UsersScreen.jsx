@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, ArrowDownUp, Ban, BadgeCheck, Check, ChevronLeft, ChevronRight, GraduationCap, KeyRound, Search, Users } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
+import { loadCached, setCached, useCached } from '../../lib/cache.js';
 import { shortDateTime } from '../../lib/format.js';
 import { InfoPill } from '../../components/StatusPill.jsx';
 import { UserDetailModal } from './modals/UserDetailModal.jsx';
@@ -52,7 +53,10 @@ function BlockForm({ busy, onBlock }) {
  * Every account, plus the blocked list, which lasts until lifted.
  */
 export function UsersScreen({ currentEmail, canManage, showToast }) {
-  const [data, setData] = useState(null);
+  // Shown at once when seen before (lib/cache.js), and asked again behind.
+  const users = useCached(canManage ? '/api/admin/users' : null);
+  const data = users.data || null;
+  const setData = (next) => setCached('/api/admin/users', next);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState([]);
   const [sort, setSort] = useState('newest');
@@ -61,8 +65,9 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
   const [opened, setOpened] = useState(null); // the account row, shown at once while its details load
   const closeDetail = useCallback(() => setOpened(null), []);
 
-  const load = useCallback(() => api('/api/admin/users').then(setData), []);
-  useEffect(() => { if (canManage) load().catch((error) => showToast(error.message)); }, [canManage, load, showToast]);
+  const load = useCallback(() => loadCached('/api/admin/users', { force: true }), []);
+  const firstFailure = !users.data && users.error;
+  useEffect(() => { if (firstFailure) showToast(firstFailure.message); }, [firstFailure, showToast]);
 
   const run = async (request, message) => {
     setBusy(true);

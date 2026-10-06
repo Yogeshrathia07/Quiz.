@@ -120,15 +120,18 @@ function IntegrityBadge({ attempt }) {
  * this question's under strict timing, else the test's - with a bar that
  * drains as it runs out, and one quiet line with the rest.
  */
-export function ExamHeader({ attempt, strict, away = false, answeredCount, totalCount, onTestExpire, onQuestionExpire, onWarn }) {
+export function ExamHeader({ attempt, strict, away = false, waitingForPicture = false, answeredCount, totalCount, onTestExpire, onQuestionExpire, onWarn }) {
   const serverTime = attempt.serverTime;
-  const test = useDeadline(attempt.untimed ? null : attempt.deadlineAt, serverTime, onTestExpire);
+  // A picture still on its way: the clock waiting for it has not started, so it shows its full time.
+  const holdQuestion = waitingForPicture && Boolean(strict?.shownPending);
+  const holdPaper = waitingForPicture && Boolean(attempt.clockPending);
+  const test = useDeadline(attempt.untimed || holdPaper ? null : attempt.deadlineAt, serverTime, onTestExpire);
   // The question's (and, untimed, the paper's) clock, held still while away.
   // Held, it has no deadline to run out at - only the time it had left.
   const heldAt = useQuestionPause(strict, serverTime, away);
   const questionEndsAt = strict?.questionEndsAt || null;
   const paperEndsAt = strict && attempt.untimed ? strict.paperEndsAt : null;
-  const running = useDeadline(heldAt === null ? questionEndsAt : null, serverTime, onQuestionExpire);
+  const running = useDeadline(heldAt === null && !holdQuestion ? questionEndsAt : null, serverTime, onQuestionExpire);
   const paperRunning = useDeadline(heldAt === null ? paperEndsAt : null, serverTime, null);
   const held = (endsAt) => (endsAt ? { secondsLeft: (Date.parse(endsAt) - heldAt) / 1000, known: true, isOver: false } : running);
   const question = heldAt === null ? running : held(questionEndsAt);
@@ -149,8 +152,13 @@ export function ExamHeader({ attempt, strict, away = false, answeredCount, total
   // student's own). With no clock at all there is no timer to show.
   const questionTimed = Boolean(strict?.questionEndsAt);
   let primary = null;
-  if (questionTimed) {
+  if (questionTimed && holdQuestion) {
+    primary = { label: 'Starts when the picture loads', left: strict.questionSeconds, total: strict.questionSeconds, low: 0, critical: 0 };
+  } else if (questionTimed) {
     primary = { label: 'This question', left: question.known ? question.secondsLeft : null, total: strict.questionSeconds, low: 30, critical: 10 };
+  } else if (!attempt.untimed && holdPaper) {
+    const minutes = Number(attempt.durationMinutes) || 0;
+    primary = { label: 'Your time starts when the pictures load', left: minutes ? minutes * 60 : null, total: minutes * 60, low: 0, critical: 0 };
   } else if (!attempt.untimed) {
     const windowSeconds = (Date.parse(attempt.deadlineAt) - Date.parse(attempt.startedAt)) / 1000;
     const label = attempt.ownTime ? 'Your time left' : 'Time left';

@@ -1,4 +1,4 @@
-import { describeEvent } from './integrity.js';
+import { describeEvent, keptEvents } from './integrity.js';
 import { kindWord } from './device.js';
 
 /**
@@ -79,7 +79,7 @@ export function activityLog(test, registration) {
   if (attempt) {
     add(attempt.startedAt, 'start', 'Started the test', attempt.device ? `On a ${kindWord(attempt.device.kind)} (${attempt.device.label})` : '');
     entries.push(...answerEntries(test, attempt));
-    for (const event of attempt.events || []) {
+    for (const event of keptEvents(attempt.events)) {
       const described = describeEvent(event);
       const label = event.type === 'fullscreen_exit' ? `Left the test: ${described.label.toLowerCase()}` : described.label;
       add(event.createdAt, EVENT_KIND[event.type] || 'other', label, described.detail || '', described.durationMs);

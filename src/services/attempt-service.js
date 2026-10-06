@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { paperHasImages, questionHasImage, shownGraceMs } from '../domain/question-image.js';
 import { registrations, tests } from '../db/index.js';
 import { PublicTestError } from '../lib/errors.js';
 import { asInteger, hmac, randomId, stableSort } from '../lib/crypto.js';
@@ -6,7 +7,7 @@ import { currentMs, dateMs, now } from '../lib/time.js';
 import { selectedAttemptQuestions } from '../domain/question-bank.js';
 import { attemptView } from '../domain/presenters.js';
 import { TIME_OVER_MESSAGE, acceptsAttemptAnswers, isAttemptTimeOver, isPerStudent, isTimeOver } from '../domain/attempt-rules.js';
-import { MAX_EVENTS, emptyIntegrity, flagReason, leaveReason, locksOnViolation, violationActionOf, warningsBeforeLockOf } from '../domain/integrity.js';
+import { MAX_EVENTS, RETIRED_FLAGS, emptyIntegrity, flagReason, leaveReason, locksOnViolation, violationActionOf, warningsBeforeLockOf } from '../domain/integrity.js';
 import { ANSWER_LOG_MAX, TYPING_MERGE_MS } from '../domain/activity.js';
 import { automaticMarks, earnedMarks, paperMarks, paperScore, questionMarks } from '../domain/marks.js';
 import {
@@ -117,12 +118,40 @@ export function classifyLocationCheck(test, raw) {
   return { status: 'inconclusive', distanceMeters: distance, accuracyMeters };
 }
 
+/** The newest readings kept on a paper (one comes at Begin, each question change and about once a minute). */
+const LOCATION_TRAIL_LIMIT = 400;
+const coordinate = (value, limit) => {
+  const number = Number(value);
+  return Number.isFinite(number) && Math.abs(number) <= limit ? Math.round(number * 1e6) / 1e6 : null;
+};
+
+/**
+ * One reading as the teacher's Location tab lists it: where the device said
+ * it was while the paper was open, how sure it was, and what the check made
+ * of it. A check with no reading (permission refused, no fix) is kept too,
+ * without coordinates.
+ */
+export function locationReading(raw, check, at, trigger) {
+  const latitude = coordinate(raw?.latitude, 90);
+  const longitude = coordinate(raw?.longitude, 180);
+  const known = latitude !== null && longitude !== null;
+  const accuracy = Number(raw?.accuracyMeters);
+  return {
+    at,
+    trigger,
+    status: check.status,
+    latitude: known ? latitude : null,
+    longitude: known ? longitude : null,
+    accuracyMeters: known && Number.isFinite(accuracy) && accuracy >= 0 ? Math.round(accuracy) : null,
+    distanceMeters: Number.isFinite(check.distanceMeters) ? Math.round(check.distanceMeters) : null
+  };
+}
+
 /**
  * Why a student's page could not get their location at Begin, as the page
  * found it (client/src/lib/geo.js) - kept on the registration so the teacher's
- * row says why, beside the location exception that lets them in. Never the
- * position itself: only the venue's coordinates are stored, and of a student
- * the distance from it.
+ * row says why, beside the location exception that lets them in. Not the
+ * position itself: that is kept only once a paper is open (locationReading).
  */
 const LOCATION_PROBLEMS = ['denied', 'inapp', 'unavailable', 'timeout', 'insecure', 'unsupported', 'imprecise'];
 const locationProblemOf = (raw) => ({
@@ -358,6 +387,7 @@ export async function startAttempt(req, code, raw = {}) {
   if (initialLocation) {
     attempt.locationChecks[initialLocation.status] = 1;
     attempt.locationChecks.last = { ...initialLocation, checkedAt: now(), trigger: 'start' };
+    attempt.locationTrail = [locationReading(raw, initialLocation, attempt.locationChecks.last.checkedAt, 'start')];
   }
   // When the admin presses Start, every waiting student asks for a paper at
   // once, and a double tap sends two requests. Only the first may create the
@@ -441,18 +471,20 @@ export async function recordLocationCheck(req, attemptId, raw = {}) {
       'locationChecks.last': { ...check, checkedAt, trigger },
       'locationChecks.outsideStreak': verdict.outsideStreak,
       'locationChecks.outsideSince': verdict.outsideSince
-    }
+    },
+    // Every reading, with where it was, for the teacher's Location tab.
+    $push: { locationTrail: { $each: [locationReading(raw, check, checkedAt, trigger)], $slice: -LOCATION_TRAIL_LIMIT } }
   };
   // Leaving the venue and coming back both belong in the student's timeline.
   if (verdict.left || verdict.returned) {
-    update.$push = logEvent({
+    Object.assign(update.$push, logEvent({
       type: verdict.left ? 'venue_left' : 'venue_returned',
       createdAt: checkedAt,
       durationMs: verdict.returned && attempt.locationChecks?.outsideSince
         ? Math.max(0, checkedAt.getTime() - dateMs(attempt.locationChecks.outsideSince))
         : null,
       detail: check.distanceMeters === null ? null : `${Math.round(check.distanceMeters)} m`
-    });
+    }));
   }
   // The tally the admin reads: how many times they left, and for how long.
   if (verdict.left) update.$inc['locationChecks.outsideCount'] = 1;
@@ -751,7 +783,6 @@ export async function nextQuestion(req, attemptId, raw = {}) {
   return studentView(test, registration, fresh);
 }
 
-const shownGraceMs = () => Math.max(0, Number(config.shownGraceSeconds) || 0) * 1000;
 
 /**
  * The student's device says what it was sent is now on screen: the paper (on
@@ -768,11 +799,10 @@ export async function markShown(req, attemptId, raw = {}) {
   const checked = await checkIn(test, registration, owned);
   if (checked.status !== 'in_progress' || checked.isLocked) return studentView(test, registration, checked);
   const atMs = Date.now();
-  const graceMs = shownGraceMs();
   const expect = { id: checked.id, status: 'in_progress' };
   const set = {};
   if (raw.paper === true && checked.clockSentAt) {
-    const start = clockStartOnShown(dateMs(checked.clockSentAt), dateMs(checked.startedAt), atMs, graceMs);
+    const start = clockStartOnShown(dateMs(checked.clockSentAt), dateMs(checked.startedAt), atMs, shownGraceMs(paperHasImages(test, checked)));
     if (start !== null) set.startedAt = new Date(start);
     set.clockSentAt = null;
     expect.clockSentAt = checked.clockSentAt;
@@ -780,7 +810,7 @@ export async function markShown(req, attemptId, raw = {}) {
   const questionId = asInteger(raw.questionId, 1, Number.MAX_SAFE_INTEGER);
   const open = isStrict(test) && checked.strict ? strictPaper(test, checked)[checked.strict.index ?? 0] : null;
   if (open && questionId === open.questionId) {
-    const shown = acknowledgeShown(checked.strict, atMs, graceMs);
+    const shown = acknowledgeShown(checked.strict, atMs, shownGraceMs(questionHasImage(test, open.questionId)));
     if (shown) {
       set['strict.shownAt'] = shown.shownAt;
       set['strict.sentAt'] = null;
@@ -1097,25 +1127,13 @@ async function checkIn(test, registration, attempt) {
 
 /** Noted for the report; never counts as leaving and never locks. */
 async function recordFlag(test, registration, attempt, raw) {
+  // A check taken out (see RETIRED_FLAGS), sent by a page still open from before: dropped.
+  if (RETIRED_FLAGS.includes(raw.detail)) return null;
   const reason = flagReason(raw.detail);
   if (!reason) throw new PublicTestError(400, 'Invalid integrity event.');
-  const createdAt = now();
-  // What an extension was seen doing, in a few plain words, for the report.
-  let extra = {};
-  if (reason === 'extension') {
-    const note = String(raw.note || '').replace(/[^\w\s<>#:./-]/g, '').slice(0, 80);
-    if (note) extra = { note };
-  } else if (reason === 'text_burst') {
-    // Which answer, and how much arrived at once - worded here, not by the page.
-    const questionId = asInteger(raw.questionId, 1, Number.MAX_SAFE_INTEGER);
-    const chars = asInteger(raw.chars, 1, 100_000);
-    const assigned = (attempt.questions || []).find((entry) => entry.questionId === questionId);
-    if (!assigned || !chars) throw new PublicTestError(400, 'Invalid integrity event.');
-    extra = { questionId, chars, note: `Q${assigned.questionIndex + 1}: ${chars} characters` };
-  }
   await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress' }, {
     $inc: { [`integrity.flags.${reason}`]: 1 },
-    $push: logEvent({ type: 'integrity_flag', createdAt, durationMs: null, detail: reason, ...extra })
+    $push: logEvent({ type: 'integrity_flag', createdAt: now(), durationMs: null, detail: reason })
   });
   return null;
 }

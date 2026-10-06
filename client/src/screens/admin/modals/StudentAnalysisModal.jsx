@@ -4,6 +4,10 @@ import { dateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
 import { InfoTip } from '../../../components/InfoTip.jsx';
 import { RichText } from '../../../components/RichText.jsx';
+import { QuestionImage } from '../../../components/QuestionImage.jsx';
+import { Flag, LogOut, PenLine, Search, ShieldAlert, WifiOff } from 'lucide-react';
+import { FilterMenu } from '../../../components/FilterMenu.jsx';
+import { applyFilters } from '../../../lib/filters.js';
 
 const markValue = (answer) => (answer.marks === null || answer.marks === undefined ? '' : String(answer.marks));
 
@@ -14,6 +18,7 @@ function AnswerCard({ answer, mark, onMark, readOnly }) {
         <div>
           <p className="eyebrow">Question {answer.questionNumber} · {answer.type.toUpperCase()}</p>
           <RichText className="analysis-prompt" text={answer.prompt}/>
+          {answer.image && <QuestionImage image={answer.image} label={`Picture for question ${answer.questionNumber}`} compact/>}
         </div>
         {answer.manualGrading && !readOnly ? (
           // Any mark from 0 to what the question is worth; 0 and full marks one tap away.
@@ -48,11 +53,6 @@ function AnswerCard({ answer, mark, onMark, readOnly }) {
           </InfoTip>
         </p>
       )}
-      {answer.textBursts?.length > 0 && (
-        <p className="analysis-answer-burst">
-          Text appeared all at once: {answer.textBursts.map((chars) => `${chars} characters`).join(', ')} — pasted (a phone keyboard's clipboard) or voice typing.
-        </p>
-      )}
       <p className="analysis-answer-meta">
         {answer.answeredAt ? `Answered ${dateTime(answer.answeredAt)}` : 'Not answered'}
         {answer.timeSpentSeconds !== undefined && answer.timeSpentSeconds !== null && (
@@ -75,38 +75,83 @@ const KIND_LABEL = {
   offline: 'Offline', late: 'Late', other: ''
 };
 
-/** The student's whole test in order: joining, every answer and change, every exit and return, submitting. */
-function ActivityLog({ entries }) {
-  const [filter, setFilter] = useState('all');
-  if (!entries.length) return <p className="help">No activity recorded yet.</p>;
-  const shown = filter === 'all' ? entries
-    : filter === 'answers' ? entries.filter((entry) => entry.kind === 'answer' || entry.kind === 'late')
-      : filter === 'offline' ? entries.filter((entry) => entry.kind === 'offline' || entry.kind === 'late')
-        : entries.filter((entry) => ['exit', 'return', 'flag', 'lock'].includes(entry.kind));
+/**
+ * What the log can be narrowed to - the portal's own Filter button, a tick
+ * box for each kind of event. Late answers count both as answers and as
+ * offline: they were made offline.
+ */
+const LOG_GROUPS = [{
+  id: 'kind',
+  title: 'Show',
+  options: [
+    { id: 'answers', label: 'Answers and changes', test: (entry) => entry.kind === 'answer' || entry.kind === 'late' },
+    { id: 'exits', label: 'Left and came back', test: (entry) => entry.kind === 'exit' || entry.kind === 'return' },
+    { id: 'blocked', label: 'Blocked actions and locks', test: (entry) => entry.kind === 'flag' || entry.kind === 'lock' },
+    { id: 'offline', label: 'Offline and late answers', test: (entry) => entry.kind === 'offline' || entry.kind === 'late' },
+    { id: 'steps', label: 'Joined, started, submitted', test: (entry) => !['answer', 'late', 'exit', 'return', 'flag', 'lock', 'offline'].includes(entry.kind) }
+  ]
+}];
+const LOG_ICONS = {
+  answers: { icon: PenLine, tone: 'info' },
+  exits: { icon: LogOut, tone: 'bad' },
+  blocked: { icon: ShieldAlert, tone: 'bad' },
+  offline: { icon: WifiOff, tone: 'warn' },
+  steps: { icon: Flag, tone: 'muted' }
+};
+const searchText = (entry) => `${entry.label} ${entry.detail || ''} ${KIND_LABEL[entry.kind] || ''}`.toLowerCase();
+
+/**
+ * The student's whole test in order: joining, every answer and change, every
+ * exit and return, submitting - with a search and a Filter button above it.
+ * `bare` leaves out its own fold-away heading, where the page around it
+ * already says what it is (the student's window); `extra` sits at the end of
+ * the search line (the download).
+ */
+export function ActivityLog({ entries, bare = false, extra = null }) {
+  const [filters, setFilters] = useState([]);
+  const [query, setQuery] = useState('');
+  if (!entries.length) {
+    return <div className="activity-tools"><p className="help">No activity recorded yet.</p>{extra}</div>;
+  }
+  const Wrapper = bare ? 'div' : 'details';
+  const needle = query.trim().toLowerCase();
+  const shown = applyFilters(entries, LOG_GROUPS, filters).filter((entry) => !needle || searchText(entry).includes(needle));
+  const narrowed = filters.length > 0 || Boolean(needle);
   return (
-    <details className="activity-log" open>
-      <summary>Activity log ({entries.length} events)</summary>
-      <div className="activity-filter" role="group" aria-label="Show">
-        {[['all', 'Everything'], ['answers', 'Answers'], ['integrity', 'Exits & blocked'], ['offline', 'Offline & late']].map(([id, label]) => (
-          <button key={id} type="button" className={filter === id ? 'is-on' : ''} onClick={() => setFilter(id)}>{label}</button>
-        ))}
+    <Wrapper className={`activity-log${bare ? ' is-bare' : ''}`} open={bare ? undefined : true}>
+      {!bare && <summary>Activity log ({entries.length} events)</summary>}
+      <div className="activity-tools">
+        <label className="activity-search">
+          <Search size={15} aria-hidden="true"/>
+          <input className="text-input" type="search" placeholder="Search the log" aria-label="Search the log" value={query} onChange={(event) => setQuery(event.target.value)}/>
+        </label>
+        <FilterMenu groups={LOG_GROUPS} rows={entries} selected={filters} onChange={setFilters} icons={LOG_ICONS} title="Filter the log" allLabel="Everything"/>
+        <span className="activity-count">{narrowed ? `${shown.length} of ${entries.length}` : `${entries.length} events`}</span>
+        {extra}
       </div>
-      <ol>
-        {shown.map((entry, index) => (
-          <li key={`${entry.at}-${index}`} className={`is-${entry.kind}`}>
-            <time title={dateTime(entry.at)}>{clock(entry.at)}</time>
-            <span className="activity-kind">{KIND_LABEL[entry.kind] ?? ''}</span>
-            <span className="activity-text">
-              {entry.label}
-              {/* An offline period says its length in its own words. */}
-              {entry.kind !== 'offline' && entry.durationMs !== null && entry.durationMs !== undefined ? ` · ${seconds(entry.durationMs)} away` : ''}
-              {entry.late ? ` · received ${clock(entry.late.arrivedAt)}` : ''}
-              {entry.detail ? <small>{entry.detail}</small> : null}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </details>
+      {shown.length === 0 ? (
+        <p className="help activity-none">
+          Nothing matches.{' '}
+          <button type="button" className="link-button" onClick={() => { setFilters([]); setQuery(''); }}>Show everything</button>
+        </p>
+      ) : (
+        <ol>
+          {shown.map((entry, index) => (
+            <li key={`${entry.at}-${index}`} className={`is-${entry.kind}`}>
+              <time title={dateTime(entry.at)}>{clock(entry.at)}</time>
+              <span className="activity-kind">{KIND_LABEL[entry.kind] ?? ''}</span>
+              <span className="activity-text">
+                {entry.label}
+                {/* An offline period says its length in its own words. */}
+                {entry.kind !== 'offline' && entry.durationMs !== null && entry.durationMs !== undefined ? ` · ${seconds(entry.durationMs)} away` : ''}
+                {entry.late ? ` · received ${clock(entry.late.arrivedAt)}` : ''}
+                {entry.detail ? <small>{entry.detail}</small> : null}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Wrapper>
   );
 }
 
@@ -130,11 +175,9 @@ function IntegrityReport({ integrity, location }) {
         <div><span>Answers arrived late</span><strong>{integrity.lateAnswers || 0}</strong></div>
         <div><span>Split screen</span><strong>{leaves.split_screen}</strong></div>
         <div><span>Copy / paste / drag tries</span><strong>{(integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)}</strong></div>
-        <div><span>Text all at once</span><strong>{integrity.flags?.text_burst || 0}</strong></div>
         <div><span>Keyboard app while typing (not counted)</span><strong>{integrity.flags?.keyboard_app || 0}</strong></div>
         <div><span>Screenshot / print tries</span><strong>{(integrity.flags?.screenshot || 0) + (integrity.flags?.print || 0)}</strong></div>
         <div><span>Developer tools tries</span><strong>{integrity.flags?.devtools || 0}</strong></div>
-        <div><span>Browser extension seen</span><strong>{integrity.flags?.extension || 0}</strong></div>
         {location && (location.outsideCount || location.submit) && (
           <>
             <div><span>Left the venue</span><strong>{location.outsideCount || 0}×</strong></div>

@@ -16,7 +16,6 @@ import {
 import { setExamInProgress } from '../../lib/useAppUpdate.js';
 import { serverNow } from '../../lib/server-clock.js';
 import { useKeepAwake } from '../../lib/keep-awake.js';
-import { useExtensionWatch } from '../../lib/extension-watch.js';
 import { getBrowserLocation } from '../../lib/geo.js';
 import { LocationHelp } from '../../components/LocationCheck.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
@@ -26,6 +25,7 @@ import { QuestionList } from './QuestionList.jsx';
 import { LockedAttempt, PausedAttempt } from './StatusScreens.jsx';
 import { ResultScreen } from './ResultScreen.jsx';
 import { ExamHeader } from './ExamHeader.jsx';
+import { useImagesSettled } from '../../components/QuestionImage.jsx';
 
 const storage = typeof window === 'undefined' ? null : window.localStorage;
 const durableStorage = typeof window === 'undefined' ? null : window.indexedDB;
@@ -792,9 +792,18 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   const shownSent = useRef('');
   const shownQuestion = attempt?.strict?.shownPending ? attempt.questions?.[0]?.id ?? null : null;
   const shownPaper = Boolean(attempt?.clockPending);
+  // Every picture on the paper starts loading as it opens. "On screen" waits
+  // for the pictures it is about - this question's, or (the paper's own clock)
+  // all of them - so no clock runs while a picture is still on its way. The
+  // server gives a question with a picture up to 30 s for this.
+  const imageUrls = useMemo(() => (attempt?.questions || []).map((question) => question.image?.url).filter(Boolean), [attempt?.questions]);
+  const settled = useImagesSettled(imageUrls);
+  const shownImages = shownQuestion ? [attempt.questions[0]?.image?.url].filter(Boolean) : shownPaper ? imageUrls : [];
+  const imagesWaiting = shownImages.some((url) => !settled.has(url));
   useEffect(() => {
     const attemptId = attempt?.id;
     if (!attemptId || attempt?.status !== 'in_progress' || (!shownQuestion && !shownPaper)) return undefined;
+    if (imagesWaiting) return undefined;
     const key = `${attemptId}:${shownQuestion ?? ''}:${shownPaper}`;
     if (shownSent.current === key) return undefined;
     shownSent.current = key;
@@ -826,7 +835,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       }
     })();
     return () => { cancelled = true; };
-  }, [attempt?.id, attempt?.status, shownQuestion, shownPaper]);
+  }, [attempt?.id, attempt?.status, shownQuestion, shownPaper, imagesWaiting]);
 
   const attemptId = attempt?.id;
   // The admin turned on "Private window only" and this is a normal window:
@@ -971,30 +980,6 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
       { title: count === warnings ? `Last warning (${count} of ${warnings})` : `Warning ${count} of ${warnings}` });
     }
   }, [attempt?.violationCount, attempt?.isLocked]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Text arriving in an answer all at once: on the record against its question,
-  // and the student is reminded - not more than every 20 seconds.
-  const burstWarnedAt = useRef(0);
-  const onTextBurst = useCallback((questionId, chars) => {
-    reportPresence({ type: 'flag', detail: 'text_burst', questionId, chars });
-    if (Date.now() - burstWarnedAt.current < 20_000) return;
-    burstWarnedAt.current = Date.now();
-    showToast('Answers pasted in are recorded, and your administrator sees them.', 'warn', { title: 'Text appeared all at once' });
-  }, [reportPresence, showToast]);
-
-  // A browser extension changing the paper: on the record each time it shows
-  // something new (a few at most), and a notice above the paper that stays -
-  // a message that fades would be gone at the first tap.
-  const extensionReports = useRef(0);
-  const [extensionSeen, setExtensionSeen] = useState(false);
-  useExtensionWatch({
-    enabled: sitting,
-    onFound: (note) => {
-      extensionReports.current += 1;
-      setExtensionSeen(true);
-      if (extensionReports.current <= 5) reportPresence({ type: 'flag', detail: 'extension', note });
-    }
-  });
 
   useClipboardGuard({
     enabled: sitting && !attempt?.isLocked,
@@ -1367,6 +1352,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
         attempt={attempt}
         strict={strict}
         away={away}
+        waitingForPicture={imagesWaiting}
         answeredCount={answeredCount}
         totalCount={totalCount}
         onTestExpire={autoSubmit}
@@ -1384,11 +1370,6 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
             {expiredId === current.id
               ? 'Time is up for this question. The next one opens as soon as the connection is back. Your answer is kept on this device.'
               : 'Waiting for the connection to open the next question. Your answer is kept on this device.'}
-          </p>
-        )}
-        {extensionSeen && (
-          <p className="notice danger" role="status">
-            <strong>A browser extension is changing this page.</strong> Turn extensions off, or take the test in a private (Incognito) window. This is recorded.
           </p>
         )}
 
@@ -1415,8 +1396,8 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
           </div>
         )}
         {showAll
-          ? <QuestionList questions={questions} onSave={saveAnswer} onTextBurst={onTextBurst} connection={connection}/>
-          : <QuestionPaper key={current.id} question={strict && current.id === expiredId ? { ...current, locked: true } : current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} onTextBurst={onTextBurst} connection={connection}/>}
+          ? <QuestionList questions={questions} onSave={saveAnswer} connection={connection}/>
+          : <QuestionPaper key={current.id} question={strict && current.id === expiredId ? { ...current, locked: true } : current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} connection={connection}/>}
         {strict && movingOn && (
           <div className="strict-switching" role="status">{isLastStrict ? 'Submitting your paper…' : 'Opening the next question…'}</div>
         )}

@@ -1,18 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChevronRight, Clock, Download, Hourglass, PenLine } from 'lucide-react';
-import { api, downloadMyResponses } from '../../lib/api.js';
+import { downloadMyResponses } from '../../lib/api.js';
+import { prefetch, setCached, useCached } from '../../lib/cache.js';
+import { DownloadQuestion } from './DownloadQuestion.jsx';
 import { clockTime, durationLabel, shortDateTime } from '../../lib/format.js';
 import { InfoTip } from '../../components/InfoTip.jsx';
 import { SapIdPrompt } from './SapIdPrompt.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
 
-/** A test you created opens on its manage page; any other on the test's own page. */
-const targetOf = (result) => (result.isOwner ? `/?admin=${encodeURIComponent(result.code)}` : `/?test=${encodeURIComponent(result.code)}`);
+/**
+ * One you handed in opens on its result (found by your account, so on any
+ * device); any other on the test's own page - as a student, even a teacher's
+ * own test, which they run from Created by me.
+ */
+const targetOf = (result) => (result.attemptStatus === 'submitted' ? `/?result=${encodeURIComponent(result.code)}`
+  : `/?test=${encodeURIComponent(result.code)}`);
 
 // Marks earned out of the paper's full marks.
 const outOf = (result) => result.totalMarks ?? result.totalQuestions;
 const percentOf = (result) => (outOf(result) ? (result.score / outOf(result)) * 100 : 0);
 const percent = (value) => `${Math.round(value)}%`;
+/** How a score reads at a glance: good, middling, low. */
+const band = (value) => (value >= 60 ? 'good' : value >= 35 ? 'mid' : 'low');
 
 /**
  * Where one test stands for this student, in a few words: `now` when it is
@@ -50,15 +59,17 @@ function Marks({ result }) {
   return (
     <span className="my-score" title={unmarked ? 'Your teacher has not marked every short answer yet. The score counts only what is marked so far.' : undefined}>
       <strong>{result.score}<small>/{outOf(result)}</small></strong>
-      <span className={unmarked ? 'is-warn' : undefined}>{unmarked ? `${result.pendingManual} to mark` : percent(percentOf(result))}</span>
+      <span className={unmarked ? 'is-warn' : `is-${band(percentOf(result))}`}>{unmarked ? `${result.pendingManual} to mark` : percent(percentOf(result))}</span>
     </span>
   );
 }
 
 function DownloadButton({ result, showToast }) {
   const [busy, setBusy] = useState(false);
+  const [asking, setAsking] = useState(false);
   if (!result.canDownload) return null;
   const download = async () => {
+    setAsking(false);
     setBusy(true);
     try { await downloadMyResponses(result.code); } catch (error) { showToast(error.message); }
     setBusy(false);
@@ -67,32 +78,31 @@ function DownloadButton({ result, showToast }) {
     ? 'Download your responses (some short answers are not marked yet)'
     : 'Download your responses: your answers, the correct answers and your marks';
   return (
-    <button className="my-download" type="button" disabled={busy} onClick={download} aria-label={label} title={label}>
-      <Download size={18} aria-hidden="true"/>
-    </button>
+    <>
+      <button className="download-round my-download" type="button" disabled={busy} onClick={() => setAsking(true)} aria-label={label} title={label}>
+        <Download size={18} aria-hidden="true"/>
+      </button>
+      {asking && <DownloadQuestion result={result} onConfirm={download} onCancel={() => setAsking(false)}/>}
+    </>
   );
 }
 
 /**
  * One test. The whole row opens it (the link's hit area covers the row);
- * the download button sits above that, left of the marks, so every row's
- * marks line up.
+ * the download button sits above that, at the start of the row.
  */
 function TestRow({ result, go, showToast }) {
   const state = standing(result);
   const target = targetOf(result);
-  const action = result.isOwner && state.go ? 'Manage' : state.go;
+  const action = state.go;
   return (
     <li className={`my-row is-${state.group}`}>
+      <DownloadButton result={result} showToast={showToast}/>
       <span className="my-row-text">
-        <a className="my-row-link" href={target} onClick={(event) => { event.preventDefault(); go(target); }}
-          title={result.isOwner ? 'Your test: edit it, follow its students and see its results' : undefined}>
-          {result.title}
-        </a>
+        <a className="my-row-link" href={target} onClick={(event) => { event.preventDefault(); go(target); }}>{result.title}</a>
         <span>{state.detail}</span>
       </span>
-      <DownloadButton result={result} showToast={showToast}/>
-      <span className="my-row-side">
+      <span className={`my-row-side${action ? ' is-action' : ''}`}>
         {state.group === 'done' ? <Marks result={result}/>
           : action ? <span className="my-go">{action}</span>
             : <span className={`my-state is-${state.tone}`}>{state.word}</span>}
@@ -147,30 +157,60 @@ function SapIdLine({ profile, onAdd }) {
 }
 
 /**
- * The student's home: what needs them now (a test to continue, begin or be let
- * into), then every result, newest first, with tests they missed at the end.
+ * The tests someone joined, as they see them: three numbers, what needs them
+ * now (a test to continue, begin or be let into), then every result, newest
+ * first, with tests they missed at the end. The student's home, and a
+ * teacher's "Taken by me" under Tests.
  */
-export function MyResultsScreen({ go, showToast, isStudent = false }) {
-  const [results, setResults] = useState(null);
-  // undefined while loading; null when the student has no SAP ID yet.
-  const [profile, setProfile] = useState(undefined);
-  const [asking, setAsking] = useState(false);
-
-  useEffect(() => {
-    api('/api/me/results').then((data) => setResults(data.results)).catch((error) => showToast(error.message));
-  }, [showToast]);
-
-  useEffect(() => {
-    if (!isStudent) return;
-    api('/api/student/profile')
-      .then((data) => { setProfile(data.profile); if (!data.profile) setAsking(true); })
-      .catch((error) => showToast(error.message));
-  }, [isStudent, showToast]);
-
+export function MyTestsList({ results, go, showToast }) {
   const grouped = { now: [], done: [], past: [] };
-  for (const result of results || []) grouped[standing(result).group].push(result);
+  for (const result of results) grouped[standing(result).group].push(result);
   grouped.now.sort((left, right) => (NOW_ORDER[standing(left).go] ?? 2) - (NOW_ORDER[standing(right).go] ?? 2));
   grouped.done.sort((left, right) => String(right.submittedAt || '').localeCompare(String(left.submittedAt || '')));
+  // The newest few results' answers, fetched in a quiet moment, so opening one
+  // is instant. The rest come when their row is pointed at or touched (lib/prefetch.js).
+  const newest = grouped.done.filter((result) => result.canDownload).slice(0, 3).map((result) => result.code).join(',');
+  useEffect(() => {
+    if (!newest) return undefined;
+    const idle = window.requestIdleCallback ? window.requestIdleCallback.bind(window) : (run) => window.setTimeout(run, 600);
+    const cancel = window.cancelIdleCallback ? window.cancelIdleCallback.bind(window) : window.clearTimeout;
+    const handle = idle(() => newest.split(',').forEach((code) => prefetch(`/api/me/results/${encodeURIComponent(code)}/responses`, { maxAgeMs: 60_000 })));
+    return () => cancel(handle);
+  }, [newest]);
+  return (
+    <div className="my-tests">
+      <Stats results={results}/>
+      <div className="my-lists">
+        <TestList title="Now" results={grouped.now} go={go} showToast={showToast}/>
+        <TestList title="Results" results={[...grouped.done, ...grouped.past]} go={go} showToast={showToast}/>
+      </div>
+    </div>
+  );
+}
+
+/** The student's home (and a teacher's own attempts, from their account menu). */
+export function MyResultsScreen({ go, showToast, isStudent = false }) {
+  // Shown at once when they were seen before (lib/cache.js), and asked again behind.
+  const list = useCached('/api/me/results');
+  const results = list.data?.results ?? null;
+  const own = useCached(isStudent ? '/api/student/profile' : null);
+  // undefined while loading; null when the student has no SAP ID yet.
+  const profile = own.data ? own.data.profile : undefined;
+  const [asking, setAsking] = useState(false);
+  const told = useRef(new Set());
+  useEffect(() => {
+    for (const error of [list.error, own.error]) {
+      if (error && !told.current.has(error)) { told.current.add(error); showToast(error.message); }
+    }
+  }, [list.error, own.error, showToast]);
+  // No SAP ID yet: asked for, once, as the page opens.
+  const askedOnce = useRef(false);
+  useEffect(() => {
+    if (own.data && !own.data.profile && !askedOnce.current) {
+      askedOnce.current = true;
+      setAsking(true);
+    }
+  }, [own.data]);
 
   return (
     <section className="admin-list my-dash">
@@ -196,17 +236,13 @@ export function MyResultsScreen({ go, showToast, isStudent = false }) {
             : 'A test you join yourself, a colleague\'s or your own, shows here.'}</p>
         </div>
       ) : (
-        <>
-          <Stats results={results}/>
-          <TestList title="Now" results={grouped.now} go={go} showToast={showToast}/>
-          <TestList title="Results" results={[...grouped.done, ...grouped.past]} go={go} showToast={showToast}/>
-        </>
+        <MyTestsList results={results} go={go} showToast={showToast}/>
       )}
       {asking && (
         <SapIdPrompt
           showToast={showToast}
           onClose={() => setAsking(false)}
-          onSaved={(saved) => { setProfile(saved); setAsking(false); }}
+          onSaved={(saved) => { setCached('/api/student/profile', { ...(own.data || {}), profile: saved }); setAsking(false); }}
         />
       )}
     </section>

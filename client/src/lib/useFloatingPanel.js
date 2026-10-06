@@ -23,7 +23,8 @@ function naturalHeight(list) {
  * where its last options and its buttons could not be reached.
  *
  * With `dialog`, a panel that fits on neither side of the button - or any
- * panel on a phone - is not squeezed into the gap: it opens as a dialog
+ * panel on a phone, or opened from inside a pop-up window - is not squeezed
+ * into the gap: it opens as a dialog
  * instead (`isDialog`; the caller's CSS centres it, or makes it a sheet from
  * the bottom on a phone), over a backdrop.
  *
@@ -50,7 +51,10 @@ export function useFloatingPanel(open, setOpen, align = 'right', { dialog = fals
     const roomAbove = button.top - GAP - EDGE;
     const fitsBelow = height <= roomBelow;
     const fitsAbove = height <= roomAbove;
-    const cramped = window.matchMedia?.(PHONE).matches || (!fitsBelow && !fitsAbove);
+    // Opened from a window over the page (a student's), it opens in the middle
+    // of the screen rather than hanging off its button at the window's edge.
+    const inWindow = Boolean(holder.current?.closest('.student-analysis-sheet'));
+    const cramped = inWindow || window.matchMedia?.(PHONE).matches || (!fitsBelow && !fitsAbove);
     setPosition((current) => {
       if (dialog && (decide ? cramped : current?.mode === 'dialog')) return current?.mode === 'dialog' ? current : { mode: 'dialog' };
       const below = fitsBelow || (!fitsAbove && roomBelow >= roomAbove);

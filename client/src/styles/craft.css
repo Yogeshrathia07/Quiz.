@@ -94,7 +94,7 @@
 /* Dashboard tabs:"someone is waiting" is a yellow dot beside the total (the number itself
    is on the Test tab and read out to screen readers), so the tab never has to squeeze. */
 [data-area="portal"] .tab-count.has-badge{display:inline-flex;align-items:center;gap:5px}
-@media (min-width:761px){[data-area="portal"] .dashboard-tabs{width:auto;grid-template-columns:repeat(3,auto)}}
+@media (min-width:761px){[data-area="portal"] .dashboard-tabs{width:auto;grid-template-columns:repeat(3,1fr)}}
 [data-area="portal"] .dashboard-tabs .tab-label{overflow:visible;text-overflow:clip;white-space:nowrap}
 [data-area="portal"] .tab-count .tab-badge{position:static;flex:0 0 8px;width:8px;min-width:8px;height:8px;padding:0;border-radius:50%;font-size:0;box-shadow:none}
 

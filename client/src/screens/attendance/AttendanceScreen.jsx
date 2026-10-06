@@ -4,6 +4,7 @@ import { readDeviceSignals } from '../../lib/device.js';
 import { dateTime } from '../../lib/format.js';
 import { LocationProblem } from '../../lib/geo.js';
 import { LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
+import { OpenInBrowser, useInAppGate } from '../../components/OpenInBrowser.jsx';
 import { Check, Clock3, X } from 'lucide-react';
 import { AuthForm } from '../../components/AuthForm.jsx';
 
@@ -176,6 +177,8 @@ function MarkForm({ code, session, user, onMarked, onScanAgain, showToast }) {
 export function AttendanceScreen({ code, auth, refreshAuth, go, showToast }) {
   const [session, setSession] = useState(null);
   const [error, setError] = useState('');
+  // Inside another app's built-in browser the location check cannot work.
+  const inAppGate = useInAppGate();
 
   const load = useCallback(async (key) => {
     try {
@@ -224,6 +227,16 @@ export function AttendanceScreen({ code, auth, refreshAuth, go, showToast }) {
     );
   }
   if (!session) return <div className="empty card">Loading…</div>;
+  // Only where location is checked: elsewhere an app's browser marks attendance just as well.
+  if (inAppGate.show && session.locationRequired && session.isOpen && !session.myMark) {
+    // The scanned code goes with the link, while it lasts.
+    const url = new URL(window.location.href);
+    if (linkKey) url.searchParams.set('k', linkKey);
+    return (
+      <OpenInBrowser url={url.toString()} onContinue={inAppGate.stay}
+        note="If it then says the code has expired, scan the QR again with your Camera app."/>
+    );
+  }
 
   let body;
   if (session.myMark) {

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChartColumn, ChevronDown, ClipboardList, House, KeyRound, LogOut, Menu, UserCheck, Users, X } from 'lucide-react';
+import { ChevronDown, ClipboardList, House, KeyRound, LogOut, Menu, UserCheck, Users, X } from 'lucide-react';
 import { BRAND } from '../brand.js';
 
 const initials = (name) => String(name || '?')
@@ -16,6 +16,8 @@ function activeLink(route, isAdmin) {
   if (route.admin === 'users') return 'users';
   // A student's results are their Home; a teacher's own attempts sit in the account menu.
   if (route.page === 'results') return isAdmin ? null : 'home';
+  // One handed-in test: a teacher reaches it from Tests (Taken by me), a student from Home.
+  if (route.result) return isAdmin ? 'tests' : 'home';
   if (route.test || route.attend) return null;
   // The quiz list, and a test's dashboard, creator or editor: all the Tests section.
   if (route.admin && route.admin !== 'portal') return 'tests';
@@ -60,8 +62,6 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
     user?.canManageUsers && { id: 'users', url: '/?admin=users', label: 'Users', icon: Users }
   ].filter(Boolean);
   const active = activeLink(route, isAdmin);
-  // Tests a teacher sat themselves - a colleague's, or their own to try it.
-  const attemptsUrl = '/?page=results';
   // A guest's password is not theirs to change, and a test page keeps the student on the test.
   const canChangePassword = user && !user.isGuest && !route.test;
 
@@ -105,7 +105,6 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
                 <strong>{user.name.replace(/^Guest:\s*/, '')}</strong>
                 <span>{subtitle}</span>
               </div>
-              {isAdmin && <button type="button" role="menuitem" onClick={run(() => go(attemptsUrl))}><ChartColumn size={16} aria-hidden="true"/>My test attempts</button>}
               {canChangePassword && <button type="button" role="menuitem" onClick={run(onChangePassword)}><KeyRound size={16} aria-hidden="true"/>Change password</button>}
               <button type="button" role="menuitem" className="is-danger" onClick={run(onSignOut)}><LogOut size={16} aria-hidden="true"/>Sign out</button>
             </div>
@@ -137,7 +136,6 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
             </div>
           </div>
           <div className="nav-panel-actions">
-            {isAdmin && <button className="button button-secondary" type="button" onClick={run(() => go(attemptsUrl))}>My test attempts</button>}
             {canChangePassword && <button className="button button-secondary" type="button" onClick={run(onChangePassword)}>Change password</button>}
             <button className="button button-danger" type="button" onClick={run(onSignOut)}>Sign out</button>
           </div>

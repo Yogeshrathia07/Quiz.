@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, downloadFile, post } from '../../../lib/api.js';
 import { durationLabel, shortDateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
-import { Ban, ChevronRight, CircleCheck, Download, Pencil, Trash2 } from 'lucide-react';
+import { Ban, CalendarDays, ChevronRight, CircleCheck, Download, Pencil, Trash2 } from 'lucide-react';
 import { StudentAnalysisModal } from './StudentAnalysisModal.jsx';
-import { InfoPill, StatusPill, attemptLabel } from '../../../components/StatusPill.jsx';
+import { InfoPill, StatusPill, StatusWord, attemptLabel } from '../../../components/StatusPill.jsx';
+import { InfoTip } from '../../../components/InfoTip.jsx';
+import { ConfirmDialog } from '../../../components/ConfirmDialog.jsx';
 
 const userPath = (email) => `/api/admin/users/${encodeURIComponent(email)}`;
 
@@ -15,6 +17,57 @@ function localDateKey(value) {
   if (!value || Number.isNaN(new Date(value).getTime())) return '';
   const date = new Date(value);
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 10);
+}
+
+/** "3 Oct" - the day alone, for a list. */
+const dayOf = (value) => {
+  const date = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? new Date(Number(value.slice(0, 4)), Number(value.slice(5, 7)) - 1, Number(value.slice(8, 10)))
+    : new Date(value);
+  return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
+
+/**
+ * One test in the person's list: its name and day, the marks, the details
+ * behind an (i), and - once handed in - their record to download. The row
+ * opens their paper.
+ */
+function UserTestRow({ result, downloading, onOpen, onDownload }) {
+  const status = attemptLabel(result);
+  const submitted = result.attemptStatus === 'submitted';
+  const outOf = result.totalMarks ?? result.totalQuestions;
+  const when = result.testDate || result.submittedAt;
+  return (
+    <li className={`user-test is-${status}`}>
+      {submitted ? (
+        <button className="download-round is-small user-test-download" type="button" disabled={downloading}
+          onClick={onDownload} title="Download their full record for this test (Excel)" aria-label={`Download ${result.title}: their full record`}>
+          <Download size={16} aria-hidden="true"/>
+        </button>
+      ) : <span className="user-test-download" aria-hidden="true"/>}
+      <button type="button" className="user-test-open" onClick={onOpen} title="Open their paper">
+        <strong>{result.title}</strong>
+        {when && <small>{dayOf(when)}</small>}
+      </button>
+      <span className="user-test-score">
+        {submitted && result.score !== null && result.score !== undefined
+          ? <span className="user-test-marks">{result.score}<small>/{outOf}</small></span>
+          : <StatusWord status={status}/>}
+        {result.pendingManual > 0 && <em>{result.pendingManual} to mark</em>}
+      </span>
+      <InfoTip label={`About ${result.title}`}>
+        <span className="info-tip-list user-test-info">
+          <span><strong>{result.title}</strong>{result.code}</span>
+          <span><StatusPill status={status}/></span>
+          {result.testDate && <span><strong>Test</strong>{shortDateTime(result.testDate)}</span>}
+          {result.submittedAt && <span><strong>Submitted</strong>{shortDateTime(result.submittedAt)}</span>}
+          {result.timeTakenSeconds ? <span><strong>Time taken</strong>{durationLabel(result.timeTakenSeconds)}</span> : null}
+          {result.pendingManual > 0 && <span><strong>To mark</strong>{result.pendingManual} short answer{result.pendingManual === 1 ? '' : 's'}</span>}
+        </span>
+      </InfoTip>
+      <ChevronRight size={16} className="user-test-go" aria-hidden="true"/>
+    </li>
+  );
 }
 
 /**
@@ -105,6 +158,8 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
   const [loadState, setLoadState] = useState('loading');
   const [loadError, setLoadError] = useState('');
   const [downloading, setDownloading] = useState('');
+  // The test whose record is about to download, asked about once first.
+  const [asking, setAsking] = useState(null);
   const [paper, setPaper] = useState(null);
   const [testQuery, setTestQuery] = useState('');
   const [testDate, setTestDate] = useState('');
@@ -126,8 +181,8 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
 
   useEffect(() => { void load(); }, [load, isBlocked]);
 
-  const download = async (event, result) => {
-    event.stopPropagation();
+  const download = async (result) => {
+    setAsking(null);
     const downloadKey = `${result.code}-${result.registrationId}`;
     setDownloading(downloadKey);
     try {
@@ -201,9 +256,12 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
               placeholder="Search test or code" aria-label="Search this person's tests"
               onChange={(event) => setTestQuery(event.target.value)}
             />
-            <label className="user-test-date">
-              <span>Test date</span>
-              <input className="text-input" type="date" value={testDate} onChange={(event) => setTestDate(event.target.value)}/>
+            {/* A day to show tests from: the box says which, the phone's own date picker chooses it. */}
+            <label className={`user-test-date${testDate ? ' is-set' : ''}`} title="Show the tests of one day">
+              <CalendarDays size={16} aria-hidden="true"/>
+              <span>{testDate ? dayOf(testDate) : 'Any date'}</span>
+              <input type="date" aria-label="Test date" value={testDate} onChange={(event) => setTestDate(event.target.value)}
+                onClick={(event) => { try { event.currentTarget.showPicker?.(); } catch { /* the browser opens its own */ } }}/>
             </label>
             {hasTestFilters && <button className="link-button" type="button" onClick={() => { setTestQuery(''); setTestDate(''); }}>Clear</button>}
           </div>
@@ -212,30 +270,19 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
           {visibleResults.length === 0 ? <p className="user-empty">No tests match this search.</p> : (
           <ul className="user-tests">
           {visibleResults.map((result) => (
-            <li key={`${result.code}-${result.registrationId}`}>
-              <button type="button" className="user-test" onClick={() => setPaper(result)} title="Open their paper">
-                <span className="user-test-name">
-                  <strong>{result.title}</strong>
-                  <small>{result.code}{result.testDate ? ` · Test ${shortDateTime(result.testDate)}` : ''}{result.submittedAt ? ` · Submitted ${shortDateTime(result.submittedAt)}` : ''}{result.timeTakenSeconds ? ` · ${durationLabel(result.timeTakenSeconds)}` : ''}</small>
-                </span>
-                <StatusPill status={attemptLabel(result)}/>
-                <span className="user-test-score">
-                  {result.score === null ? '—' : `${result.score}/${result.totalMarks ?? result.totalQuestions}`}
-                  {result.pendingManual > 0 && <small>{result.pendingManual} to mark</small>}
-                </span>
-                <ChevronRight size={16} className="user-test-go" aria-hidden="true"/>
-              </button>
-              {result.attemptStatus === 'submitted' && (
-                <button className="button icon-button user-test-download" type="button" disabled={downloading === `${result.code}-${result.registrationId}`}
-                  onClick={(event) => download(event, result)} title="Download full response and audit data (Excel)" aria-label={`Download ${result.title} response and audit data`}>
-                  <Download size={15} aria-hidden="true"/>
-                </button>
-              )}
-            </li>
+            <UserTestRow key={`${result.code}-${result.registrationId}`} result={result}
+              downloading={downloading === `${result.code}-${result.registrationId}`}
+              onOpen={() => setPaper(result)} onDownload={() => setAsking(result)}/>
           ))}
           </ul>
           )}
         </>
+      )}
+
+      {asking && (
+        <ConfirmDialog title={`Download ${user.name}'s record?`} onConfirm={() => download(asking)} onCancel={() => setAsking(null)}>
+          An Excel file of everything on “{asking.title}”: answers and marks, activity, leaving the test, venue, device and location readings.
+        </ConfirmDialog>
       )}
 
       {paper && (

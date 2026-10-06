@@ -27,6 +27,11 @@ export function StatusPill({ status, children }) {
   return <span className={`pill status-pill ${tone(status)}`}>{children ?? sentenceCase(status)}</span>;
 }
 
+/** The same status as a quiet word with a coloured dot, where a pill would shout (a list's side column). */
+export function StatusWord({ status }) {
+  return <span className={`status-word ${tone(status)}`}>{sentenceCase(status)}</span>;
+}
+
 /** Free-text pill for labels that are not a status value, e.g. the release policy. */
 export function InfoPill({ children, tone: pillTone = 'muted' }) {
   return <span className={`pill ${pillTone}`}>{children}</span>;

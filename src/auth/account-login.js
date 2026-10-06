@@ -158,8 +158,11 @@ export async function requestCode(req, raw = {}) {
   return { sent: true, email, purpose, expiresInSeconds: config.otp.minutesValid * 60, resendInSeconds: config.otp.resendSeconds };
 }
 
-/** Checks and spends a code. Throws unless it is right, fresh, and for `purpose`. */
-async function useCode(email, purpose, rawCode) {
+/**
+ * Checks a code, counting the try. Throws unless it is right, fresh, and for
+ * `purpose`; a wrong one uses up one of its attempts.
+ */
+async function matchCode(email, purpose, rawCode) {
   const code = String(rawCode ?? '').replace(/\s/g, '');
   if (!/^\d{6}$/.test(code)) throw new PublicTestError(400, 'Enter the 6-digit code from the email.');
   // Count the attempt before comparing, in one atomic step, so parallel
@@ -181,7 +184,29 @@ async function useCode(email, purpose, rawCode) {
       ? `That code is not right. ${left} attempt${left === 1 ? '' : 's'} left.`
       : 'That code is not right. Ask for a new code.');
   }
+  return pending;
+}
+
+/** Checks and spends a code - the last step, which creates the account or sets the password. */
+async function useCode(email, purpose, rawCode) {
+  await matchCode(email, purpose, rawCode);
   await otpCodes().deleteOne({ _id: email });
+}
+
+/**
+ * The form's middle step: the code is right, so the page goes on to ask for
+ * the password - and the code is kept for that last step. Its tries start
+ * again (it was right), and it lasts a while longer, so choosing a password
+ * never runs it out.
+ */
+export async function checkCode(req, raw = {}) {
+  const { email } = allowedEmail(raw.email);
+  await refuseIfBlocked(email);
+  const purpose = PURPOSES.includes(raw.purpose) ? raw.purpose : null;
+  if (!purpose) throw new PublicTestError(400, 'Invalid request.');
+  await matchCode(email, purpose, raw.code);
+  await otpCodes().updateOne({ _id: email, purpose }, { $set: { attempts: 0, expiresAt: minutesFromNow(config.otp.minutesValid) } });
+  return { ok: true, email, purpose };
 }
 
 /* --------------------------------------------------- sign up, reset, login */

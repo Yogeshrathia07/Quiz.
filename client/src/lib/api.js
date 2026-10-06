@@ -84,7 +84,6 @@ export async function downloadFile(path, fallbackName, body) {
   const link = document.createElement('a');
   link.href = url;
   link.download = named || fallbackName;
-  link.dataset.portal = '';
   document.body.append(link);
   link.click();
   link.remove();

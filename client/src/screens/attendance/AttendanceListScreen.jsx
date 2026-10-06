@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownAZ, BookOpen, CalendarDays, CircleDot, Download, Lock, Search, ShieldCheck, Smartphone, Users } from 'lucide-react';
-import { api, post } from '../../lib/api.js';
+import { post } from '../../lib/api.js';
+import { dropCached, useCached } from '../../lib/cache.js';
 import { shortDateTime } from '../../lib/format.js';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
@@ -31,16 +32,17 @@ const iconsFor = (groups) => ({
 });
 
 export function AttendanceListScreen({ go, showToast }) {
-  const [data, setData] = useState(null);
+  // Shown at once when seen before (lib/cache.js), and asked again behind.
+  const register = useCached('/api/admin/attendance');
+  const data = register.data || null;
   // ?new=1 (the home page's "Take attendance") opens straight on the form.
   const [creating, setCreating] = useState(() => new URLSearchParams(window.location.search).get('new') === '1');
   const [exporting, setExporting] = useState(false);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState([]);
   const [sort, setSort] = useState(USUAL_SORT);
-  useEffect(() => {
-    api('/api/admin/attendance').then(setData).catch((error) => showToast(error.message));
-  }, [showToast]);
+  const firstFailure = !register.data && register.error;
+  useEffect(() => { if (firstFailure) showToast(firstFailure.message); }, [firstFailure, showToast]);
 
   const sessions = data?.sessions;
   const groups = useMemo(() => sessionFilters(sessions || []), [sessions]);
@@ -78,6 +80,9 @@ export function AttendanceListScreen({ go, showToast }) {
       {showForm && (
         <SessionForm lastVenue={data.lastVenue} showToast={showToast} onCancel={sessions.length ? () => setCreating(false) : null} onSave={async (body) => {
           const created = await post('/api/admin/attendance', body);
+          // This list and the home page are asked for fresh next time, with the new session in them.
+          dropCached('/api/admin/attendance');
+          dropCached('/api/admin/home');
           go(sessionUrl(created.session.code));
         }}/>
       )}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RichText } from '../../components/RichText.jsx';
+import { QuestionImage } from '../../components/QuestionImage.jsx';
 
 const HINT = {
   mcq: 'Select one answer',
@@ -8,10 +9,6 @@ const HINT = {
 };
 const letter = (position) => String.fromCharCode(65 + position);
 
-// Typing adds a character at a time, a keyboard's suggestion or swipe a word.
-// This much arriving in one change came from somewhere else: a phone
-// keyboard's clipboard (which sends no paste event), voice typing, an extension.
-const BURST_CHARS = 30;
 // What an answer box must never take: a paste or a drop, however it comes.
 const REFUSED_INPUT = new Set(['insertFromPaste', 'insertFromPasteAsQuotation', 'insertFromDrop', 'insertFromYank']);
 
@@ -86,31 +83,17 @@ function SaveState({ question, connection = 'online' }) {
  * Mounted with `key={question.id}`, so the typed draft below belongs to exactly
  * one question and a background refresh can never overwrite it mid-sentence.
  */
-export function QuestionPaper({ question, total, onSave, flushRef, draftRef, onTextBurst, connection }) {
+export function QuestionPaper({ question, total, onSave, flushRef, draftRef, connection }) {
   const [answerText, setAnswerText] = useState(question.answerText);
   const box = useRef(null);
-  const burstRef = useRef(onTextBurst);
-  burstRef.current = onTextBurst;
 
-  // Pasting and dropping are refused before they land (the page-wide guard
-  // records them). What cannot be refused - text arriving all at once - is
-  // measured on every change and reported with how much came in.
+  // Pasting and dropping are refused before they land (the page-wide guard records them).
   useEffect(() => {
     const field = box.current;
     if (!field || question.locked) return undefined;
-    let length = field.value.length;
     const refuse = (event) => { if (REFUSED_INPUT.has(event.inputType)) event.preventDefault(); };
-    const measure = () => {
-      const grew = field.value.length - length;
-      length = field.value.length;
-      if (grew >= BURST_CHARS) burstRef.current?.(question.id, grew);
-    };
     field.addEventListener('beforeinput', refuse);
-    field.addEventListener('input', measure);
-    return () => {
-      field.removeEventListener('beforeinput', refuse);
-      field.removeEventListener('input', measure);
-    };
+    return () => field.removeEventListener('beforeinput', refuse);
   }, [question.id, question.locked]);
   const draft = useRef(question.answerText);
   const saved = useRef(question.answerText);
@@ -176,57 +159,64 @@ export function QuestionPaper({ question, total, onSave, flushRef, draftRef, onT
 
   return (
     <article className="q-card" id={`question-${question.id}`}>
-      <div className="q-head">
-        <span className="q-count">
-          Question {question.number}<span>/{total}</span>
-          {/* What it is worth (domain/marks.js), as on a printed paper. */}
-          {question.marks ? <span className="q-marks">{question.marks} mark{question.marks === 1 ? '' : 's'}</span> : null}
-        </span>
-        <SaveState question={question} connection={connection}/>
-      </div>
-      <RichText className="q-prompt" text={question.prompt}/>
-      <p className="q-hint">{HINT[question.type]}</p>
-
-      {question.type === 'short' ? (
-        <textarea
-          ref={box}
-          className="q-text"
-          value={answerText}
-          readOnly={question.locked}
-          onChange={(event) => changeText(event.target.value)}
-          onBlur={flush}
-          onFocus={(event) => {
-            const box = event.currentTarget;
-            // Once the phone keyboard has slid up (and again when it has settled),
-            // bring the answer back into view.
-            for (const ms of [350, 750]) window.setTimeout(() => { if (document.activeElement === box) revealBox(box); }, ms);
-          }}
-          placeholder={question.locked ? 'This answer is final.' : 'Your answer'}
-        />
-      ) : (
-        <div className={`q-options${question.type === 'msq' ? ' is-multi' : ''}`}>
-          {question.options.map((option, position) => {
-            const selected = question.selectedOptions.includes(option.id);
-            return (
-              <button
-                key={option.id}
-                type="button"
-                disabled={question.locked}
-                className={`q-option${selected ? ' is-selected' : ''}`}
-                aria-pressed={selected}
-                onClick={() => toggleOption(option.id)}
-              >
-                <span className="q-letter" aria-hidden="true">{letter(position)}</span>
-                <span className="q-option-text">{option.text}</span>
-              </button>
-            );
-          })}
+      {/* The question, then the answer: one under the other - or, on a phone held
+          sideways, side by side (theme.css), so neither is squeezed. */}
+      <div className="q-ask">
+        <div className="q-head">
+          <span className="q-count">
+            Question {question.number}<span>/{total}</span>
+            {/* What it is worth (domain/marks.js), as on a printed paper. */}
+            {question.marks ? <span className="q-marks">{question.marks} mark{question.marks === 1 ? '' : 's'}</span> : null}
+          </span>
+          <SaveState question={question} connection={connection}/>
         </div>
-      )}
+        <RichText className="q-prompt" text={question.prompt}/>
+        {question.image && <QuestionImage image={question.image} label={`Picture for question ${question.number}`}/>}
+      </div>
+      <div className="q-answer">
+        <p className="q-hint">{HINT[question.type]}</p>
 
-      {canClear && (
-        <button className="q-clear" type="button" onClick={clear}>Clear answer</button>
-      )}
+        {question.type === 'short' ? (
+          <textarea
+            ref={box}
+            className="q-text"
+            value={answerText}
+            readOnly={question.locked}
+            onChange={(event) => changeText(event.target.value)}
+            onBlur={flush}
+            onFocus={(event) => {
+              const box = event.currentTarget;
+              // Once the phone keyboard has slid up (and again when it has settled),
+              // bring the answer back into view.
+              for (const ms of [350, 750]) window.setTimeout(() => { if (document.activeElement === box) revealBox(box); }, ms);
+            }}
+            placeholder={question.locked ? 'This answer is final.' : 'Your answer'}
+          />
+        ) : (
+          <div className={`q-options${question.type === 'msq' ? ' is-multi' : ''}`}>
+            {question.options.map((option, position) => {
+              const selected = question.selectedOptions.includes(option.id);
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  disabled={question.locked}
+                  className={`q-option${selected ? ' is-selected' : ''}`}
+                  aria-pressed={selected}
+                  onClick={() => toggleOption(option.id)}
+                >
+                  <span className="q-letter" aria-hidden="true">{letter(position)}</span>
+                  <span className="q-option-text">{option.text}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {canClear && (
+          <button className="q-clear" type="button" onClick={clear}>Clear answer</button>
+        )}
+      </div>
     </article>
   );
 }

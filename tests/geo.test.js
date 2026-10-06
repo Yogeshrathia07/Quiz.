@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { afterEach } from 'node:test';
-import { LocationProblem, browserInfo, getBrowserLocation, imprecision, knownProblem } from '../client/src/lib/geo.js';
+import { LocationProblem, browserInfo, browserLinkFor, getBrowserLocation, imprecision, knownProblem } from '../client/src/lib/geo.js';
 
 const realNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 const realWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -172,4 +172,23 @@ test('a laptop refusing without a question is told where Windows or macOS keeps 
   assert.equal(mac.reason, 'unavailable');
   assert.ok(mac.steps.some((step) => /System Settings → Privacy & Security → Location Services/.test(step)));
   assert.ok(mac.steps.some((step) => /Wi-Fi/.test(step)), 'laptops find themselves from Wi-Fi');
+});
+
+test('the way out of an app browser opens the same page in the phone browser', () => {
+  const page = 'https://quiz.example.com/?test=TEST-AB12CD';
+  const android = browserLinkFor(page, { android: true, ios: false });
+  assert.match(android, /^intent:\/\/quiz\.example\.com\/\?test=TEST-AB12CD#Intent;scheme=https;/, 'the same address, handed to the default browser');
+  assert.match(android, /S\.browser_fallback_url=https%3A%2F%2Fquiz\.example\.com/);
+  assert.equal(browserLinkFor(page, { android: false, ios: true }), 'x-safari-https://quiz.example.com/?test=TEST-AB12CD');
+  assert.equal(browserLinkFor(page, { android: false, ios: false }), null, 'a computer: copy the link instead');
+  assert.equal(browserLinkFor('javascript:alert(1)', { android: true, ios: false }), null);
+});
+
+test('Snapchat, Instagram and scanner app browsers are told apart from Chrome and Safari', () => {
+  const seen = (userAgent) => { phone([], { userAgent }); return browserInfo().inApp; };
+  assert.equal(seen('Mozilla/5.0 (Linux; Android 14; Pixel 7; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/128.0 Mobile Safari/537.36'), true, 'any Android app browser');
+  assert.equal(seen('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 330.0'), true);
+  assert.equal(seen('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Snapchat/13.0'), true);
+  assert.equal(seen('Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36'), false, 'Chrome');
+  assert.equal(seen('Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'), false, 'Safari');
 });

@@ -8,6 +8,7 @@ import { endModeOf, startModeOf } from '../domain/attempt-rules.js';
 import { publicTest } from '../domain/presenters.js';
 import { activeQuestions } from '../domain/question-bank.js';
 import { qrSvg } from '../domain/qr-art.js';
+import { requireImages } from './question-image-service.js';
 import { adminEmail, invalidateTestCache, publicCode, requireOwnedTest, requireTest, testDocByCode, updateTest } from '../data/test-repository.js';
 
 /** Where each active question sits in the stored bank array. */
@@ -26,6 +27,7 @@ export function refusePastTimes(input, raw) {
 export async function createTest(req, raw) {
   const input = buildTest(raw);
   refusePastTimes(input, raw);
+  await requireImages(input.questions);
   let code = publicCode();
   while (await testDocByCode(code, { withStudents: false })) code = publicCode();
 
@@ -84,7 +86,8 @@ export async function createTest(req, raw) {
       manualGrading: question.type === 'short',
       timeSeconds: question.timeSeconds,
       // Its own marks; null follows its type's (domain/marks.js).
-      marks: question.marks ?? null
+      marks: question.marks ?? null,
+      image: question.image ?? null
     }))
   };
   await tests().insertOne(doc);

@@ -310,8 +310,9 @@
 @media (min-width:761px){.main:has(.quiz-hero){margin:0 auto}.main:has(.quiz-hero),.main:has(.quiz-hero) .quiz-hero{min-height:calc(100dvh - 56px)}}
 
 /* Time limit choice (create / edit test). */
-.segmented{display:inline-flex;flex-wrap:wrap;gap:4px;padding:4px;border:1px solid #474C52;border-radius:12px;background:#33373B}
-.segmented button{min-height:38px;padding:8px 14px;border:0;border-radius:9px;background:transparent;color:#D5DEE2;font:inherit;font-size:.85rem;font-weight:750;cursor:pointer}
+/* A toggle's buttons all one width - the widest label's - so the highlight never changes size as it moves. */
+.segmented{display:inline-grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:4px;padding:4px;border:1px solid #474C52;border-radius:12px;background:#33373B}
+.segmented button{min-height:38px;padding:8px 14px;text-align:center;border:0;border-radius:9px;background:transparent;color:#D5DEE2;font:inherit;font-size:.85rem;font-weight:750;cursor:pointer}
 .segmented button.is-on{background:#1598D1;color:#F7FAFC}
 .paper-clock.is-untimed strong{font-size:1rem}
 
@@ -1021,7 +1022,7 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
   .users-toolbar .text-input{width:100%}
   .users-filters{margin:0 0 12px}
   .users-block-form{margin:0 0 12px}
-  .segmented{width:100%;justify-content:space-between}
+  .segmented{width:100%}
   /* Dialogs use the whole screen, so nothing is cut off. */
   .student-analysis-sheet{width:100%;max-width:none;max-height:92vh;border-radius:16px 16px 0 0;padding:18px 16px 24px}
   .analysis-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -1046,7 +1047,7 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
   .row-chevron{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:#33373B;color:#D5DEE2;transition:transform .18s ease}
   .live-table tr.is-open .row-chevron{transform:rotate(180deg);background:#1598D1;color:#F7FAFC}
   /* Closed:name and SAP ID only. Open: everything, as before. */
-  .live-table:not(.results-table):not(.review-table) tr:not(.is-open) td:not([data-label="Student"]):not([data-label="Person"]):not([data-label="Test"]){display:none}
+  .live-table:not(.results-table):not(.review-table):not(.student-accordion-table) tr:not(.is-open) td:not([data-label="Student"]):not([data-label="Person"]):not([data-label="Test"]){display:none}
   .live-table tr:not(.is-open) td[data-label="Student"]{border-bottom:0;padding-bottom:0;margin-bottom:0}
   .live-table tr{padding:10px 12px}
   .person-detail .pill{margin-top:4px}
@@ -1115,7 +1116,6 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
    Choices are segmented controls, presets sit beside their stepper, and
    switches are a plain list:the form reads top to bottom without boxes
    inside boxes. */
-.choice-segments{display:inline-flex;flex-wrap:wrap}
 .schedule-fields{display:grid;gap:16px}
 .schedule-row{display:grid;gap:8px;justify-items:start}
 .schedule-row>*{max-width:100%}
@@ -1144,8 +1144,7 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .creator-head-row .json-import-actions .button:hover{background:#2A2D31;color:#F7FAFC}
 .join-card>p.start-countdown{color:#F7FAFC}
 @media (max-width:680px){
-  .choice-segments{display:flex;width:100%}
-  .choice-segments button{flex:1 1 auto}
+  .choice-segments{width:100%}
   .datetime-row .text-input{flex:1 1 100%}
   .creator-head-row .json-import-actions{width:auto}
   .creator-head-row .json-import-actions .button{width:auto}

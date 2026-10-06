@@ -739,14 +739,14 @@ try {
   assert.equal(pausedPaper.strict.questionPaused, false, 'the paper checking in after the unlock starts it again');
   assert.equal(pausedPaper.strict.index, 0, 'five minutes locked did not run it out');
   assert.ok(leftOf(pausedPaper) > 5 && leftOf(pausedPaper) < 11, 'the time it had left when it locked');
-  // Text that arrived in an answer all at once is recorded against its question.
-  await recordFullscreenEvent(pausedSeat.studentRequest, pausedPaper.id, { type: 'flag', detail: 'text_burst', questionId: pausedOne.id, chars: 214 });
-  const burstAttempt = (await registrations().findOne(pausedKey)).attempt;
-  assert.equal(burstAttempt.integrity.flags.text_burst, 1);
-  const burstEvent = burstAttempt.events.find((event) => event.detail === 'text_burst');
-  assert.equal(burstEvent.note, 'Q1: 214 characters', 'the note is the server\'s, naming the question');
-  assert.equal(burstEvent.questionId, pausedOne.id);
-  await expectPublicError(() => recordFullscreenEvent(pausedSeat.studentRequest, pausedPaper.id, { type: 'flag', detail: 'text_burst', questionId: 999_999, chars: 50 }), 400);
+  // The checks that were guesses, sent by a page still open from before: accepted and dropped.
+  for (const detail of ['text_burst', 'extension']) {
+    await recordFullscreenEvent(pausedSeat.studentRequest, pausedPaper.id, { type: 'flag', detail, questionId: pausedOne.id, chars: 214, note: 'div' });
+  }
+  const retiredAttempt = (await registrations().findOne(pausedKey)).attempt;
+  assert.equal(retiredAttempt.integrity.flags?.text_burst, undefined, 'text all at once is no longer recorded');
+  assert.equal(retiredAttempt.integrity.flags?.extension, undefined, 'nor an extension seen');
+  assert.ok(!retiredAttempt.events.some((event) => ['text_burst', 'extension'].includes(event.detail)), 'nothing in the log either');
   await recordFullscreenEvent(pausedSeat.studentRequest, pausedPaper.id, { type: 'flag', detail: 'drop' });
   assert.equal((await registrations().findOne(pausedKey)).attempt.integrity.flags.drop, 1, 'dragging text in is recorded');
   await submitAttemptForStudent(pausedSeat.studentRequest, pausedPaper.id);
@@ -1706,13 +1706,13 @@ try {
   assert.ok(await shownTo(studentReq), 'restored, it is back in the student\'s results');
   assert.equal((await homeSummary(adminReq)).results.submitted, homeBefore.results.submitted, 'and in the counts');
 
-  // A teacher who sits their own test finds it in their results as theirs to
-  // manage; a student never does.
-  assert.equal((await myResults(studentReq)).results.find((entry) => entry.code === code).isOwner, false, 'a student\'s test is not theirs to manage');
+  // Results are the papers someone sat - a teacher's own test included, which
+  // opens there as a student sees it (managing it is under Tests).
+  assert.equal((await myResults(studentReq)).results.find((entry) => entry.code === code).isOwner, undefined, 'no row is marked as the viewer\'s own');
   const ownTest = await createTest(adminReq, objectivePayload(`Own test ${identifier}`));
   createdCodes.push(ownTest.test.code);
   await registerForTest(adminReq, cookieResponse(), ownTest.test.code, {});
-  assert.equal((await myResults(adminReq)).results.find((entry) => entry.code === ownTest.test.code)?.isOwner, true, 'a teacher\'s own test opens on its manage page');
+  assert.ok((await myResults(adminReq)).results.some((entry) => entry.code === ownTest.test.code && entry.isOwner === undefined), 'a teacher\'s own test is in their results, as a paper they sat');
   // A test that ends with no paper begun reads as missed, not "not started".
   const ownRow = async () => (await myResults(adminReq)).results.find((entry) => entry.code === ownTest.test.code);
   assert.equal((await ownRow()).testClosed, false);
@@ -1730,7 +1730,7 @@ try {
     'and automatic submission by the scheduler, scheduled starts, durations from the real start,',
     'strict per-question timing (forward only, server-side timeouts, auto-submit on the last question),',
     'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, reopening one handed-in paper (with minutes for that student alone), phones-only and laptops-only tests (Begin refused, the paper covered, exceptions, what the teacher sees), rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
-    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results opening on its manage page.'
+    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results as a paper they sat; text all at once and extensions seen no longer recorded.'
   ].join(' '));
 } finally {
   if (createdCodes.length) {

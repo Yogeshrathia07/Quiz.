@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { reloadFresh } from './app-shell.js';
 
 /**
  * Notices when the server has a newer build than the one this tab is running.
@@ -13,6 +14,10 @@ import { useEffect, useState } from 'react';
  * It only offers a one-tap Update banner and never reloads by itself. A
  * reload mid-test would drop the student out of fullscreen and count as
  * leaving, so a student sitting a paper sees the banner after submitting.
+ *
+ * A portal page opens from the service worker's saved copy (public/sw.js),
+ * which can be one version behind: so it also checks a few seconds after
+ * opening, and Update has the saved copy replaced before reloading.
  */
 const CHECK_EVERY_MS = 60_000;
 const SCRIPT = /<script[^>]+type="module"[^>]+src="([^"]*\/assets\/[^"]+\.js)"/;
@@ -76,14 +81,16 @@ export function useAppUpdate() {
     };
 
     const onVisibility = () => { if (!document.hidden) check(); };
+    const soon = window.setTimeout(check, 4_000);
     const timer = window.setInterval(check, CHECK_EVERY_MS);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       stopped = true;
+      window.clearTimeout(soon);
       window.clearInterval(timer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
-  return { updateAvailable: available && !sitting, applyUpdate: () => window.location.reload() };
+  return { updateAvailable: available && !sitting, applyUpdate: () => { void reloadFresh(); } };
 }

@@ -1,7 +1,11 @@
-import { useState } from 'react';
-import { AlertTriangle, ChevronDown, CircleCheck, Clock, ClipboardPaste, IdCard, Keyboard, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Puzzle, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
-import { clockTime, durationLabel, shortDateTime } from '../../lib/format.js';
-import { StatusPill } from '../../components/StatusPill.jsx';
+import { useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Circle, CircleCheck, Clock, Copy, Download, FileCheck2, Hourglass, IdCard, PenLine, Keyboard, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
+import { prefetch, useCached } from '../../lib/cache.js';
+import { recordPath as recordAddress } from '../../lib/dashboard-paths.js';
+import { ConfirmDialog } from '../../components/ConfirmDialog.jsx';
+import { clockTime, copyText, dateTime, durationLabel, shortDateTime } from '../../lib/format.js';
+import { downloadFile } from '../../lib/api.js';
+import { ActivityLog } from './modals/StudentAnalysisModal.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { isGuest, venueStatus } from './student-filters.js';
 
@@ -25,9 +29,7 @@ const offlineNoted = (record) => Math.max(0, (record?.offline?.count || 0) - (re
 export function integrityText(registration) {
   const record = registration.integrity;
   if (!record) return '';
-  const extension = record.flags?.extension || 0;
-  const bursts = record.flags?.text_burst || 0;
-  const blocked = (record.flagCount || 0) - extension - bursts;
+  const blocked = record.flagCount || 0;
   const breakdown = Object.entries(record.leaves || {})
     .filter(([, count]) => count > 0)
     .map(([reason, count]) => `${count} ${LEAVE_LABELS[reason] || reason}`)
@@ -42,9 +44,7 @@ export function integrityText(registration) {
     record.lateAnswers ? `${record.lateAnswers} answer${record.lateAnswers === 1 ? '' : 's'} arrived late` : '',
     registration.overLimit ? 'Over the limit' : '',
     record.lockCount ? `Locked ${record.lockCount}×` : '',
-    blocked ? `${blocked} blocked action${blocked === 1 ? '' : 's'}` : '',
-    extension ? 'browser extension seen' : '',
-    bursts ? `text appeared all at once ${bursts}×` : ''
+    blocked ? `${blocked} blocked action${blocked === 1 ? '' : 's'}` : ''
   ].filter(Boolean).join(' · ');
 }
 
@@ -60,23 +60,19 @@ function initials(name) {
 }
 
 /**
- * A small sign for something worth a look. Hovering it says what; clicking
- * the row opens every detail.
+ * A small sign for something worth a look. Hovering it says what, at once
+ * (components/HoverTips); clicking the row opens every detail.
  */
 export function Issue({ icon: Icon, tone = 'warn', label, children }) {
   return (
-    <span className={`issue is-${tone}`} title={label} aria-label={label} role="img">
+    <span className={`issue is-${tone}`} data-tip={label} data-tip-tone={tone} aria-label={label} role="img">
       <Icon size={14} aria-hidden="true"/>{children}
     </span>
   );
 }
 
 /** Name and SAP ID on one line; the email waits in the details. */
-/**
- * `status` ({ tone, word }): where they stand, shown under the name on a phone,
- * where the row's status column is folded away until the row is opened.
- */
-export function StudentIdentity({ registration, status = null }) {
+export function StudentIdentity({ registration }) {
   const guest = isGuest(registration);
   return (
     <div className="person">
@@ -84,51 +80,267 @@ export function StudentIdentity({ registration, status = null }) {
       <div className="person-detail">
         <strong>{registration.name}</strong>
         <span className="table-subtext">{isFaculty(registration) ? 'Faculty' : registration.sapId}</span>
-        {status && <span className={`pill person-status ${status.tone}`}>{status.word}</span>}
       </div>
-      <ChevronDown className="row-caret" size={16} aria-hidden="true"/>
     </div>
   );
 }
 
 /**
- * One compact table row that opens on click into a full-width panel with
- * everything else. Its actions show on hover, on keyboard focus and while
- * open; on a touch screen, always.
+ * Where a student stands, as a coloured icon rather than a word: their
+ * request, then their paper. Each is named on hover and to a screen reader,
+ * and the Status heading's (i) lists them all.
  */
-export function ExpandableRow({ columns, cells, details, actions, label, open: controlledOpen, onOpenChange }) {
-  const [localOpen, setLocalOpen] = useState(false);
-  const open = controlledOpen ?? localOpen;
-  const setOpen = (next) => {
-    const value = typeof next === 'function' ? next(open) : next;
-    if (controlledOpen === undefined) setLocalOpen(value);
-    onOpenChange?.(value);
+const STATES = {
+  pending: { icon: Hourglass, tone: 'warn', label: 'Waiting for approval' },
+  rejected: { icon: UserX, tone: 'danger', label: 'Rejected' },
+  approved: { icon: UserCheck, tone: 'ok', label: 'Approved' },
+  not_started: { icon: Circle, tone: 'neutral', label: 'Not started' },
+  writing: { icon: PenLine, tone: 'info', label: 'Writing' },
+  paused: { icon: Pause, tone: 'warn', label: 'Paused' },
+  locked: { icon: Lock, tone: 'danger', label: 'Locked' },
+  submitted: { icon: FileCheck2, tone: 'ok', label: 'Submitted' }
+};
+export const STATE_LEGEND = Object.entries(STATES);
+
+/**
+ * The other signs a row can carry, for the Status heading's (i) - each one's
+ * icon and colour as the row shows it, and what it means.
+ */
+export const SIGN_LEGEND = [
+  { icon: AlertTriangle, tone: 'warn', text: '1×', label: 'Left the test - how many times (hover a row\'s sign for how long and why)' },
+  { icon: ShieldAlert, tone: 'danger', text: '2×', label: 'Left the test past the limit, or their paper was locked' },
+  { icon: CircleCheck, tone: 'ok', label: 'Never left the test' },
+  { icon: Smartphone, tone: 'neutral', label: 'The device they used (phone, tablet or laptop); orange or red when it is not allowed or its signals disagree' },
+  { icon: UserRound, tone: 'warn', text: 'Guest', label: 'Guest account: identity not verified' },
+  { icon: Repeat2, tone: 'warn', text: '1', label: 'Moved their test to another browser or device' },
+  { icon: MapPin, tone: 'danger', label: 'Away from the venue (blue: a location exception you gave)' },
+  { icon: MapPinOff, tone: 'danger', label: 'Their location could not be checked' },
+  { icon: WifiOff, tone: 'warn', text: '1', label: 'Went offline (noted, not counted as leaving), or away from the test right now' },
+  { icon: Clock, tone: 'warn', text: '1', label: 'Answers that arrived late, held on their device by a lost connection' },
+  { icon: Keyboard, tone: 'warn', text: '1', label: 'Keyboard opened another app while typing (not counted as leaving)' }
+];
+const paperState = (registration) => (!registration.attemptStatus ? 'not_started'
+  : registration.attemptStatus === 'submitted' ? 'submitted'
+    : registration.isPaused ? 'paused'
+      : registration.isLocked ? 'locked' : 'writing');
+/** The one or two states a student is in: their request, and once let in, their paper. */
+export const statesOf = (registration) => (registration.status === 'approved' ? ['approved', paperState(registration)] : [registration.status]);
+
+export function StateChip({ state }) {
+  const look = STATES[state] || STATES.not_started;
+  return (
+    <span className={`issue state-chip is-${look.tone}`} data-tip={look.label} data-tip-tone={look.tone} aria-label={look.label} role="img">
+      <look.icon size={14} aria-hidden="true"/>
+    </span>
+  );
+}
+
+/**
+ * One compact table row. A click (or Enter) opens everything about the
+ * student in a window over the list, so the list itself never moves. Its
+ * buttons and menu work from the row without opening it. `onWarm`: what the
+ * window will need, started when a mouse rests on the row, or it is pressed
+ * or reached with Tab - a moment before the click lands.
+ */
+export function StudentListRow({ cells, actions, label, onOpen, onWarm }) {
+  const resting = useRef(null);
+  useEffect(() => () => window.clearTimeout(resting.current), []);
+  const open = (event) => {
+    if (event.target.closest('button, a, input, select, [role="menu"]')) return;
+    onOpen();
   };
-  const toggle = (event) => {
-    if (event.target.closest('button, a, input, select')) return;
-    setOpen((value) => !value);
+  const restOn = (event) => {
+    if (!onWarm || event.pointerType !== 'mouse') return;
+    window.clearTimeout(resting.current);
+    resting.current = window.setTimeout(onWarm, 150);
+  };
+  return (
+    <tr
+      className="xrow"
+      onClick={open}
+      onPointerEnter={restOn}
+      onPointerLeave={() => window.clearTimeout(resting.current)}
+      onPointerDown={() => onWarm?.()}
+      onFocus={() => onWarm?.()}
+      aria-haspopup="dialog"
+      aria-label={label}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); onOpen(); }
+      }}
+    >
+      {cells}
+      <td className="xrow-actions" data-label="Actions"><div className="table-actions">{actions}</div></td>
+    </tr>
+  );
+}
+
+/** Where one student's record is kept, for the Log and Location tabs and its download. */
+const recordPath = (code, registration) => recordAddress(code, registration.id);
+
+/** Their whole record (answers, activity, integrity, venue, device, locations) as Excel, from a round green button. */
+function RecordDownload({ test, registration }) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState('');
+  const [asking, setAsking] = useState(false);
+  if (!registration.attemptStatus) return null;
+  const download = async () => {
+    setAsking(false);
+    setBusy(true);
+    setProblem('');
+    try {
+      await downloadFile(`${recordPath(test.code, registration)}/record.xlsx`, `${test.code}-${registration.sapId || 'student'}-record.xlsx`);
+    } catch (error) { setProblem(error.message); }
+    setBusy(false);
+  };
+  const label = problem || `Download ${registration.name}'s full record (Excel)`;
+  return (
+    <>
+      <button className="download-round is-small" type="button" disabled={busy} onClick={() => setAsking(true)} aria-label={label} title={label}>
+        <Download size={16} aria-hidden="true"/>
+      </button>
+      {asking && (
+        <ConfirmDialog title={`Download ${registration.name}'s record?`} onConfirm={download} onCancel={() => setAsking(false)}>
+          An Excel file of everything on their test: answers and marks, activity, leaving the test, venue, device and location readings.
+        </ConfirmDialog>
+      )}
+    </>
+  );
+}
+
+/** A part's first line: how much is in it, and the download. */
+function PartHead({ test, registration, text }) {
+  return (
+    <div className="student-log-head">
+      <span>{text}</span>
+      <RecordDownload test={test} registration={registration}/>
+    </div>
+  );
+}
+
+const READING = {
+  inRange: { word: 'At the venue', tone: 'ok' },
+  outOfRange: { word: 'Away', tone: 'bad' },
+  inconclusive: { word: 'Unsure', tone: 'muted' }
+};
+const TAKEN_WHEN = { start: 'at Begin', timer: 'regular check', question: 'changed question', manual: 'checked again', blocked: 'while shut out', submit: 'at Submit' };
+const readingClock = (value) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
+
+/**
+ * Every location reading taken while their paper was open, newest first:
+ * the coordinates (a tap copies them), and what the check made of it.
+ */
+function LocationReadings({ readings }) {
+  const [copied, setCopied] = useState(null);
+  const [problem, setProblem] = useState('');
+  if (!readings.length) return <p className="help">No readings yet. One is kept at Begin, at each question change and about once a minute.</p>;
+  const copy = async (text, key) => {
+    try {
+      await copyText(text);
+      setProblem('');
+      setCopied(key);
+      window.setTimeout(() => setCopied((current) => (current === key ? null : current)), 1600);
+    } catch (error) { setProblem(error.message); }
   };
   return (
     <>
-      <tr
-        className={`xrow${open ? ' is-open' : ''}`}
-        onClick={toggle}
-        aria-expanded={open}
-        aria-label={label}
-        tabIndex={0}
-        onKeyDown={(event) => {
-          if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); setOpen((value) => !value); }
-        }}
-      >
-        {cells}
-        <td className="xrow-actions" data-label="Actions"><div className="table-actions">{actions}</div></td>
-      </tr>
-      {open && (
-        <tr className="xrow-details">
-          <td colSpan={columns}><dl className="detail-grid">{details}</dl></td>
-        </tr>
-      )}
+      {problem && <p className="help" role="alert">{problem}</p>}
+      <ol className="loc-list">
+        {[...readings].reverse().map((reading) => {
+          const key = `${reading.at}-${reading.trigger}`;
+          const known = reading.latitude !== null && reading.longitude !== null;
+          const text = known ? `${reading.latitude.toFixed(6)}, ${reading.longitude.toFixed(6)}` : '';
+          const status = READING[reading.status] || READING.inconclusive;
+          return (
+            <li key={key} className={`loc-row is-${status.tone}`}>
+              <time title={dateTime(reading.at)}>{readingClock(reading.at)}</time>
+              {known ? (
+                <button type="button" className="loc-coords" onClick={() => copy(text, key)} title="Copy latitude, longitude" aria-label={`Copy ${text}`}>
+                  <span>{text}</span>
+                  {copied === key ? <Check size={14} aria-hidden="true"/> : <Copy size={14} aria-hidden="true"/>}
+                  {copied === key && <span className="loc-copied" role="status">Copied</span>}
+                </button>
+              ) : <span className="loc-none">No reading</span>}
+              <span className="loc-meta">
+                <span className="loc-status">{status.word}</span>
+                {reading.distanceMeters !== null ? ` · ${reading.distanceMeters} m from venue` : ''}
+                {reading.accuracyMeters !== null ? ` · ±${reading.accuracyMeters} m` : ''}
+                {TAKEN_WHEN[reading.trigger] ? ` · ${TAKEN_WHEN[reading.trigger]}` : ''}
+              </span>
+            </li>
+          );
+        })}
+      </ol>
     </>
+  );
+}
+
+/**
+ * An opened row: one short line - their email and when they finished - and
+ * a button for each part (details, log, location, device). Nothing more shows
+ * until one is pressed, and pressing it again closes it. The buttons keep one
+ * size whichever is pressed; on a phone they fold into one menu. Log and
+ * Location show at once what was fetched before (fetched ahead when the
+ * window opened - DashboardScreen) and are asked for again behind, so a
+ * paper still being written shows its latest.
+ */
+function StudentPanel({ test, registration, brief, summary, venue, device, hasDevice, part, onPart: setPart }) {
+  const fetched = part === 'log' || part === 'location';
+  const base = recordPath(test.code, registration);
+  const analysis = useCached(fetched ? `${base}/analysis` : null);
+  const record = analysis.data || null;
+  const problem = analysis.data ? '' : analysis.error?.message || '';
+  const parts = [
+    ['details', 'Details'],
+    ['log', 'Log'],
+    test.locationRequired && ['location', 'Location'],
+    hasDevice && ['device', 'Device']
+  ].filter(Boolean);
+  const choose = (id) => setPart((current) => (current === id ? null : id));
+  const open = parts.find(([id]) => id === part);
+  const entries = record?.integrity?.activity || [];
+  const readings = record?.locationTrail || [];
+  const waiting = problem ? '' : 'Loading…';
+  return (
+    <div className="student-panel">
+      <div className="student-panel-bar">
+        {brief.length > 0 && <p className="student-brief">{brief.map((text) => <span key={text} title={text}>{text}</span>)}</p>}
+        <div className="segmented student-panel-tabs" role="group" aria-label={`${registration.name}: show`}>
+          {parts.map(([id, label]) => (
+            <button key={id} type="button" aria-pressed={part === id} className={part === id ? 'is-on' : ''} onClick={() => choose(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="student-panel-pick">
+          <ActionMenu
+            label={open ? open[1] : 'Show'}
+            items={[...parts.map(([id, label]) => ({ label, tone: part === id ? 'info' : undefined, onSelect: () => setPart(id) })), part && { label: 'Hide', onSelect: () => setPart(null) }]}
+          />
+        </div>
+      </div>
+      {part && (
+        // One box for the open part, the window's only scrolling area (the log and the readings scroll their own lists inside it).
+        <div className={`student-part is-${part}`}>
+          {part === 'details' && <dl className="detail-grid">{summary}</dl>}
+          {part === 'device' && <dl className="detail-grid">{device}</dl>}
+          {part === 'log' && (
+            <div className="student-log">
+              {problem && <p className="help" role="alert">{problem}</p>}
+              {!record && !problem && <p className="help">{waiting}</p>}
+              {record && <ActivityLog entries={entries} bare extra={<RecordDownload test={test} registration={registration}/>}/>}
+            </div>
+          )}
+          {part === 'location' && (
+            <div className="student-log">
+              <dl className="detail-grid">{venue}</dl>
+              <PartHead test={test} registration={registration}
+                text={record ? `${readings.length} reading${readings.length === 1 ? '' : 's'}${readings.length > 1 ? ' · newest first' : ''}` : waiting}/>
+              {problem && <p className="help" role="alert">{problem}</p>}
+              {record && <LocationReadings readings={readings}/>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -197,7 +409,12 @@ function deviceSign(test, registration) {
 }
 
 /** The admission decision: who is allowed to sit this test. */
-export function StudentRow({ test, registration, act, openSapId, openReopen, isBusy, columns, open, onOpenChange }) {
+/**
+ * What one student's row and window both show, worked out once: where they
+ * stand (states and their signs), the buttons and menu for them, and the
+ * facts behind Details, Location and Device.
+ */
+function studentParts({ test, registration, act, openSapId, openReopen, isBusy }) {
   const path = `registrations/${registration.id}`;
   const pending = registration.status === 'pending';
   const guest = isGuest(registration);
@@ -212,14 +429,6 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
   // Each student's own time, still running: shown beside their status.
   const ownEnd = test.endMode === 'each' && writing && !registration.isPaused && Boolean(registration.ownDeadlineAt);
   const serious = registration.overLimit || registration.isLocked;
-  // The same words as the status column, for the phone's folded row.
-  const phoneStatus = pending ? { tone: 'warn', word: 'Waiting for you' }
-    : registration.status === 'rejected' ? { tone: 'danger', word: 'Declined' }
-      : !registration.attemptStatus ? { tone: 'muted', word: 'Not started' }
-        : registration.isPaused && !submitted ? { tone: 'paused', word: 'Paused' }
-          : registration.isLocked ? { tone: 'danger', word: 'Locked' }
-            : submitted ? { tone: 'success', word: 'Submitted' } : { tone: 'warn', word: 'In progress' };
-
   const device = registration.device;
   const deviceWrong = device && !registration.deviceFits && !registration.deviceOverride;
   const began = registration.deviceBegan;
@@ -242,16 +451,11 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
   ].filter(Boolean);
 
   const integritySigns = [
-    registration.isLocked && <Issue key="lock" icon={Lock} tone="danger" label="Attempt locked: waiting for you to revive it"/>,
     record?.isAway && !registration.isLocked && registration.attemptStatus === 'in_progress' && <Issue key="away" icon={WifiOff} label="Away from the test right now"/>,
     record && record.leaveCount > 0 && (
       <Issue key="left" icon={serious ? ShieldAlert : AlertTriangle} tone={serious ? 'danger' : 'warn'} label={integrity}>{record.leaveCount}×</Issue>
     ),
     registration.windowCheck === 'declared' && <Issue key="window" icon={AlertTriangle} tone="danger" label="Incognito not verified"/>,
-    record?.flags?.extension > 0 && <Issue key="extension" icon={Puzzle} tone="danger" label="A browser extension changed the test page"/>,
-    record?.flags?.text_burst > 0 && (
-      <Issue key="burst" icon={ClipboardPaste} tone="danger" label={`Text appeared all at once ${record.flags.text_burst}× (pasted, or voice typing): see the answers`}>{record.flags.text_burst}</Issue>
-    ),
     // Left while typing and back within moments - most likely the keyboard's own app. Not counted as leaving.
     record?.flags?.keyboard_app > 0 && (
       <Issue key="keyboard" icon={Keyboard} tone="warn" label={`Keyboard opened another app while typing ${record.flags.keyboard_app}× (back within 15 s; not counted as leaving)`}>{record.flags.keyboard_app}</Issue>
@@ -266,42 +470,88 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
     record && !record.leaveCount && !registration.isLocked && registration.attemptStatus && <Issue key="clean" icon={CircleCheck} tone="ok" label="Never left the test"/>
   ].filter(Boolean);
 
-  return (
-    <ExpandableRow
-      columns={columns}
-      open={open}
-      onOpenChange={onOpenChange}
-      label={pending ? `${registration.name}, waiting for your decision` : registration.name}
-      cells={<>
-        <td data-label="Student"><StudentIdentity registration={registration} status={phoneStatus}/></td>
-        <td data-label="Status">
-          <div className="cell-row student-status-cluster">
-            <StatusPill status={registration.status}/>
-            {registration.attemptStatus
-              ? <span className={`pill status-pill ${registration.isPaused && !submitted ? 'paused' : registration.isLocked ? 'danger' : submitted ? 'success' : 'warn'}`}>
-                  {registration.isPaused && !submitted ? 'Paused' : registration.isLocked ? 'Locked' : submitted ? 'Submitted' : 'In progress'}
-                </span>
-              : <span className="pill status-pill muted">Not started</span>}
-            {/* Each student's own time: when this student's runs out. */}
-            {ownEnd && (
-              <span className="pill status-pill muted own-end" title={`Their own time ends at ${clockTime(registration.ownDeadlineAt)}`}>
-                <Clock size={12} aria-hidden="true"/>ends {clockTime(registration.ownDeadlineAt)}
-              </span>
-            )}
-            {issues}
-            {integritySigns}
-          </div>
-        </td>
-        <td data-label="Answered" className="cell-num col-answered">{registration.attemptStatus ? `${registration.answeredCount}/${registration.totalQuestions}` : '—'}</td>
-      </>}
-      details={<>
-        {!guest && <Detail label="Email">{registration.email}</Detail>}
-        <Detail label="SAP ID">{isFaculty(registration) ? 'Faculty' : registration.sapId}</Detail>
-        <Detail label="Asked">{shortDateTime(registration.requestedAt)}</Detail>
+  // The same buttons and menu on the row and in the window.
+  const actions = (<>
+    {registration.isLocked && (
+      <button className="button button-primary button-small" disabled={isBusy} onClick={() => act(`${path}/resume`, 'Revive this attempt? Their leaving and away-time allowances restart; the test end time does not move.')}>Revive</button>
+    )}
+    {writing && registration.isPaused && (
+      <button className="button button-success button-small" disabled={isBusy} onClick={() => act(`${path}/continue`)}>Continue</button>
+    )}
+    {pending && (
+      <>
+        <button className="button button-primary button-small" disabled={isBusy} onClick={() => act(`${path}/approve`)}>Approve</button>
+        <button className="button button-reject button-small" disabled={isBusy} onClick={() => act(`${path}/reject`)}>Reject</button>
+      </>
+    )}
+    <ActionMenu
+      disabled={isBusy}
+      trigger="icon"
+      label={<MoreVertical size={16} aria-label={`More for ${registration.name}`}/>}
+      items={[
+        !isFaculty(registration) && { label: 'Edit SAP ID', icon: IdCard, onSelect: () => openSapId(registration) },
+        registration.status === 'rejected' && { label: 'Approve', icon: UserCheck, tone: 'ok', onSelect: () => act(`${path}/approve`) },
+        test.locationRequired && {
+          label: registration.locationOverride ? 'Remove location exception' : 'Allow location exception',
+          icon: registration.locationOverride ? MapPinOff : MapPin,
+          tone: registration.locationOverride ? 'warn' : 'info',
+          onSelect: () => act(`${path}/location-override`, null, { enabled: !registration.locationOverride })
+        },
+        // Phones only or laptops only: this student may use whatever they have.
+        (deviceRule !== 'any' || registration.deviceOverride) && {
+          label: registration.deviceOverride ? 'Remove device exception' : 'Allow any device',
+          icon: MonitorSmartphone,
+          tone: registration.deviceOverride ? 'warn' : 'info',
+          onSelect: () => act(`${path}/device-override`, null, { enabled: !registration.deviceOverride })
+        },
+        // Green keeps or approves, blue adjusts, amber stops for now, red ends or wipes.
+        writing && !registration.isPaused && {
+          label: 'Pause (stop their time)', icon: Pause, tone: 'warn',
+          onSelect: () => act(`${path}/pause`, `Pause ${registration.name}? Their paper is hidden and their time stops until you continue it.`)
+        },
+        writing && registration.isPaused && { label: 'Continue', icon: Play, tone: 'ok', onSelect: () => act(`${path}/continue`) },
+        writing && {
+          label: 'Submit paper now', icon: Send, danger: true,
+          onSelect: () => act(`${path}/submit`, `Hand in ${registration.name}'s paper now, with the answers saved so far? They cannot carry on after this.`)
+        },
+        // Handed in: back to where they left off (a timer on each question makes every question final, so not there).
+        registration.attemptStatus === 'submitted' && !test.strictTiming && openReopen && {
+          label: 'Reopen paper', icon: Undo2, tone: 'info', onSelect: () => openReopen(registration)
+        },
+        registration.attemptStatus && { label: 'Restart attempt', icon: RotateCcw, danger: true, onSelect: () => act(`${path}/restart`, 'Restart this student’s attempt with a blank paper?') },
+        registration.status === 'approved' && { label: 'Reject registration', icon: UserX, danger: true, onSelect: () => act(`${path}/reject`) }
+      ]}
+    />
+  </>);
+  const states = statesOf(registration);
+  const signs = (
+    <div className="cell-row student-status-cluster">
+      {states.map((state) => <StateChip key={state} state={state}/>)}
+      {/* Each student's own time: when this student's runs out. */}
+      {ownEnd && (
+        <span className="pill status-pill muted own-end" data-tip={`Their own time ends at ${clockTime(registration.ownDeadlineAt)}`}>
+          <Clock size={12} aria-hidden="true"/>ends {clockTime(registration.ownDeadlineAt)}
+        </span>
+      )}
+      {issues}
+      {integritySigns}
+    </div>
+  );
+  return {
+    states,
+    signs,
+    actions,
+    label: `${registration.name}, ${states.map((state) => STATES[state].label.toLowerCase()).join(', ')}`,
+    panel: {
+      brief: [
+        !guest && registration.email,
+        registration.attemptStatus && `${submitted ? 'Finished' : 'Started'} ${shortDateTime(submitted ? registration.submittedAt : registration.startedAt)}`
+      ].filter(Boolean),
+      hasDevice: Boolean(device || registration.windowCheck || registration.deviceSwitches > 0),
+      summary: <>
         {registration.decidedAt && <Detail label={registration.status === 'rejected' ? 'Rejected' : 'Approved'}>{shortDateTime(registration.decidedAt)}</Detail>}
         {guest && registration.exitedAt && <Detail label="Left">{shortDateTime(registration.exitedAt)}</Detail>}
-        {registration.deviceSwitches > 0 && <Detail label="Switched browser">{registration.deviceSwitches}×</Detail>}
-        {registration.attemptStatus && <Detail label={submitted ? 'Finished' : 'Started'}>{shortDateTime(submitted ? registration.submittedAt : registration.startedAt)}</Detail>}
+        {submitted && registration.startedAt && <Detail label="Started">{shortDateTime(registration.startedAt)}</Detail>}
         {writing && registration.isPaused && <Detail label="Paused since">{shortDateTime(registration.pausedAt)} — their time is stopped</Detail>}
         {registration.extraMs > 0 && <Detail label="Extra time">{durationLabel(Math.round(registration.extraMs / 1000))} {test.endMode === 'each' ? 'added to their own time, for extensions, pauses or a reopened paper' : <>after the test&apos;s end, for pauses or a reopened paper</>}{registration.ownDeadlineAt && writing ? ` · their paper ends at ${shortDateTime(registration.ownDeadlineAt)}` : ''}</Detail>}
         {record && <Detail label="Leaving the test">{integrity}</Detail>}
@@ -313,7 +563,19 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
             ].filter(Boolean).join(' · ')}
           </Detail>
         )}
-        {registration.windowCheck && <Detail label="Browser window">{WINDOW_TEXT[registration.windowCheck] || registration.windowCheck}</Detail>}
+      </>,
+      venue: <>
+        <Detail label="Venue">
+          {venueText(registration)}{registration.locationVerifiedAt ? ` · checked ${shortDateTime(registration.locationVerifiedAt)}` : ''}
+          {venue === 'not_checked' && registration.locationProblem ? ` · ${locationProblemText(registration.locationProblem)} (${shortDateTime(registration.locationProblem.at)})` : ''}
+        </Detail>
+        {checks.inRange || checks.outOfRange || checks.inconclusive ? (
+          <Detail label="During the test">
+            {checks.inRange || 0} in · {checks.outOfRange || 0} out · {checks.inconclusive || 0} uncertain{checks.outsideCount ? ` · left ${checks.outsideCount}×` : ''}
+          </Detail>
+        ) : null}
+      </>,
+      device: <>
         {device && (
           <Detail label="Device">
             {deviceName(device)}
@@ -329,70 +591,52 @@ export function StudentRow({ test, registration, act, openSapId, openReopen, isB
             {registration.deviceLog.map((entry) => `${deviceName(entry)} ${STAGE_WORDS[entry.stage] || ''} ${shortDateTime(entry.at)}`).join(' → ')}
           </Detail>
         )}
-        {test.locationRequired && (
-          <Detail label="Venue">
-            {venueText(registration)}{registration.locationVerifiedAt ? ` · checked ${shortDateTime(registration.locationVerifiedAt)}` : ''}
-            {venue === 'not_checked' && registration.locationProblem ? ` · ${locationProblemText(registration.locationProblem)} (${shortDateTime(registration.locationProblem.at)})` : ''}
-          </Detail>
-        )}
-        {test.locationRequired && (checks.inRange || checks.outOfRange || checks.inconclusive) ? (
-          <Detail label="During the test">
-            {checks.inRange || 0} in · {checks.outOfRange || 0} out · {checks.inconclusive || 0} uncertain{checks.outsideCount ? ` · left ${checks.outsideCount}×` : ''}
-          </Detail>
-        ) : null}
+        {registration.deviceSwitches > 0 && <Detail label="Switched browser">{registration.deviceSwitches}×</Detail>}
+        {registration.windowCheck && <Detail label="Browser window">{WINDOW_TEXT[registration.windowCheck] || registration.windowCheck}</Detail>}
+      </>
+    }
+  };
+}
+
+/** One student's row in the list; a click opens their window (StudentWindow). */
+export function StudentRow({ onOpen, ...props }) {
+  const { registration } = props;
+  const { signs, actions, label } = studentParts(props);
+  return (
+    <StudentListRow
+      onOpen={onOpen}
+      onWarm={() => prefetch(`${recordPath(props.test.code, registration)}/analysis`, { maxAgeMs: 15_000 })}
+      label={`${label}: open details`}
+      cells={<>
+        <td data-label="Student"><StudentIdentity registration={registration}/></td>
+        <td data-label="Status">{signs}</td>
+        <td data-label="Answered" className="cell-num col-answered">{registration.attemptStatus ? `${registration.answeredCount}/${registration.totalQuestions}` : '—'}</td>
       </>}
-      actions={<>
-        {registration.isLocked && (
-          <button className="button button-primary button-small" disabled={isBusy} onClick={() => act(`${path}/resume`, 'Revive this attempt? Their leaving and away-time allowances restart; the test end time does not move.')}>Revive</button>
-        )}
-        {writing && registration.isPaused && (
-          <button className="button button-success button-small" disabled={isBusy} onClick={() => act(`${path}/continue`)}>Continue</button>
-        )}
-        {pending && (
-          <>
-            <button className="button button-primary button-small" disabled={isBusy} onClick={() => act(`${path}/approve`)}>Approve</button>
-            <button className="button button-reject button-small" disabled={isBusy} onClick={() => act(`${path}/reject`)}>Reject</button>
-          </>
-        )}
-        <ActionMenu
-          disabled={isBusy}
-          trigger="icon"
-          label={<MoreVertical size={16} aria-label={`More for ${registration.name}`}/>}
-          items={[
-            !isFaculty(registration) && { label: 'Edit SAP ID', icon: IdCard, onSelect: () => openSapId(registration) },
-            registration.status === 'rejected' && { label: 'Approve', icon: UserCheck, tone: 'ok', onSelect: () => act(`${path}/approve`) },
-            test.locationRequired && {
-              label: registration.locationOverride ? 'Remove location exception' : 'Allow location exception',
-              icon: registration.locationOverride ? MapPinOff : MapPin,
-              tone: registration.locationOverride ? 'warn' : 'info',
-              onSelect: () => act(`${path}/location-override`, null, { enabled: !registration.locationOverride })
-            },
-            // Phones only or laptops only: this student may use whatever they have.
-            (deviceRule !== 'any' || registration.deviceOverride) && {
-              label: registration.deviceOverride ? 'Remove device exception' : 'Allow any device',
-              icon: MonitorSmartphone,
-              tone: registration.deviceOverride ? 'warn' : 'info',
-              onSelect: () => act(`${path}/device-override`, null, { enabled: !registration.deviceOverride })
-            },
-            // Green keeps or approves, blue adjusts, amber stops for now, red ends or wipes.
-            writing && !registration.isPaused && {
-              label: 'Pause (stop their time)', icon: Pause, tone: 'warn',
-              onSelect: () => act(`${path}/pause`, `Pause ${registration.name}? Their paper is hidden and their time stops until you continue it.`)
-            },
-            writing && registration.isPaused && { label: 'Continue', icon: Play, tone: 'ok', onSelect: () => act(`${path}/continue`) },
-            writing && {
-              label: 'Submit paper now', icon: Send, danger: true,
-              onSelect: () => act(`${path}/submit`, `Hand in ${registration.name}'s paper now, with the answers saved so far? They cannot carry on after this.`)
-            },
-            // Handed in: back to where they left off (a timer on each question makes every question final, so not there).
-            registration.attemptStatus === 'submitted' && !test.strictTiming && openReopen && {
-              label: 'Reopen paper', icon: Undo2, tone: 'info', onSelect: () => openReopen(registration)
-            },
-            registration.attemptStatus && { label: 'Restart attempt', icon: RotateCcw, danger: true, onSelect: () => act(`${path}/restart`, 'Restart this student’s attempt with a blank paper?') },
-            registration.status === 'approved' && { label: 'Reject registration', icon: UserX, danger: true, onSelect: () => act(`${path}/reject`) }
-          ]}
-        />
-      </>}
+      actions={actions}
     />
+  );
+}
+
+/**
+ * One student in the window over the list: who, the same buttons as their
+ * row, where they stand, then Details / Log / Location / Device - the part
+ * open (`part`) kept by the window, so it stays open moving from one student
+ * to the next.
+ */
+export function StudentWindow({ part, onPart, ...props }) {
+  const { test, registration } = props;
+  const { states, signs, actions, panel } = studentParts(props);
+  return (
+    <>
+      <header className="student-modal-head">
+        <StudentIdentity registration={registration}/>
+        <div className="student-modal-actions">{actions}</div>
+      </header>
+      <div className="student-modal-states">
+        {signs}
+        <span className="student-modal-words">{states.map((state) => STATES[state].label).join(' · ')}</span>
+      </div>
+      <StudentPanel key={registration.id} test={test} registration={registration} part={part} onPart={onPart} {...panel}/>
+    </>
   );
 }

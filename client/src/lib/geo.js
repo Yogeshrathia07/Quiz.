@@ -57,6 +57,27 @@ export function browserInfo() {
 /** Opened inside another app: no location there. */
 export const inAppBrowser = () => browserInfo().inApp;
 
+/**
+ * A link that leaves an app's built-in browser (a QR scanner, Snapchat,
+ * Instagram, a payment app) for the phone's own browser, at the same address:
+ * on Android an intent the system hands to the default browser (Chrome,
+ * Samsung Internet...), on an iPhone Safari's own link (iOS 17 and later).
+ * Null where there is none - the student copies the link instead.
+ */
+export function browserLinkFor(href, info = browserInfo()) {
+  let url;
+  try { url = new URL(href); } catch { return null; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return null;
+  const scheme = url.protocol.slice(0, -1);
+  // An address with a #fragment would clash with the intent's own "#Intent"; the app uses none.
+  const address = `${url.host}${url.pathname}${url.search}`;
+  if (info.android) {
+    return `intent://${address}#Intent;scheme=${scheme};action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;S.browser_fallback_url=${encodeURIComponent(href)};end`;
+  }
+  if (info.ios) return `x-safari-${scheme}://${address}`;
+  return null;
+}
+
 /** What to do, step by step, on this phone and in this browser. */
 function guidance(reason, { asked, accuracyMeters } = {}) {
   const { ios, android, app, windows, mac, desktop } = browserInfo();

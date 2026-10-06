@@ -286,8 +286,6 @@ export async function myResults(req) {
       return {
         code: test.code,
         title: test.title,
-        // A teacher who sat their own test: theirs opens on its manage page.
-        isOwner: test.ownerEmail === email,
         registrationStatus: registration.status,
         attemptStatus: attempt?.status || null,
         // Ended with no paper begun: missed, not "not started".
@@ -324,4 +322,31 @@ export async function myResponseData(req, code) {
     throw new PublicTestError(403, 'Your responses can be downloaded once the test is closed and results are released.');
   }
   return studentResponseData(found.test, found.registration);
+}
+
+/**
+ * The same paper to read on the page rather than download: each question with
+ * their answer, the key and the mark - under the same rule as the download
+ * (the test closed and its marks released), and nothing else of the record.
+ */
+export async function myResponseView(req, code) {
+  const data = await myResponseData(req, code);
+  return {
+    test: { code: data.test.code, title: data.test.title },
+    summary: data.summary,
+    answers: data.answers.map((answer) => ({
+      questionNumber: answer.questionNumber,
+      type: answer.type,
+      prompt: answer.prompt,
+      image: answer.image,
+      selectedAnswer: answer.selectedAnswer,
+      correctAnswer: answer.correctAnswer,
+      answered: answer.answered,
+      marks: answer.marks,
+      maxMarks: answer.maxMarks,
+      isCorrect: answer.isCorrect,
+      partial: answer.partial,
+      manualGrading: answer.manualGrading
+    }))
+  };
 }

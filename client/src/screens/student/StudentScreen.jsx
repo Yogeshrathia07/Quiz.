@@ -11,6 +11,7 @@ import { useKeepAwake } from '../../lib/keep-awake.js';
 import { RegistrationForm } from './RegistrationForm.jsx';
 import { SignInScreen } from './SignInScreen.jsx';
 import { TestLaunch } from './TestLaunch.jsx';
+import { OpenInBrowser, useInAppGate } from '../../components/OpenInBrowser.jsx';
 import {
   GuestsNotAllowed, RegistrationPending, RegistrationRejected, TestClosed,
   TestTimeOver, WaitingForStart
@@ -26,6 +27,8 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   // No connection, but this device holds the paper: it opens from here (the
   // page was reloaded mid-test, or the phone put it away and reopened it).
   const [offlinePaper, setOfflinePaper] = useState(null);
+  // Opened inside another app's built-in browser (a QR scanner, Snapchat...): sent to the real one first.
+  const inAppGate = useInAppGate();
   // The Start response is a complete paper. Keep it briefly while this parent
   // still has the pre-start `attemptId: null` state, rather than asking the
   // server for the same paper again.
@@ -155,6 +158,8 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   if (!data) return <div className="empty card">Loading test…</div>;
 
   const { test, registration, attemptId } = data;
+  // Before signing in there for nothing - but never in the way of a paper already begun in it.
+  if (inAppGate.show && !attemptId && !startedAttempt && !test.isClosed) return <OpenInBrowser onContinue={inAppGate.stay}/>;
   if (test.isClosed && !attemptId && !startedAttempt) return <TestClosed test={test}/>;
   // The test's creator may preview from anywhere; everyone who sits it -
   // students, guests and other faculty - needs a private window. A browser

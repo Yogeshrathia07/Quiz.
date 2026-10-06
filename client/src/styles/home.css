@@ -1,80 +1,131 @@
 /*
- * The faculty home page (screens/admin/FacultyHome.jsx): a greeting, the date
- * across from it - a small green tick beside it when nothing needs the teacher,
- * a chip each under them when something does - then one card per part of the
- * portal: its icon, its name, its
- * key numbers and its usual action. Three across where there is room, two, or
- * one a row on a phone, chosen by the page's own width (a container query),
- * not the window's. Colours come from theme.css; each card's accent says which
- * part it is.
+ * The faculty home page (screens/admin/FacultyHome.jsx). A greeting card - the
+ * date, hello, what is happening in a sentence, the two usual actions and a
+ * small drawing - then a card per number (tests, attendance, students).
+ * Something running now, waiting on you, or coming
+ * up shows under them only while there is some. One centred column; the
+ * numbers three across (two without Users), one a line on a phone.
  */
-.faculty-home{display:grid;gap:24px;width:100%;padding-top:6px;container-type:inline-size}
+/* One column that never grows past the screen, whatever a card inside it holds. */
+.faculty-home{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;width:100%;max-width:1120px;margin:0 auto;padding-top:8px}
+.faculty-home>*{min-width:0}
+.home-action-short{display:none}
 
-/* The greeting on the left, the date on the right - large, with a green tick
-   when nothing needs you; under the greeting when narrow */
-.faculty-home-head{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 24px}
-.faculty-home-head h1{margin:0;font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em}
-.faculty-home-date{display:flex;align-items:center;gap:8px;margin:0;color:var(--text-2,#AAB6BC);font-size:clamp(1.05rem,1.8vw,1.35rem);font-weight:600;letter-spacing:-.01em}
-.home-all-clear{display:inline-grid;place-items:center;color:#43CF88}
+/* The greeting card. */
+.home-hero{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:28px 32px;border:1px solid rgba(255,255,255,.05);border-radius:20px;background:var(--bg-card,#2A2D31)}
+.home-hero-text{min-width:0}
+.home-hero-date{margin:0 0 6px;color:var(--text-2,#AAB6BC);font-size:.88rem;font-weight:600}
+.home-hero h1{margin:0;font-size:clamp(1.7rem,3.2vw,2.4rem);font-weight:750;letter-spacing:-.035em;line-height:1.15}
+.home-hero-line{min-height:1.4em;margin:8px 0 0;color:var(--text-2,#AAB6BC);font-size:.95rem;line-height:1.45}
+.home-hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+.home-hero-actions .button{min-height:42px;padding:0 18px;border-radius:10px;text-decoration:none;white-space:nowrap}
+.home-hero-actions .button-secondary{border:1px solid var(--border,#474C52);background:transparent;color:var(--text,#F7FAFC)}
+.home-hero-actions .button-secondary:hover{background:var(--bg-raised,#33373B)}
+.home-hero-art{flex:none;width:230px;height:auto}
+.home-hero-art .art-halo{fill:rgba(21,152,209,.09)}
+.home-hero-art .art-dot{fill:#5D6A71}
+.home-hero-art .art-dot.is-blue,.home-hero-art .art-plus{fill:none;stroke:#3DB3E6;stroke-width:2.2;stroke-linecap:round}
+.home-hero-art .art-dot.is-blue{fill:none}
+.home-hero-art .art-board{fill:#1F2A31;stroke:#3DB3E6;stroke-width:2.5}
+.home-hero-art .art-clip{fill:#1F2A31;stroke:#3DB3E6;stroke-width:2.5}
+.home-hero-art .art-tick{fill:none;stroke:#5CC3EE;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.home-hero-art .art-line{fill:none;stroke:#6E7C83;stroke-width:3;stroke-linecap:round}
+.home-hero-art .art-box{fill:none;stroke:#6E7C83;stroke-width:2.2}
+.home-hero-art .art-qr-frame{fill:rgba(39,182,111,.1);stroke:#43CF88;stroke-width:2.2}
+.home-hero-art .art-qr{fill:none;stroke:#43CF88;stroke-width:2;stroke-linejoin:round}
 
-/* What needs the teacher now: one tap each into its section */
-.home-attention{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:-8px}
-.home-chip{display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:0 12px 0 11px;border-radius:999px;font-size:.86rem;font-weight:700;text-decoration:none;transition:filter .15s}
-.home-chip:hover{filter:brightness(1.15)}
-.home-chip:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:2px}
-.home-chip.is-warn{background:rgba(243,154,74,.16);color:#F5A45C}
-.home-chip.is-ok{background:rgba(39,182,111,.16);color:#43CF88}
+/* Live now: one bar per running test or open attendance - what is happening, and Follow. */
+.home-live{display:grid;gap:10px}
+.home-live-item{display:flex;align-items:center;flex-wrap:wrap;gap:10px 16px;padding:14px 18px;border:1px solid rgba(39,182,111,.45);border-radius:var(--r-lg,16px);background:linear-gradient(90deg,rgba(39,182,111,.14),rgba(39,182,111,.03) 60%);color:var(--text,#F7FAFC);text-decoration:none;transition:border-color .15s}
+.home-live-item:hover{border-color:var(--ok,#27B66F)}
+.home-live-item:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:2px}
+.home-live-dot{flex:none;width:10px;height:10px;border-radius:50%;background:var(--ok,#27B66F);animation:home-pulse 1.6s ease-out infinite}
+@keyframes home-pulse{0%{box-shadow:0 0 0 0 rgba(39,182,111,.55)}100%{box-shadow:0 0 0 10px rgba(39,182,111,0)}}
+.home-live-text{display:grid;min-width:0;flex:1 1 220px}
+.home-live-text small{color:#43CF88;font-size:.74rem;font-weight:750;letter-spacing:.04em;text-transform:uppercase}
+.home-live-text strong{overflow:hidden;font-size:1.05rem;text-overflow:ellipsis;white-space:nowrap}
+.home-live-figures{display:flex;flex-wrap:wrap;gap:6px 16px;color:var(--text-2,#AAB6BC);font-size:.84rem}
+.home-live-figures>span{display:inline-flex;align-items:baseline;gap:5px}
+.home-live-figures strong{color:var(--text,#F7FAFC);font-size:1.05rem;font-variant-numeric:tabular-nums}
+.home-live-figures .is-warn,.home-live-figures .is-warn strong{color:#F5A45C}
+.home-live-figures .is-bad,.home-live-figures .is-bad strong{color:#FF7C7F}
+.home-live-figures svg{align-self:center}
+.home-live-go{display:inline-flex;align-items:center;gap:6px;flex:none;color:#43CF88;font-weight:700}
 
-/* One card per section: two across ... */
-.home-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
-/* ... three where there is room for them, so none sits alone on a row - and
-   where there is not, the third takes the whole row under the other two ... */
-@container (min-width: 940px){
-  .home-cards.has-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+/* A card per number: its icon and an arrow, the number with its name, a line under it. */
+.home-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.home-stats.has-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.home-stat{--accent:#3DB3E6;--accent-bg:rgba(21,152,209,.16);display:grid;gap:10px;min-width:0;padding:18px 20px;border:1px solid rgba(255,255,255,.05);border-radius:16px;background:var(--bg-card,#2A2D31);color:var(--text,#F7FAFC);text-decoration:none;transition:border-color .15s,background .15s}
+.home-stat:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border,#474C52));background:#2E3135}
+.home-stat:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:2px}
+.home-stat.is-ok{--accent:#43CF88;--accent-bg:rgba(39,182,111,.16)}
+.home-stat.is-violet{--accent:#A991F7;--accent-bg:rgba(139,111,240,.18)}
+.home-stat-top{display:flex;align-items:center;justify-content:space-between}
+.home-stat-icon{display:grid;place-items:center;width:38px;height:38px;border-radius:11px;background:var(--accent-bg);color:var(--accent)}
+.home-stat-go{color:var(--text-3,#75848B);transition:transform .15s,color .15s}
+.home-stat:hover .home-stat-go{color:var(--accent);transform:translateX(3px)}
+.home-stat-value{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 8px;margin-top:6px;font-size:.98rem;font-weight:700}
+.home-stat-value strong{font-size:2rem;font-weight:750;font-variant-numeric:tabular-nums;line-height:1}
+.home-stat small{color:var(--text-2,#AAB6BC);font-size:.82rem}
+.home-stat small .is-warn{color:#F5A45C}
+
+/* A heading for a part, with a link to all of it. */
+.home-section{display:grid;gap:12px}
+.home-section h2{display:flex;align-items:center;gap:8px;margin:0;font-size:1.05rem;font-weight:700}
+.home-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.home-section-head a{display:inline-flex;align-items:center;gap:4px;color:#3DB3E6;font-size:.86rem;font-weight:650;text-decoration:none}
+.home-section-head a:hover{color:#5CC3EE}
+.home-count{display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;border-radius:999px;background:rgba(243,154,74,.18);color:#F5A45C;font-size:.76rem;font-weight:750}
+
+/* Needs you (and Coming up): a line each, with its button. */
+.home-needs{margin:0;padding:0;list-style:none;border:1px solid rgba(255,255,255,.05);border-radius:16px;background:var(--bg-card,#2A2D31);overflow:hidden}
+.home-needs li{display:flex;align-items:center;gap:12px;padding:12px 18px}
+.home-needs li+li{border-top:1px solid var(--border,#474C52)}
+.home-need-icon{display:grid;place-items:center;flex:none;width:34px;height:34px;border-radius:10px;background:var(--bg-input,#3A3E43);color:var(--text-2,#AAB6BC)}
+.home-need-icon.is-warn{background:rgba(243,154,74,.14);color:#F5A45C}
+.home-need-icon.is-info{background:rgba(21,152,209,.14);color:#5CC3EE}
+.home-need-text{display:grid;flex:1;min-width:0;color:var(--text,#F7FAFC);text-decoration:none}
+.home-need-text strong{font-size:.93rem;font-weight:650}
+.home-need-text small{overflow:hidden;color:var(--text-2,#AAB6BC);font-size:.8rem;text-overflow:ellipsis;white-space:nowrap}
+.home-needs .button{flex:none;min-width:84px;justify-content:center;text-decoration:none}
+
+/* Waiting for the numbers: grey bars where they will be. */
+.home-loading-line{background:linear-gradient(90deg,var(--bg-input,#3A3E43) 0%,#474C52 50%,var(--bg-input,#3A3E43) 100%);background-size:200% 100%;animation:home-shimmer 1.2s linear infinite}
+.home-loading-line{display:block;height:40px;margin-top:6px;border-radius:9px}
+@keyframes home-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.home-live-dot,.home-loading-line{animation:none}}
+
+/* Tablet: the numbers still one row (three, or two), a little tighter; the drawing smaller. */
+@media (max-width:1023px){
+  .home-stats{gap:12px}
+  .home-stat{padding:16px}
+  .home-stat-value strong{font-size:1.7rem}
+  .home-hero-art{width:180px}
 }
-@container (min-width: 561px) and (max-width: 939px){
-  .home-cards.has-3>.home-card:last-child{grid-column:1/-1}
+/* Phone: one column; the greeting without its drawing; each number a single row. */
+@media (max-width:640px){
+  .faculty-home{gap:14px;padding-top:4px}
+  .home-hero{padding:20px}
+  .home-hero-art{display:none}
+  .home-hero-actions{display:grid;grid-template-columns:1fr 1fr}
+  .home-hero-actions .button{justify-content:center;min-width:0;padding:0 10px}
+  .home-action-long{display:none}
+  .home-action-short{display:inline}
+  .home-stats,.home-stats.has-2{grid-template-columns:1fr;gap:10px}
+  .home-stat{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"icon value go" "icon line go";gap:2px 14px;align-items:center;padding:14px 16px}
+  .home-stat-top{display:contents}
+  .home-stat-icon{grid-area:icon}
+  .home-stat-go{grid-area:go}
+  .home-stat-value{grid-area:value;margin:0}
+  .home-stat-value strong{font-size:1.5rem}
+  .home-stat small{grid-area:line}
+  .home-stat .home-loading-line{grid-area:value;height:24px;margin:0}
+  .home-live-item{padding:12px 14px}
+  .home-live-text{flex:1 1 0}
+  .home-live-figures{width:100%;order:3;padding-left:26px}
+  .home-needs li{padding:10px 14px;gap:10px}
+  .home-needs .button{min-width:0;padding:0 12px}
 }
-/* ... and one a row on a phone. */
-@container (max-width: 560px){
-  .home-cards{grid-template-columns:1fr;gap:10px}
-  .home-card-main{padding:16px 16px 12px}
-  .home-card-icon{width:40px;height:40px;border-radius:11px}
-  .home-card-foot{min-height:66px;padding:12px 16px 14px}
-  .home-figures dd{font-size:1.4rem}
-}
-
-.home-card{--accent:#3DB3E6;--accent-bg:rgba(21,152,209,.16);display:flex;flex-direction:column;min-width:0;border:1px solid var(--border,#474C52);border-radius:var(--r-lg,16px);background:var(--bg-card,#2A2D31);overflow:hidden;transition:border-color .15s,background .15s}
-.home-card:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--border,#474C52));background:#2E3135}
-.home-card.is-ok{--accent:#43CF88;--accent-bg:rgba(39,182,111,.16)}
-.home-card.is-warn{--accent:#F5A45C;--accent-bg:rgba(243,154,74,.16)}
-.home-card.is-muted{--accent:#AAB6BC;--accent-bg:var(--bg-input,#3A3E43)}
-
-/* Its icon and name; the whole band opens the section */
-.home-card-main{display:flex;align-items:center;gap:14px;padding:20px 22px 16px;color:var(--text,#F7FAFC);text-decoration:none}
-.home-card-main:focus-visible{outline:2px solid var(--primary,#1598D1);outline-offset:-2px;border-radius:var(--r-lg,16px)}
-.home-card-icon{display:grid;place-items:center;flex:none;width:46px;height:46px;border-radius:13px;background:var(--accent-bg);color:var(--accent)}
-.home-card-title{flex:1;min-width:0;font-size:1.15rem;font-weight:700;letter-spacing:-.01em}
-.home-card-go{flex:none;color:var(--text-3,#75848B);transition:transform .15s,color .15s}
-.home-card-main:hover .home-card-go{color:var(--accent);transform:translateX(3px)}
-
-/* Key numbers on the left - coloured when one waits on you - and the section's
-   usual action on the right. The same height whether the numbers have arrived
-   or not, so nothing jumps. */
-.home-card-foot{display:flex;flex-wrap:wrap;align-items:flex-end;gap:12px;min-height:80px;margin-top:auto;padding:14px 22px 18px;border-top:1px solid var(--border,#474C52)}
-.home-figures{display:flex;gap:28px;margin:0}
-.home-figures div{display:flex;flex-direction:column-reverse;gap:2px;min-width:0}
-.home-figures dt{color:var(--text-3,#75848B);font-size:.72rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap}
-.home-figures dd{margin:0;color:var(--text,#F7FAFC);font-size:1.7rem;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
-.home-figures .is-warn dd{color:#F5A45C}
-.home-figures .is-ok dd{color:#43CF88}
-.home-card-action{display:inline-flex;align-items:center;gap:6px;flex:none;margin-left:auto;text-decoration:none}
-
-/* While the numbers load: quiet grey bars, never a dash or dots. */
-.home-figures-loading{display:flex;gap:28px}
-.home-figures-loading i{display:block;width:46px;height:38px;border-radius:7px;background:linear-gradient(90deg,var(--bg-input,#3A3E43) 0%,#474C52 50%,var(--bg-input,#3A3E43) 100%);background-size:200% 100%;animation:home-shimmer 1.2s linear infinite}
-@keyframes home-shimmer{from{background-position:100% 0}to{background-position:-100% 0}}
-@media (prefers-reduced-motion:reduce){.home-figures-loading i{animation:none}}
 
 /*
  * Numbers at a glance (the Users page): one row of tiles at every size. They

@@ -4,6 +4,7 @@ import { api, post } from '../../../lib/api.js';
 import { shortDateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
 import { RichText } from '../../../components/RichText.jsx';
+import { QuestionImage } from '../../../components/QuestionImage.jsx';
 import { InfoTip } from '../../../components/InfoTip.jsx';
 import { STATE_WORDS, answerOf, answerState, initialsOf, papersWith } from '../review.js';
 
@@ -305,6 +306,7 @@ export function ResultReviewModal({ code, startAt = null, startMode = 'student',
                 <span className={`review-state is-${state}`}>{STATE_WORDS[state]}{answer.overridden ? ' · changed' : ''}</span>
               </header>
               <RichText className="review-prompt" text={shown.prompt}/>
+              {shown.image && <QuestionImage image={shown.image} label="Picture for this question" compact/>}
               <AnswerBody question={shown} answer={answer}/>
               {/* Held on the student's device by a lost connection, and taken after its time: theirs to judge. */}
               {answer.late && (

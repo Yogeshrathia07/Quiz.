@@ -4,14 +4,14 @@ import {
   authStatus, logout, requireAccount, requireAdmin, requireTestTaker, requireUserManager
 } from '../auth/portal-auth.js';
 import {
-  changePassword, logIn, passwordStatus, requestCode, resetPassword, signUp
+  changePassword, checkCode, logIn, passwordStatus, requestCode, resetPassword, signUp
 } from '../auth/account-login.js';
 import { beginMicrosoftLogin, finishMicrosoftLogin } from '../auth/microsoft-login.js';
   import { createTest, testQrSvg, updateTestSettings } from '../services/test-service.js';
 import { saveTestPaper, testForEditing } from '../services/paper-service.js';
 import { importMarks } from '../services/marks-import.js';
 import {
-  beginGuestSession, endGuestVisit, getTest, myResponseData, myResults, registerForTest, setMySapId, studentProfile
+  beginGuestSession, endGuestVisit, getTest, myResponseData, myResponseView, myResults, registerForTest, setMySapId, studentProfile
 } from '../services/registration-service.js';
 import {
   blockUser, deleteUser, listUsers, setUserName, setUserSapId, unblockUser, userDetail, userResponseData
@@ -22,7 +22,7 @@ import {
 import { attemptRevision, compactAnswerResponse, compactAttemptState, revisionedAttempt } from '../domain/attempt-sync.js';
 import {
   adminDashboard, adminExportData, adminTests, archiveTest, userTestAnalysis, bulkAttemptAction, duplicateTest, bulkDecision, closeTest, csvForAdmin, decideRegistration,
-  deleteTest, gradeManualAnswer, manualReview, registrationAnalysis, releaseResults, restartAllAttempts, restartQuiz, reviewData, setAnswerMarks, setResultsFrozen, setUnmarkedRelease,
+  deleteTest, gradeManualAnswer, manualReview, registrationAnalysis, registrationRecord, releaseResults, restartAllAttempts, restartQuiz, reviewData, setAnswerMarks, setResultsFrozen, setUnmarkedRelease,
   continueAttempt, pauseAttempt, reopenTest, restartAttempt, resetTest, resumeAttempt, reopenStudentPaper, submitStudentPaper, setDeviceOverride, setLocationOverride, setTestEndTime, startTest, updateStudentSapId
 } from '../services/admin-service.js';
 import { exportWorkerStats, runExportJob } from '../export/worker-pool.js';
@@ -36,6 +36,7 @@ import {
   reopenAttendance, searchPeople, setMarkStatus, setMarkStatuses
 } from '../services/attendance-service.js';
 import { homeSummary } from '../services/home-service.js';
+import { MAX_IMAGE_BYTES, questionImage, saveQuestionImage } from '../services/question-image-service.js';
 import { checkAnyDevice, checkTestDevice } from '../services/device-service.js';
 
 /** Forwards any thrown PublicTestError to the central error handler. */
@@ -115,6 +116,8 @@ export function createApiRouter() {
   router.post('/api/auth/login', route(async (req, res) => res.json(await logIn(req, res, req.body || {}))));
   // Sign-up and password reset each start with a code emailed to the address.
   router.post('/api/auth/code', route(async (req, res) => res.json(await requestCode(req, req.body || {}))));
+  // The middle step of sign-up and reset: is this code right? (It is spent only by the last step.)
+  router.post('/api/auth/check-code', route(async (req, res) => res.json(await checkCode(req, req.body || {}))));
   router.post('/api/auth/signup', route(async (req, res) => res.json(await signUp(req, res, req.body || {}))));
   router.post('/api/auth/reset-password', route(async (req, res) => res.json(await resetPassword(req, res, req.body || {}))));
   router.get('/api/auth/password', requireAccount, route(async (req, res) => res.json(await passwordStatus(req))));
@@ -136,6 +139,8 @@ export function createApiRouter() {
   router.get('/api/student/profile', requireTestTaker, route(async (req, res) => res.json(await studentProfile(req))));
   router.post('/api/student/profile/sap-id', requireAccount, route(async (req, res) => res.json(await setMySapId(req, req.body || {}))));
   router.get('/api/me/results', requireAccount, route(async (req, res) => res.json(await myResults(req))));
+  // Their own paper, answer by answer, to read on the page (the .xlsx below is the same, to keep).
+  router.get('/api/me/results/:code/responses', requireAccount, route(async (req, res) => res.json(await myResponseView(req, req.params.code))));
   router.get('/api/me/results/:code/responses.xlsx', requireAccount, route(async (req, res) => {
     await sendResponseSheet(res, await myResponseData(req, req.params.code));
   }));
@@ -248,6 +253,19 @@ export function createApiRouter() {
 
   /* --------------------------------------------------------- admin: reading */
   router.get('/api/admin/tests', requireAdmin, route(async (req, res) => res.json({ tests: await adminTests(req) })));
+  // A picture for a question, from the editor: its bytes as the body (already shrunk on the admin's device).
+  router.post('/api/admin/question-images', requireAdmin, express.raw({ type: ['image/jpeg', 'image/png', 'image/webp'], limit: MAX_IMAGE_BYTES + 1024 }), route(async (req, res) => {
+    res.status(201).json(await saveQuestionImage(req, req.body, req.query));
+  }));
+  // A question's picture. Its id cannot be guessed and its bytes never change,
+  // so the browser keeps it for good - fetched once when the paper opens, it
+  // is there for every later look, and for a paper carried on offline.
+  router.get('/api/question-images/:id', route(async (req, res) => {
+    const image = await questionImage(req.params.id);
+    if (!image) { res.status(404).json({ error: 'This picture does not exist.' }); return; }
+    res.set({ 'Content-Type': image.contentType, 'Content-Length': String(image.bytes), 'Cache-Control': 'private, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'" });
+    res.end(Buffer.from(image.data.buffer));
+  }));
   router.get('/api/admin/home', requireAdmin, route(async (req, res) => res.json(await homeSummary(req))));
   router.get('/api/admin/performance', requireAdmin, route(async (_req, res) => res.json(performanceSnapshot({ exports: exportWorkerStats() }))));
   router.get('/api/admin/tests/:code/events', requireAdmin, route(async (req, res) => {
@@ -410,6 +428,10 @@ export function createApiRouter() {
   }));
   router.get(`${registrationPath}/analysis`, requireAdmin, route(async (req, res) => {
     res.json(await registrationAnalysis(req, req.params.code, req.params.registrationId));
+  }));
+  // That student's full record as Excel, from the dashboard's activity log.
+  router.get(`${registrationPath}/record.xlsx`, requireAdmin, route(async (req, res) => {
+    await sendResponseSheet(res, await registrationRecord(req, req.params.code, req.params.registrationId), { audit: true });
   }));
   router.post(`${registrationPath}/manual-grade`, requireAdmin, route(async (req, res) => {
     const response = await gradeManualAnswer(req, req.params.code, req.params.registrationId, req.body || {});

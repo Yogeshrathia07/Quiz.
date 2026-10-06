@@ -40,6 +40,18 @@ export function estimateSeconds(mix) {
 }
 
 /** Clamps every count to what the bank can actually supply. */
+/**
+ * A question joins `type` - added, or changed to it. When every student
+ * already gets every question of that type (none at all, say, before this
+ * one), the count per student grows by one so the new question reaches the
+ * papers; a count chosen below the bank stays as chosen. `pool` is the bank
+ * before the change.
+ */
+export function mixWithAdded(mix, pool, type) {
+  const count = Number(mix?.[type] || 0);
+  return count === availableOfType(pool, type) ? { ...mix, [type]: count + 1 } : mix;
+}
+
 export function clampMix(mix, pool) {
   return QUESTION_TYPES.reduce((result, type) => ({
     ...result,

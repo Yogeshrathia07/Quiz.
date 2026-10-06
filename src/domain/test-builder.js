@@ -7,6 +7,7 @@ import { ESTIMATE_SECONDS, QUESTION_DRAWS, QUESTION_LAYOUTS, estimateSeconds, qu
 import { buildTypeSeconds, secondsOrNull, strictEstimateSeconds } from './strict-timing.js';
 import { buildTypeMarks, marksField } from './marks.js';
 import { END_MODES } from './attempt-rules.js';
+import { imageField } from './question-image.js';
 
 export const RESULT_RELEASE_MODES = ['instant', 'after_quiz', 'admin'];
 
@@ -101,7 +102,9 @@ function buildQuestion(rawQuestion, index) {
   // Its own time under strict timing, and its own marks: null follows the test's default for its type.
   const timeSeconds = secondsOrNull(rawQuestion.timeSeconds, `Question ${index + 1}'s time`);
   const marks = marksField(rawQuestion.marks, `Question ${index + 1}'s marks`);
-  if (type === 'short') return { prompt, type, options: [], correctOptions: [], timeSeconds, marks };
+  // A picture, added in the editor (its id and size; the bytes are kept apart).
+  const image = imageField(rawQuestion.image, `Question ${index + 1}`);
+  if (type === 'short') return { prompt, type, options: [], correctOptions: [], timeSeconds, marks, image };
 
   if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length < 2 || rawQuestion.options.length > 8) {
     throw new PublicTestError(400, `Question ${index + 1} needs 2 to 8 answer options.`);
@@ -112,7 +115,7 @@ function buildQuestion(rawQuestion, index) {
     throw new PublicTestError(400, `Choose valid correct answer(s) for question ${index + 1}.`);
   }
   if (type === 'mcq' && correctOptions.length !== 1) throw new PublicTestError(400, `Question ${index + 1} is single-choice, so select one correct answer.`);
-  return { prompt, type, options, correctOptions, timeSeconds, marks };
+  return { prompt, type, options, correctOptions, timeSeconds, marks, image };
 }
 
 /**

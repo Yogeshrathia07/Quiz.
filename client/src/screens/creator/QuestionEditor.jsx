@@ -1,8 +1,11 @@
-import { useState } from 'react';
-import { Clock, Star } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Clock, ImagePlus, Star } from 'lucide-react';
 import { ChoiceCards } from '../../components/FormControls.jsx';
 import { PromptField } from './PromptField.jsx';
 import { QUESTION_TYPES, marksLabel, questionMarksFor, questionSecondsFor, secondsLabel } from '../../lib/quiz.js';
+import { uploadFile } from '../../lib/api.js';
+import { compressImage, sizeLabel } from '../../lib/image-compress.js';
+import { QuestionImage } from '../../components/QuestionImage.jsx';
 
 const TYPE_TITLES = { mcq: 'Single choice', msq: 'Multiple choice', short: 'Short answer' };
 const TYPE_ABOUT = {
@@ -85,6 +88,53 @@ function QuestionMarks({ question, typeMarks, onChange }) {
   );
 }
 
+/**
+ * A picture for the question - added here, by hand: a JSON import carries
+ * text only. Shrunk on this device before it is sent (lib/image-compress.js),
+ * so it loads quickly on a student's phone; students tap it to see it big.
+ */
+function QuestionPicture({ image, onChange }) {
+  const input = useRef(null);
+  const [busy, setBusy] = useState('');
+  const [problem, setProblem] = useState('');
+  const choose = async (file) => {
+    if (!file) return;
+    setProblem('');
+    setBusy('Shrinking the picture…');
+    try {
+      const { blob, width, height } = await compressImage(file);
+      setBusy('Uploading…');
+      const { image: saved } = await uploadFile(`/api/admin/question-images?width=${width}&height=${height}`, blob);
+      onChange(saved);
+    } catch (error) { setProblem(error.message); }
+    setBusy('');
+    if (input.current) input.current.value = '';
+  };
+  return (
+    <div className="question-picture">
+      <span className="field-label">Picture <span className="field-optional">optional</span></span>
+      {image ? (
+        <div className="question-picture-row">
+          <QuestionImage image={image} label="Picture for this question" compact/>
+          <div className="question-picture-side">
+            <small>{image.width} × {image.height}{image.bytes ? ` · ${sizeLabel(image.bytes)}` : ''}</small>
+            <div className="question-picture-actions">
+              <button className="button button-secondary button-small" type="button" disabled={Boolean(busy)} onClick={() => input.current?.click()}>{busy || 'Replace'}</button>
+              <button className="button button-danger button-small" type="button" disabled={Boolean(busy)} onClick={() => onChange(null)}>Remove</button>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <button className="button button-secondary question-picture-add" type="button" disabled={Boolean(busy)} onClick={() => input.current?.click()}>
+          <ImagePlus size={17} aria-hidden="true"/>{busy || 'Add a picture'}
+        </button>
+      )}
+      {problem && <p className="help is-bad" role="alert">{problem}</p>}
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/gif" hidden onChange={(event) => choose(event.target.files?.[0])}/>
+    </div>
+  );
+}
+
 export function QuestionEditor({ question, index, canRemove, onChange, onRemove, strict = false, typeSeconds, typeMarks, onPapers = 0 }) {
   const update = (patch) => onChange(index, { ...question, ...patch });
 
@@ -131,6 +181,7 @@ export function QuestionEditor({ question, index, canRemove, onChange, onRemove,
       </div>
 
       <PromptField value={question.prompt} onChange={(prompt) => update({ prompt })}/>
+      <QuestionPicture image={question.image || null} onChange={(image) => update({ image })}/>
 
       <ChoiceCards
         label="Answer type"

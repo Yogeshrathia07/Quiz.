@@ -1,12 +1,13 @@
 import { currentMs, dateMs, iso } from '../lib/time.js';
 import { config } from '../config.js';
-import { describeEvent, integrityRecord, integritySummary, locksOnViolation, violationActionOf, warningsBeforeLockOf, warnsOnViolation } from './integrity.js';
+import { describeEvent, integrityRecord, integritySummary, keptEvents, locksOnViolation, violationActionOf, warningsBeforeLockOf, warnsOnViolation } from './integrity.js';
 import { activityLog } from './activity.js';
 import { activeQuestions, questionPoolCounts, questionType } from './question-bank.js';
 import { attemptDeadlineMs, endModeOf, isAnswered, isAttemptTimeOver, isPerStudent, isTimeOver, isUntimed, startModeOf } from './attempt-rules.js';
 import { DEFAULT_TYPE_SECONDS, allowsNext, isStrict, openQuestionEndsAt, questionSeconds, strictPaper } from './strict-timing.js';
 import { DEVICE_NOTES, deviceRuleOf, kindWord } from './device.js';
 import { DEFAULT_TYPE_MARKS, earnedMarks, paperMarks, paperScore, questionMarks, roundMarks } from './marks.js';
+import { imageView, paperHasImages, questionHasImage, shownGraceMs } from './question-image.js';
 
 const lockWaitMs = () => (Number(config.lockWaitSeconds) || 0) * 1000;
 /**
@@ -14,8 +15,8 @@ const lockWaitMs = () => (Number(config.lockWaitSeconds) || 0) * 1000;
  * (attempt-service markShown) - until the shown grace is up, when saying so
  * could no longer move it.
  */
-const waitsForShown = (sentAt, atMs) => Boolean(sentAt)
-  && atMs < dateMs(sentAt) + Math.max(0, Number(config.shownGraceSeconds) || 0) * 1000;
+/** Sent, and still within the wait for "on screen" - longer where a picture has to arrive (domain/question-image.js). */
+const waitsForShown = (sentAt, atMs, withImage = false) => Boolean(sentAt) && atMs < dateMs(sentAt) + shownGraceMs(withImage);
 
 /** How long a submitted paper took, start to submit; null until it is submitted. */
 export const timeTakenSeconds = (attempt) => (attempt?.startedAt && attempt?.submittedAt
@@ -94,6 +95,8 @@ function paperQuestion(test, attempt, assigned, atMs) {
     id: question.id,
     type: questionType(question),
     prompt: question.prompt,
+    // Its picture, if it has one: where to fetch it and its size, so the page keeps room for it.
+    image: imageView(question.image),
     options: order
       .map((id) => ({ id, text: question.options[Number(id)] }))
       .filter((option) => option.text !== undefined),
@@ -134,7 +137,7 @@ function strictView(test, attempt, atMs) {
       // as if they came back now, and the page holds them still.
       questionPaused: Boolean(state.pausedSince),
       // Sent, and its clock waits for this device to say it is on screen.
-      shownPending: Boolean(open) && Boolean(state.shownAt) && waitsForShown(state.sentAt, atMs),
+      shownPending: Boolean(open) && Boolean(state.shownAt) && waitsForShown(state.sentAt, atMs, questionHasImage(test, open.questionId)),
       paperEndsAt: endsAt ? iso(new Date(endsAt.getTime() + laterSeconds * 1000)) : null,
       laterSeconds,
       untimedLeft,
@@ -172,7 +175,7 @@ export function attemptView(test, attempt, atMs = currentMs(), { venue = null } 
     serverTime: new Date(atMs).toISOString(),
     timeOver: isAttemptTimeOver(test, attempt, atMs),
     // Each student's own time: the paper's clock waits for this device to say it is on screen.
-    clockPending: attempt.status === 'in_progress' && waitsForShown(attempt.clockSentAt, atMs),
+    clockPending: attempt.status === 'in_progress' && waitsForShown(attempt.clockSentAt, atMs, paperHasImages(test, attempt)),
     // Paused by the teacher: no paper on screen, no answers taken, and the clock stopped.
     paused: Boolean(attempt.pausedAt),
     totalQuestions: attempt.questions?.length || test.questionCount,
@@ -250,12 +253,6 @@ export function responseDetails(test, registration) {
   if (!attempt) return [];
   const questions = new Map((test.questions || []).map((question) => [question.id, question]));
   const answers = new Map((attempt.answers || []).map((answer) => [answer.questionId, answer]));
-  // Text that arrived in an answer all at once, per question (see FLAG_REASONS.text_burst).
-  const bursts = new Map();
-  for (const event of attempt.events || []) {
-    if (event.type !== 'integrity_flag' || event.detail !== 'text_burst' || !event.questionId) continue;
-    bursts.set(event.questionId, [...(bursts.get(event.questionId) || []), event.chars]);
-  }
   return [...(attempt.questions || [])]
     .sort((left, right) => left.questionIndex - right.questionIndex)
     .map((assigned) => {
@@ -270,6 +267,7 @@ export function responseDetails(test, registration) {
         questionNumber: assigned.questionIndex + 1,
         type: questionType(question),
         prompt: question.prompt,
+        image: imageView(question.image),
         selectedAnswer: manualGrading ? (answer.answerText || 'No answer') : optionText(question, answer.selectedOptions),
         correctAnswer: manualGrading ? '' : optionText(question, question.correctOptions),
         answeredAt: iso(answer.answeredAt),
@@ -283,7 +281,6 @@ export function responseDetails(test, registration) {
         // A choice answer's mark the teacher changed by hand (domain/marks.js automaticMarks).
         overridden: Boolean(answer.marksOverride),
         manualGrading,
-        textBursts: bursts.get(question.id) || [],
         // Made in time on the device but held there by a lost connection
         // (domain/late-answers.js): when it says it was made, and when it came.
         late: answer.late ? { madeAt: iso(answer.late.madeAt), arrivedAt: iso(answer.late.arrivedAt) } : null,
@@ -293,6 +290,9 @@ export function responseDetails(test, registration) {
     })
     .filter(Boolean);
 }
+
+/** Where a paper was, reading by reading, oldest first - for its teacher only. */
+export const locationTrailOf = (attempt) => (attempt?.locationTrail || []).map((reading) => ({ ...reading, at: iso(reading.at) }));
 
 /**
  * One student's own paper for their response download: every question with
@@ -328,7 +328,7 @@ export function studentResponseData(test, registration) {
     // complete audit trail, rather than a score sheet with the evidence lost.
     integrity: attempt ? {
       ...integritySummary(attempt),
-      events: (attempt.events || []).map((event) => ({
+      events: keptEvents(attempt.events).map((event) => ({
         ...describeEvent(event),
         // `describeEvent` intentionally hides most raw detail in the UI; the
         // exported audit needs the original recorded value as well.
@@ -338,6 +338,8 @@ export function studentResponseData(test, registration) {
     } : null,
     activity: activityLog(test, registration),
     location: attempt?.locationChecks || null,
+    // Written only into the audit download (spreadsheet.js), never a student's own.
+    locationTrail: locationTrailOf(attempt),
     // The device the paper was begun on and the one last seen (domain/device.js).
     device: registration.device ? {
       last: `${kindWord(registration.device.kind)} (${registration.device.label || 'unknown browser'})`,

@@ -104,8 +104,7 @@
   .review-sheet>.modal-close{top:16px}
   .review-head{padding-right:46px}
   .review-head h1{font-size:1.2rem}
-  .review-modes{flex-basis:100%;display:flex}
-  .review-modes button{flex:1}
+  .review-modes{flex-basis:100%;width:100%}
   .review-card{padding:14px}
   .review-foot .button{min-height:46px}
   .review-count-noun{display:none}

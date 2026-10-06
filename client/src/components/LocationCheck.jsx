@@ -67,11 +67,10 @@ export function useLocationCheck(enabled) {
   return { phase, reading, problem, request, fresh };
 }
 
-/** The page's own link, to open in a real browser. */
-function CopyLink() {
+/** The page's own link (or `url`), to open in a real browser. */
+export function CopyLink({ url = window.location.href }) {
   const [copied, setCopied] = useState(false);
   const field = useRef(null);
-  const url = window.location.href;
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(url);

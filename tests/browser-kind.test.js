@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { phoneWithoutExtensions } from '../client/src/lib/browser-kind.js';
-import { FLAG_REASONS, integrityCells, integrityHeaders, integritySummary } from '../src/domain/integrity.js';
+import { FLAG_REASONS, integrityCells, integrityHeaders, integritySummary, keptEvents } from '../src/domain/integrity.js';
 
 const android = (browser) => `Mozilla/5.0 (Linux; Android 14; SM-A546E) AppleWebKit/537.36 (KHTML, like Gecko) ${browser}`;
 const iphone = (browser) => `Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) ${browser}`;
@@ -23,10 +23,19 @@ test('browsers that can run extensions are still checked', () => {
   assert.equal(phoneWithoutExtensions('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36', ['Google Chrome']), false, 'Chrome on a laptop');
 });
 
-test('a browser extension seen on the paper is its own column in the report', () => {
-  assert.ok(FLAG_REASONS.extension);
-  const summary = integritySummary({ integrity: { leaveCount: 0, flags: { extension: 2, copy: 1 } } });
-  assert.equal(summary.flags.extension, 2);
+test('the checks that were guesses (an extension seen, text all at once) count nowhere, even on old papers', () => {
+  assert.equal(FLAG_REASONS.extension, undefined);
+  assert.equal(FLAG_REASONS.text_burst, undefined);
+  const summary = integritySummary({ integrity: { leaveCount: 0, flags: { extension: 2, text_burst: 3, copy: 1 } } });
+  assert.deepEqual([summary.flags.extension, summary.flags.text_burst, summary.flagCount], [undefined, undefined, 1]);
   assert.equal(integrityHeaders.length, integrityCells(summary).length);
-  assert.equal(integrityCells(summary)[integrityHeaders.indexOf('Browser extension seen')], 2);
+  assert.ok(!integrityHeaders.some((header) => /extension|all at once/i.test(header)), 'no column for them in the report');
+  const events = [
+    { type: 'integrity_flag', detail: 'extension', note: 'div' },
+    { type: 'integrity_flag', detail: 'text_burst', questionId: 1, chars: 40 },
+    { type: 'integrity_flag', detail: 'copy' },
+    { type: 'fullscreen_exit', detail: 'tab_switch' }
+  ];
+  assert.deepEqual(keptEvents(events).map((event) => event.detail), ['copy', 'tab_switch'], 'left out of the log');
+  assert.deepEqual(keptEvents(undefined), []);
 });

@@ -86,6 +86,8 @@ export const config = {
   // this many seconds after the server sent it, so a slow connection does not
   // eat into the time and a tampered page can gain at most this much.
   shownGraceSeconds: Number(process.env.SHOWN_GRACE_SECONDS ?? 10),
+  // A question (or paper) with a picture: its clock may wait this long for the picture to arrive (domain/question-image.js).
+  imageShownGraceSeconds: Number(process.env.IMAGE_SHOWN_GRACE_SECONDS ?? 30),
   // An answer made on the device before its time ran out, but held there by a
   // lost connection, is still taken this many minutes after that time - and
   // marked "arrived late" for the teacher to check. 0 turns this off.

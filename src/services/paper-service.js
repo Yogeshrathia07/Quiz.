@@ -11,6 +11,8 @@ import { earnedMarks, questionMarks, roundMarks } from '../domain/marks.js';
 import { refuseIfFrozen } from '../domain/freeze.js';
 import { adminDashboard } from './admin-service.js';
 import { refusePastTimes } from './test-service.js';
+import { requireImages } from './question-image-service.js';
+import { imageView } from '../domain/question-image.js';
 
 /**
  * Editing a test's question paper - questions, options, answer keys, times,
@@ -42,13 +44,14 @@ const toStored = (built, id) => ({
   manualGrading: built.type === 'short',
   timeSeconds: built.timeSeconds ?? null,
   // Its own marks; null follows its type's (domain/marks.js).
-  marks: built.marks ?? null
+  marks: built.marks ?? null,
+  image: built.image ?? null
 });
 
 // Marks are not part of what makes a question a different version: a change
 // to what it is worth re-marks every paper that has it (see saveTestPaper).
-const sameQuestion = (a, b) => JSON.stringify([a.prompt, a.type, a.options, a.correctOptions, Boolean(a.manualGrading), a.timeSeconds ?? null])
-  === JSON.stringify([b.prompt, b.type, b.options, b.correctOptions, Boolean(b.manualGrading), b.timeSeconds ?? null]);
+const sameQuestion = (a, b) => JSON.stringify([a.prompt, a.type, a.options, a.correctOptions, Boolean(a.manualGrading), a.timeSeconds ?? null, a.image?.id ?? null])
+  === JSON.stringify([b.prompt, b.type, b.options, b.correctOptions, Boolean(b.manualGrading), b.timeSeconds ?? null, b.image?.id ?? null]);
 
 const papersOf = (test) => (test.registrations || []).filter((registration) => registration.attempt);
 
@@ -70,6 +73,7 @@ export async function testForEditing(req, code) {
       correctOptions: (question.correctOptions || []).map(String),
       timeSeconds: question.timeSeconds ?? null,
       marks: question.marks ?? null,
+      image: question.image ? { ...question.image, url: imageView(question.image).url } : null,
       onPapers: onPapers.get(question.id) || 0
     })),
     papers: { started: papers.length, submitted: papers.filter(({ attempt }) => attempt.status === 'submitted').length }
@@ -259,11 +263,12 @@ export async function saveTestPaper(req, code, raw = {}) {
     questionMix: raw.questionMix ?? test.questionMix,
     questions: raw.questions.map((question) => ({
       prompt: question?.prompt, type: question?.type, options: question?.options, correctOptions: question?.correctOptions,
-      timeSeconds: question?.timeSeconds, marks: question?.marks
+      timeSeconds: question?.timeSeconds, marks: question?.marks, image: question?.image
     }))
   };
   const input = buildTest(source);
   if (!started) refusePastTimes(input, raw);
+  await requireImages(input.questions);
 
   let summary = null;
   await serializeTestWrite(test.code, async () => {

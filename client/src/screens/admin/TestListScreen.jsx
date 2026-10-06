@@ -4,6 +4,8 @@ import {
   Eye, EyeOff, Hourglass, Lock, MoreVertical, PenLine, Plus, Radio, Search, Settings2, Trash2, UserCheck, UserX, Users
 } from 'lucide-react';
 import { api, downloadSpreadsheet, post } from '../../lib/api.js';
+import { loadCached, prefetch, useCached } from '../../lib/cache.js';
+import { wholeClassPath } from '../../lib/dashboard-paths.js';
 import { shortDateTime } from '../../lib/format.js';
 import { applyFilters, optionCounts } from '../../lib/filters.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
@@ -11,6 +13,7 @@ import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
+import { MyTestsList } from '../student/MyResultsScreen.jsx';
 import {
   ARCHIVED, TEST_FILTERS, USUAL_TEST_SORT, papersToMark, quizFacts, sortTests, statusOf, testFiltersFrom, unlessArchivedTicked
 } from './test-filters.js';
@@ -62,7 +65,8 @@ function QuizCard({ test, onOpen, onResults, onMark, onExport, onDuplicate, onAr
     test.code
   ].filter(Boolean);
   return (
-    <article className={`ql-card${test.archivedAt ? ' is-archived' : ''}`}>
+    <article className={`ql-card${test.archivedAt ? ' is-archived' : ''}`}
+      onPointerEnter={() => prefetch(wholeClassPath(test.code))} onFocus={() => prefetch(wholeClassPath(test.code))}>
       <div className="ql-card-title">
         <h2><a href={`/?admin=${encodeURIComponent(test.code)}`} onClick={(event) => { event.preventDefault(); onOpen(); }}>{test.title}</a></h2>
         <p>{meta.map((part, index) => <span key={part} className="ql-meta-part">{index > 0 && ' · '}{part}</span>)}</p>
@@ -136,36 +140,43 @@ function DeleteDialog({ test, onCancel, onConfirm }) {
 /* --------------------------------------------------------------- page */
 
 export function TestListScreen({ go, showToast }) {
-  const [tests, setTests] = useState(null);
-  const [failed, setFailed] = useState('');
+  // Both lists show at once when seen before (lib/cache.js), and are asked again behind.
+  const created = useCached('/api/admin/tests');
+  const tests = created.data?.tests || null;
+  const failed = !tests && created.error ? created.error.message : '';
   const [query, setQuery] = useState('');
   // The home page links straight to a filter: ?admin=tests&filter=marking:due.
   const [filters, setFilters] = useState(() => testFiltersFrom(new URLSearchParams(window.location.search).get('filter')));
   const [sort, setSort] = useState(USUAL_TEST_SORT);
   const [deleting, setDeleting] = useState(null);
+  // Quizzes they created (run with every admin tool), or tests they sat
+  // themselves (?view=taken) - a colleague's or their own tried out - which
+  // open just as they would for a student.
+  const [view, setView] = useState(() => (new URLSearchParams(window.location.search).get('view') === 'taken' ? 'taken' : 'created'));
+  const sat = useCached('/api/me/results');
+  const taken = sat.data ? sat.data.results || [] : sat.error ? [] : null;
+  const choose = (next) => { setView(next); if (next === 'taken') loadCached('/api/me/results', { force: true }).catch(() => {}); };
 
   // Written back as it changes - replaced, not added, so Back still leaves the page - and a reload keeps it.
   useEffect(() => {
     const url = new URL(window.location.href);
     if (filters.length) url.searchParams.set('filter', filters.join(','));
     else url.searchParams.delete('filter');
+    if (view === 'taken') url.searchParams.set('view', 'taken');
+    else url.searchParams.delete('view');
     if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url);
-  }, [filters]);
+  }, [filters, view]);
 
   const load = useCallback(async () => {
-    try {
-      const data = await api('/api/admin/tests');
-      setTests(data.tests);
-      setFailed('');
-    } catch (error) {
-      setFailed(error.message);
-      showToast(error.message, 'error');
-    }
+    try { await loadCached('/api/admin/tests', { force: true }); }
+    catch (error) { showToast(error.message, 'error'); }
   }, [showToast]);
-  useEffect(() => { load(); }, [load]);
+  // A first load that failed says so once (the page offers Try again).
+  const firstFailure = !created.data && created.error;
+  useEffect(() => { if (firstFailure) showToast(firstFailure.message, 'error'); }, [firstFailure, showToast]);
   // Registration and submission counts stay current without a reload.
   useEffect(() => {
-    const timer = window.setInterval(() => { if (!document.hidden) api('/api/admin/tests').then((data) => setTests(data.tests)).catch(() => {}); }, 15_000);
+    const timer = window.setInterval(() => { if (!document.hidden) loadCached('/api/admin/tests', { force: true }).catch(() => {}); }, 15_000);
     return () => window.clearInterval(timer);
   }, []);
 
@@ -208,8 +219,9 @@ export function TestListScreen({ go, showToast }) {
         <div className="page-heading">
           <h1>My quizzes</h1>
           <InfoTip label="About My quizzes">
-            Every quiz you created. Open one to run it, follow its students, mark short answers and see its results;
-            the filter narrows to what needs you.
+            {view === 'taken'
+              ? 'Tests you sat yourself, a colleague\'s or your own. Each opens as it does for a student: your paper, then your marks and answers.'
+              : 'Every quiz you created. Open one to run it, follow its students, mark short answers and see its results; the filter narrows to what needs you.'}
           </InfoTip>
         </div>
       </div>
@@ -231,9 +243,38 @@ export function TestListScreen({ go, showToast }) {
   }
   if (!tests) return <section className="ql-page">{header}<Skeleton rows={4} label="Loading your quizzes"/></section>;
 
+  const switcher = (
+    <div className="segmented ql-switch" role="radiogroup" aria-label="Which quizzes">
+      {[['created', 'Created by me', tests.filter((test) => !test.archivedAt).length], ['taken', 'Taken by me', taken?.length]].map(([id, label, count]) => (
+        <button key={id} type="button" role="radio" aria-checked={view === id} className={view === id ? 'is-on' : ''} onClick={() => choose(id)}>
+          {label}{known(count) && <span className="segmented-count">{count}</span>}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (view === 'taken') {
+    return (
+      <section className="ql-page">
+        {header}
+        {switcher}
+        {!taken ? <Skeleton rows={3} label="Loading the tests you took"/> : taken.length === 0 ? (
+          <div className="ql-empty">
+            <ClipboardList size={28} aria-hidden="true"/>
+            <strong>No tests taken yet</strong>
+            <p>Open a test&apos;s link or scan its QR code to sit it, as a student would. It shows here with your marks.</p>
+          </div>
+        ) : (
+          <div className="ql-taken"><MyTestsList results={taken} go={go} showToast={showToast}/></div>
+        )}
+      </section>
+    );
+  }
+
   return (
     <section className="ql-page">
       {header}
+      {switcher}
 
       {tests.length > 0 && (
         <div className="ql-toolbar">

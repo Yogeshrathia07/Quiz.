@@ -100,6 +100,8 @@ export const otpCodes = () => database.collection('otpCodes');
 export const otpSends = () => database.collection('otpSends');
 export const studentProfiles = () => database.collection('studentProfiles');
 export const attendanceSessions = () => database.collection('attendanceSessions');
+// Pictures on questions, one document each: { _id, ownerEmail, contentType, bytes, width, height, data } (services/question-image-service.js).
+export const questionImages = () => database.collection('questionImages');
 // One document: the server's heartbeat, so a restart can tell how long it was down.
 export const serverState = () => database.collection('serverState');
 
