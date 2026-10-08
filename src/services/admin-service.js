@@ -1,3 +1,4 @@
+import { csvCell } from '../lib/csv.js';
 import { registrations as registrationsCollection, studentProfiles, tests } from '../db/index.js';
 import { config } from '../config.js';
 import { PublicTestError } from '../lib/errors.js';
@@ -387,7 +388,8 @@ function dashboardBaseMatch(code, page) {
   const match = { testCode: code };
   if (page.section === 'responses') match['attempt.status'] = 'submitted';
   if (!page.search) return match;
-  const query = new RegExp(escapeRegex(page.search), 'i');
+  // What was typed, escaped and matched as plain text, ignoring case.
+  const query = { $regex: escapeRegex(page.search), $options: 'i' };
   return joinMongoAnd([match, { $or: [{ fullName: query }, { sapId: query }, { collegeEmail: query }] }]);
 }
 
@@ -666,7 +668,8 @@ export async function adminExportData(req, code) {
 }
 
 export function csvForAdmin(dashboard) {
-  const quote = (value) => `"${String(value ?? '').replaceAll('"', '""')}"`;
+  // Formula-looking text stays text in Excel (lib/csv.js).
+  const quote = csvCell;
   const rows = [[
     'Name', 'College email', 'SAP ID', 'Registration status', 'Requested at', 'Attempt status',
     'Started at', 'Submitted at', 'Time taken (seconds)', 'Account type', 'Left at (guests)', 'Answered', 'Score', 'Fullscreen exits',
@@ -737,7 +740,10 @@ function analysisOf(test, registration) {
       sapId: registration.sapId, status: registration.status
     },
     attempt: attempt
-      ? { id: attempt.id, status: attempt.status, startedAt: iso(attempt.startedAt), submittedAt: iso(attempt.submittedAt), ...scoreSummary(registration, test) }
+      ? {
+        id: attempt.id, status: attempt.status, startedAt: iso(attempt.startedAt), submittedAt: iso(attempt.submittedAt),
+        timeTakenSeconds: timeTakenSeconds(attempt), ...scoreSummary(registration, test)
+      }
       : null,
     integrity: attempt
       ? {
@@ -1046,21 +1052,36 @@ export async function pauseAttempt(req, code, registrationId, options = {}) {
 }
 
 /** Lets a paused student carry on, with the time the pause took given back. */
-export async function continueAttempt(req, code, registrationId, options = {}) {
-  const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+async function continuePausedAttempt(test, registration) {
   const attempt = registration.attempt;
-  if (!attempt?.pausedAt || attempt.status === 'submitted') throw new PublicTestError(409, 'This student is not paused.');
+  if (!attempt?.pausedAt || attempt.status !== 'in_progress') return false;
   const at = now();
   const pausedMs = Math.max(0, at.getTime() - dateMs(attempt.pausedAt));
-  const set = { pausedAt: null, questionPausedByTeacher: false, extraMs: (Number(attempt.extraMs) || 0) + pausedMs, lastSeenAt: at };
+  const hasNumericExtra = typeof attempt.extraMs === 'number' && Number.isFinite(attempt.extraMs);
+  const set = {
+    pausedAt: null, questionPausedByTeacher: false, lastSeenAt: at,
+    ...(!hasNumericExtra ? { extraMs: (Number(attempt.extraMs) || 0) + pausedMs } : {})
+  };
   if (attempt.questionPausedByTeacher && attempt.strict?.shownAt && attempt.strict?.pausedSince) {
     set['strict.shownAt'] = new Date(dateMs(attempt.strict.shownAt) + (at.getTime() - dateMs(attempt.strict.pausedSince)));
     set['strict.pausedSince'] = null;
   }
-  await updateAttemptWhere(test.code, registration.id, { id: attempt.id, pausedAt: attempt.pausedAt }, {
+  // Increment a normal clock so a concurrent extension is kept. Older papers
+  // may have no numeric extraMs yet; initialise those only if still unchanged.
+  const expect = { id: attempt.id, status: 'in_progress', pausedAt: attempt.pausedAt,
+    ...(!hasNumericExtra ? { extraMs: attempt.extraMs ?? null } : {}) };
+  return updateAttemptWhere(test.code, registration.id, expect, {
     $set: set,
+    ...(hasNumericExtra ? { $inc: { extraMs: pausedMs } } : {}),
     $push: teacherEvent('teacher_continued', at, pausedMs)
   });
+}
+
+export async function continueAttempt(req, code, registrationId, options = {}) {
+  const { test, registration } = await requireOwnedRegistration(req, code, registrationId);
+  if (test.isClosed) throw new PublicTestError(409, 'This test is closed.');
+  if (!registration.attempt?.pausedAt || registration.attempt.status !== 'in_progress') throw new PublicTestError(409, 'This student is not paused.');
+  await continuePausedAttempt(test, registration);
   return registrationActionResult(req, code, test, registrationId, options.compact);
 }
 
@@ -1232,25 +1253,42 @@ export async function restartAllAttempts(req, code, options = {}) {
 }
 
 /**
- * Revives or restarts a chosen set of students at once - the rows the admin
- * filtered the Responses table down to. Students the action does not apply to
- * (not locked, not started) are skipped rather than failing the whole batch.
+ * Revives or restarts a chosen set of students, or continues every paused
+ * student matching the current Students search/filter (across all pages).
+ * Students whose state changed meanwhile are skipped, not counted twice.
  */
 export async function bulkAttemptAction(req, code, action, raw = {}, options = {}) {
-  const test = await requireOwnedTest(req, code);
-  if (!['resume', 'restart'].includes(action)) throw new PublicTestError(400, 'Invalid attempt action.');
-  if (!Array.isArray(raw.registrationIds)) throw new PublicTestError(400, 'Choose the students to apply this to.');
+  if (!['resume', 'restart', 'continue'].includes(action)) throw new PublicTestError(400, 'Invalid attempt action.');
+  const matching = action === 'continue' && raw.scope === 'matching';
+  const test = await requireOwnedTest(req, code, { withStudents: !matching });
+  if (!matching && !Array.isArray(raw.registrationIds)) throw new PublicTestError(400, 'Choose the students to apply this to.');
   if (action === 'restart') refuseIfClosed(test);
-  if (action === 'resume' && test.isClosed) {
+  if (action !== 'restart' && test.isClosed) {
     throw new PublicTestError(409, 'Completed tests cannot be resumed. Reset the student attempt instead.');
   }
 
-  const chosen = new Set(raw.registrationIds.map(String));
-  const eligible = (test.registrations || []).filter((entry) => chosen.has(String(entry.id)) && entry.attempt && (
-    action === 'restart' || (entry.attempt.isLocked && entry.attempt.status !== 'submitted')
-  ));
+  let eligible;
+  if (matching) {
+    const page = dashboardPageOptions({ section: 'students', search: raw.search, filters: raw.filters });
+    const paused = { 'attempt.status': 'in_progress', 'attempt.pausedAt': { $exists: true, $ne: null } };
+    const match = joinMongoAnd([dashboardBaseMatch(test.code, page), dashboardSelectedMongoMatch(page, dashboardManualQuestionIds(test)), paused]);
+    eligible = await registrationsCollection().find(match, { projection: {
+      _id: 0, id: 1, 'attempt.id': 1, 'attempt.status': 1, 'attempt.pausedAt': 1, 'attempt.extraMs': 1,
+      'attempt.questionPausedByTeacher': 1, 'attempt.strict.shownAt': 1, 'attempt.strict.pausedSince': 1
+    } }).toArray();
+  } else {
+    const chosen = new Set(raw.registrationIds.map(String));
+    eligible = (test.registrations || []).filter((entry) => {
+      if (!chosen.has(String(entry.id)) || !entry.attempt) return false;
+      if (action === 'restart') return true;
+      if (action === 'continue') return entry.attempt.status === 'in_progress' && entry.attempt.pausedAt;
+      return entry.attempt.isLocked && entry.attempt.status !== 'submitted';
+    });
+  }
   const results = await mapWithConcurrency(eligible, (registration) => (
-    action === 'resume' ? reviveAttempt(test, registration) : rebuildAttempt(test, registration).then(() => true)
+    action === 'resume' ? reviveAttempt(test, registration)
+      : action === 'continue' ? continuePausedAttempt(test, registration)
+        : rebuildAttempt(test, registration).then(() => true)
   ));
   return actionResult(req, code, test, options.compact, { affectedCount: results.filter(Boolean).length });
 }
@@ -1486,8 +1524,9 @@ async function clearTestRun(test) {
       outages: []
     }
   });
-  // Every paper and its draw slot go; the registrations (and approvals) stay.
-  await updateRegistrationsWhere(test.code, {}, { $set: { attempt: null, paperSlot: null } });
+  // Every paper and its draw slot go - a paper made ahead too, being made from
+  // that slot; the registrations (and approvals) stay.
+  await updateRegistrationsWhere(test.code, {}, { $set: { attempt: null, paperSlot: null }, $unset: { preparedPaper: '', preparedBasis: '' } });
 }
 
 /**

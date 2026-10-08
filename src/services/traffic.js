@@ -22,7 +22,7 @@ export function isLiveStreamRequest(method, path) {
 export function isPollableRequest(method, path) {
   if (method !== 'GET') return false;
   return /^\/api\/tests\/[^/]+(?:\/attempt)?$/.test(path)
-    || /^\/api\/admin\/tests\/[^/]+$/.test(path)
+    || /^\/api\/admin\/tests\/[^/]+(?:\/overview|\/matrix)?$/.test(path)
     || /^\/api\/admin\/attendance\/[^/]+$/.test(path);
 }
 

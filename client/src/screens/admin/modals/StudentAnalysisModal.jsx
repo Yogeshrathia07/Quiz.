@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, post } from '../../../lib/api.js';
-import { dateTime } from '../../../lib/format.js';
+import { dateTime, durationLabel } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
+import { PersonLink } from '../../../components/PersonLink.jsx';
 import { InfoTip } from '../../../components/InfoTip.jsx';
 import { RichText } from '../../../components/RichText.jsx';
 import { QuestionImage } from '../../../components/QuestionImage.jsx';
@@ -155,36 +156,66 @@ export function ActivityLog({ entries, bare = false, extra = null }) {
   );
 }
 
-/** Everything the integrity monitor saw, so a mark can be judged with it. */
+/**
+ * A line of numbers that fills its row - four, three or two across, so no
+ * row ends in a gap - each value level with its neighbours'. `tiles`:
+ * [label, value] pairs.
+ */
+function Tiles({ tiles }) {
+  return (
+    <div className="analysis-summary" style={{ '--tiles': tiles.length }}>
+      {tiles.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
+    </div>
+  );
+}
+
+/** Why they left, in the words the leaving count is made of; only the reasons that happened are listed. */
+const LEAVE_WORDS = {
+  fullscreen: 'Left fullscreen',
+  tab_switch: 'Switched app or tab',
+  focus_lost: 'Another window or pop-up',
+  reload: 'Reloaded the page',
+  not_fullscreen: 'Not in fullscreen',
+  split_screen: 'Split screen',
+  // Papers from before going offline stopped counting as leaving.
+  offline: 'Went offline (older paper)'
+};
+
+/**
+ * What the integrity monitor saw, so a mark can be judged with it: how often
+ * and how long they left, and why; then what is noted without counting.
+ * Only what a browser can really see - no guesses (see RETIRED_FLAGS in
+ * src/domain/integrity.js).
+ */
 function IntegrityReport({ integrity, location }) {
   if (!integrity) return null;
-  const { leaves, limits } = integrity;
+  const { leaves = {}, limits, flags = {}, offline } = integrity;
+  const reasons = Object.entries(LEAVE_WORDS).filter(([key]) => leaves[key] > 0);
   return (
     <section className="integrity-report">
       <h2>Integrity</h2>
       {integrity.isLocked && <p className="notice danger">Locked: {integrity.lockReason}</p>}
-      <div className="analysis-summary">
-        <div><span>Left the test</span><strong>{integrity.leaveCount}×{limits.exits ? ` (limit ${limits.exits})` : ''}</strong></div>
-        <div><span>Time away</span><strong>{seconds(integrity.awayMs)}</strong></div>
-        <div><span>Longest away</span><strong>{seconds(integrity.longestAwayMs)}{limits.awaySeconds ? ` (limit ${limits.awaySeconds}s)` : ''}</strong></div>
-        <div><span>Times locked</span><strong>{integrity.lockCount}</strong></div>
-        <div><span>Left fullscreen</span><strong>{leaves.fullscreen}</strong></div>
-        <div><span>Switched app / tab</span><strong>{leaves.tab_switch}</strong></div>
-        <div><span>Other window or pop-up</span><strong>{leaves.focus_lost}</strong></div>
-        <div><span>Went offline (not counted)</span><strong>{integrity.offline ? `${integrity.offline.count}×${integrity.offline.ms ? ` · ${duration(integrity.offline.ms)}` : ''}` : leaves.offline}</strong></div>
-        <div><span>Answers arrived late</span><strong>{integrity.lateAnswers || 0}</strong></div>
-        <div><span>Split screen</span><strong>{leaves.split_screen}</strong></div>
-        <div><span>Copy / paste / drag tries</span><strong>{(integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)}</strong></div>
-        <div><span>Keyboard app while typing (not counted)</span><strong>{integrity.flags?.keyboard_app || 0}</strong></div>
-        <div><span>Screenshot / print tries</span><strong>{(integrity.flags?.screenshot || 0) + (integrity.flags?.print || 0)}</strong></div>
-        <div><span>Developer tools tries</span><strong>{integrity.flags?.devtools || 0}</strong></div>
-        {location && (location.outsideCount || location.submit) && (
-          <>
-            <div><span>Left the venue</span><strong>{location.outsideCount || 0}×</strong></div>
-            <div><span>Time outside venue</span><strong>{seconds(location.outsideMs || 0)}</strong></div>
-          </>
-        )}
-      </div>
+      <Tiles tiles={[
+        ['Left the test', `${integrity.leaveCount}×${limits.exits ? ` (limit ${limits.exits})` : ''}`],
+        ['Time away', duration(integrity.awayMs)],
+        ['Longest away', `${duration(integrity.longestAwayMs)}${limits.awaySeconds ? ` (limit ${limits.awaySeconds}s)` : ''}`],
+        ['Times locked', integrity.lockCount]
+      ]}/>
+      {reasons.length > 0 && (
+        <p className="integrity-why">
+          <span className="integrity-why-label">Why they left</span>
+          {reasons.map(([key, label]) => <span key={key} className="integrity-reason">{label} <strong>{leaves[key]}×</strong></span>)}
+        </p>
+      )}
+      <Tiles tiles={[
+        ['Went offline (not counted)', offline ? `${offline.count}×${offline.ms ? ` · ${duration(offline.ms)}` : ''}` : `${leaves.offline || 0}×`],
+        ['Answers arrived late', integrity.lateAnswers || 0],
+        ['Copy / paste / drag tries', (flags.copy || 0) + (flags.cut || 0) + (flags.paste || 0) + (flags.drop || 0)],
+        ['Print tries', flags.print || 0]
+      ]}/>
+      {location && (location.outsideCount || location.submit) && (
+        <Tiles tiles={[['Left the venue', `${location.outsideCount || 0}×`], ['Time outside venue', duration(location.outsideMs || 0)]]}/>
+      )}
       <ActivityLog entries={integrity.activity || []}/>
     </section>
   );
@@ -193,9 +224,10 @@ function IntegrityReport({ integrity, location }) {
 /**
  * One student's paper, answer by answer, with their integrity record. From the
  * test's own dashboard the short answers can be marked; opened from the Users
- * page (`analysisPath`, `readOnly`) it only shows.
+ * page (`analysisPath`, `readOnly`) it only shows. Their name opens them under
+ * Users - except from Users itself (`linkPerson` false), where they already are.
  */
-export function StudentAnalysisModal({ code, registration, onClose, onSaved, showToast, analysisPath = null, readOnly = false, showIntegrity = true }) {
+export function StudentAnalysisModal({ code, registration, onClose, onSaved, showToast, analysisPath = null, readOnly = false, showIntegrity = true, linkPerson = true }) {
   const [data, setData] = useState(null);
   const [loadError, setLoadError] = useState('');
   const [marks, setMarks] = useState({});
@@ -256,14 +288,15 @@ export function StudentAnalysisModal({ code, registration, onClose, onSaved, sho
 
   return (
     <Modal label={`Student analysis for ${data.registration.name}`} onClose={onClose}>
-      <h1>{data.registration.name}</h1>
+      <h1>{linkPerson ? <PersonLink email={data.registration.email}>{data.registration.name}</PersonLink> : data.registration.name}</h1>
       <p>{data.test ? `${data.test.title} · ` : ''}{data.registration.sapId} · {data.registration.email}</p>
 
-      <div className="analysis-summary">
-        <div><span>Attempt</span><strong>{{ submitted: 'Submitted', in_progress: 'In progress' }[data.attempt?.status] || 'Not started'}</strong></div>
-        <div><span>Score</span><strong>{data.attempt ? `${data.attempt.score} / ${data.attempt.total}` : '—'}</strong></div>
-        <div><span>Answered</span><strong>{data.attempt ? `${data.attempt.answered} / ${data.attempt.questions ?? data.attempt.total}` : '—'}</strong></div>
-      </div>
+      <Tiles tiles={[
+        ['Attempt', { submitted: 'Submitted', in_progress: 'In progress' }[data.attempt?.status] || 'Not started'],
+        ['Score', data.attempt ? `${data.attempt.score} / ${data.attempt.total}` : '—'],
+        ['Answered', data.attempt ? `${data.attempt.answered} / ${data.attempt.questions ?? data.attempt.total}` : '—'],
+        ['Time taken', typeof data.attempt?.timeTakenSeconds === 'number' ? durationLabel(data.attempt.timeTakenSeconds) : '—']
+      ]}/>
 
       {showIntegrity && <IntegrityReport integrity={data.integrity} location={data.location}/>}
 
@@ -273,11 +306,7 @@ export function StudentAnalysisModal({ code, registration, onClose, onSaved, sho
             Location checks{' '}
             <InfoTip label="About location checks">Uncertain GPS readings are recorded separately and are not treated as outside the venue.</InfoTip>
           </h2>
-          <div className="analysis-summary">
-            <div><span>In range</span><strong>{data.location.inRange || 0}</strong></div>
-            <div><span>Out of range</span><strong>{data.location.outOfRange || 0}</strong></div>
-            <div><span>Inconclusive</span><strong>{data.location.inconclusive || 0}</strong></div>
-          </div>
+          <Tiles tiles={[['In range', data.location.inRange || 0], ['Out of range', data.location.outOfRange || 0], ['Inconclusive', data.location.inconclusive || 0]]}/>
         </section>
       )}
 

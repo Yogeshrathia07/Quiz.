@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { accounts, blockedEmails, otpCodes, otpSends } from '../db/index.js';
 import { PublicTestError } from '../lib/errors.js';
 import { hmac } from '../lib/crypto.js';
+import { createLimiter, waitWords } from '../lib/security.js';
 import { now } from '../lib/time.js';
 import { sendMail } from '../lib/mailer.js';
 import { cleanText } from '../domain/test-builder.js';
@@ -21,6 +22,10 @@ const PURPOSES = ['signup', 'reset'];
 const EARLIER_CODES_KEPT = 3;
 const MAX_FAILED_LOGINS = 5;
 const LOGIN_LOCK_MINUTES = 15;
+// Wrong passwords from one network, across every account. A whole class signs
+// in from one campus address, so this is generous - it stops a script trying
+// password after password across the college, not a class mistyping.
+const failedFromNetwork = createLimiter({ windowMs: 15 * 60_000, max: 100 });
 const minutesFromNow = (minutes) => new Date(Date.now() + minutes * 60_000);
 const hoursAgo = (hours) => new Date(Date.now() - hours * 60 * 60 * 1000);
 const codeHash = (email, purpose, code) => hmac(`${email}:${purpose}:${code}`, config.sessionSecret);
@@ -31,6 +36,10 @@ async function hashPassword(password) {
   const derived = await scrypt(password, salt, 64);
   return `scrypt$${salt.toString('base64')}$${derived.toString('base64')}`;
 }
+
+/** Compared against when there is no account, so "no such account" takes as long as a wrong password. */
+let decoyHash = null;
+const decoy = async () => { decoyHash ||= await hashPassword(crypto.randomBytes(18).toString('base64url')); return decoyHash; };
 
 async function passwordMatches(password, stored) {
   const [scheme, salt, expected] = String(stored || '').split('$');
@@ -281,6 +290,10 @@ export async function logIn(req, res, raw = {}) {
   const { email, role } = allowedEmail(raw.email);
   const password = String(raw.password ?? '');
   if (!password) throw new PublicTestError(400, 'Enter your password.');
+  if (password.length > 128) throw new PublicTestError(401, 'Wrong email or password.');
+  const network = String(req.ip || '');
+  const wait = failedFromNetwork.waitFor(network);
+  if (wait) throw new PublicTestError(429, `Too many wrong passwords from this network. Try again in ${waitWords(wait)}, or use "Forgot password".`);
   await refuseIfBlocked(email);
   const account = await accounts().findOne({ _id: email });
   if (account?.lockedUntil && new Date(account.lockedUntil) > new Date()) {
@@ -290,12 +303,15 @@ export async function logIn(req, res, raw = {}) {
   if (account && !account.passwordHash) {
     throw new PublicTestError(400, 'This account has no password yet. Use "Forgot password" to set one, or sign in with Microsoft.');
   }
-  if (!account || !(await passwordMatches(password, account.passwordHash))) {
+  if (!account || !(await passwordMatches(password, account ? account.passwordHash : await decoy()))) {
+    failedFromNetwork.hit(network);
     if (account) {
-      const failed = (account.failedLogins || 0) + 1;
-      await accounts().updateOne({ _id: email }, { $set: failed >= MAX_FAILED_LOGINS
-        ? { failedLogins: 0, lockedUntil: minutesFromNow(LOGIN_LOCK_MINUTES) }
-        : { failedLogins: failed } });
+      // Counted in one atomic step, so guesses sent all at once cannot each
+      // read the same count and slip past the limit together.
+      const counted = await accounts().findOneAndUpdate({ _id: email }, { $inc: { failedLogins: 1 } }, { returnDocument: 'after', projection: { failedLogins: 1 } });
+      if ((counted?.failedLogins || 0) >= MAX_FAILED_LOGINS) {
+        await accounts().updateOne({ _id: email }, { $set: { failedLogins: 0, lockedUntil: minutesFromNow(LOGIN_LOCK_MINUTES) } });
+      }
     }
     throw new PublicTestError(401, 'Wrong email or password.');
   }

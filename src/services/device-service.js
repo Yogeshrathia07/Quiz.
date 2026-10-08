@@ -26,6 +26,18 @@ const studentDevice = (device) => ({ kind: device.kind, label: device.label, fac
  * Nothing is written when nothing changed, so a page's reloads cost nothing.
  */
 export async function recordDevice(test, registration, device, stage) {
+  const update = deviceUpdate(registration, device, stage);
+  if (!update) return;
+  await updateRegistration(test.code, registration.id, update);
+  registration.device = update.$set.device;
+}
+
+/**
+ * The write recordDevice makes, or null when nothing changed - for Begin to
+ * fold into the write that creates the paper: one write, not two, when the
+ * whole class presses it at once.
+ */
+export function deviceUpdate(registration, device, stage) {
   const at = now();
   const last = registration.device;
   const sameReport = last && last.kind === device.kind && last.label === device.label && last.stage === stage
@@ -35,7 +47,7 @@ export async function recordDevice(test, registration, device, stage) {
   const newDevice = !lastLogged || lastLogged.kind !== device.kind || lastLogged.label !== device.label;
   const attempt = registration.attempt;
   const switched = stage === 'paper' && attempt?.status === 'in_progress' && last?.kind && last.kind !== device.kind;
-  if (sameReport && fresh && !newDevice) return;
+  if (sameReport && fresh && !newDevice) return null;
 
   const update = {
     $set: {
@@ -54,8 +66,7 @@ export async function recordDevice(test, registration, device, stage) {
     };
   }
   if (Object.keys(push).length) update.$push = push;
-  await updateRegistration(test.code, registration.id, update);
-  registration.device = update.$set.device;
+  return update;
 }
 
 /**

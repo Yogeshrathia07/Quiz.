@@ -1,4 +1,4 @@
-import { hash, hmac, randomId } from '../lib/crypto.js';
+import { hash, hmac, randomId, safeEqual } from '../lib/crypto.js';
 import { iso } from '../lib/time.js';
 
 /**
@@ -41,7 +41,7 @@ export function isFreshQrKey(secret, key, atMs = Date.now()) {
   if (typeof key !== 'string' || !key) return false;
   const current = step(atMs);
   for (let back = 0; back <= QR_STEPS_ACCEPTED; back += 1) {
-    if (keyFor(secret, current - back) === key) return true;
+    if (safeEqual(keyFor(secret, current - back), key)) return true;
   }
   return false;
 }
@@ -58,7 +58,7 @@ export function readPass(secret, pass, atMs = Date.now()) {
   const [expires, id, signature] = String(pass || '').split('.');
   const expiresMs = Number(expires);
   if (!Number.isFinite(expiresMs) || expiresMs <= atMs || !id) return null;
-  return signature === hmac(`pass:${expiresMs}:${id}`, secret) ? id : null;
+  return safeEqual(signature, hmac(`pass:${expiresMs}:${id}`, secret)) ? id : null;
 }
 
 export const isValidPass = (secret, pass, atMs = Date.now()) => readPass(secret, pass, atMs) !== null;

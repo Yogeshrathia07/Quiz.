@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Circle, CircleCheck, Clock, Copy, Download, FileCheck2, Hourglass, IdCard, PenLine, Keyboard, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
+import { AlertTriangle, Check, Circle, CircleCheck, Clock, Copy, Download, FileCheck2, Hourglass, IdCard, PenLine, Laptop, Lock, MapPin, MapPinOff, MonitorSmartphone, MoreVertical, Pause, Play, Repeat2, RotateCcw, Send, ShieldAlert, Smartphone, Tablet, Undo2, UserCheck, UserRound, UserX, WifiOff } from 'lucide-react';
 import { prefetch, useCached } from '../../lib/cache.js';
 import { recordPath as recordAddress } from '../../lib/dashboard-paths.js';
 import { ConfirmDialog } from '../../components/ConfirmDialog.jsx';
+import { PersonLink } from '../../components/PersonLink.jsx';
 import { clockTime, copyText, dateTime, durationLabel, shortDateTime } from '../../lib/format.js';
 import { downloadFile } from '../../lib/api.js';
 import { ActivityLog } from './modals/StudentAnalysisModal.jsx';
@@ -71,14 +72,17 @@ export function Issue({ icon: Icon, tone = 'warn', label, children }) {
   );
 }
 
-/** Name and SAP ID on one line; the email waits in the details. */
-export function StudentIdentity({ registration }) {
+/**
+ * Name and SAP ID on one line; the email waits in the details. The name opens
+ * them under Users - except where a click on it must choose them (`link` false).
+ */
+export function StudentIdentity({ registration, link = true }) {
   const guest = isGuest(registration);
   return (
     <div className="person">
       <span className={`person-avatar${guest ? ' is-guest' : ''}`} aria-hidden="true">{initials(registration.name)}</span>
       <div className="person-detail">
-        <strong>{registration.name}</strong>
+        <strong>{link ? <PersonLink email={registration.email} guest={guest}>{registration.name}</PersonLink> : registration.name}</strong>
         <span className="table-subtext">{isFaculty(registration) ? 'Faculty' : registration.sapId}</span>
       </div>
     </div>
@@ -116,8 +120,7 @@ export const SIGN_LEGEND = [
   { icon: MapPin, tone: 'danger', label: 'Away from the venue (blue: a location exception you gave)' },
   { icon: MapPinOff, tone: 'danger', label: 'Their location could not be checked' },
   { icon: WifiOff, tone: 'warn', text: '1', label: 'Went offline (noted, not counted as leaving), or away from the test right now' },
-  { icon: Clock, tone: 'warn', text: '1', label: 'Answers that arrived late, held on their device by a lost connection' },
-  { icon: Keyboard, tone: 'warn', text: '1', label: 'Keyboard opened another app while typing (not counted as leaving)' }
+  { icon: Clock, tone: 'warn', text: '1', label: 'Answers that arrived late, held on their device by a lost connection' }
 ];
 const paperState = (registration) => (!registration.attemptStatus ? 'not_started'
   : registration.attemptStatus === 'submitted' ? 'submitted'
@@ -179,7 +182,7 @@ export function StudentListRow({ cells, actions, label, onOpen, onWarm }) {
 const recordPath = (code, registration) => recordAddress(code, registration.id);
 
 /** Their whole record (answers, activity, integrity, venue, device, locations) as Excel, from a round green button. */
-function RecordDownload({ test, registration }) {
+export function RecordDownload({ test, registration }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState('');
   const [asking, setAsking] = useState(false);
@@ -456,10 +459,6 @@ function studentParts({ test, registration, act, openSapId, openReopen, isBusy }
       <Issue key="left" icon={serious ? ShieldAlert : AlertTriangle} tone={serious ? 'danger' : 'warn'} label={integrity}>{record.leaveCount}×</Issue>
     ),
     registration.windowCheck === 'declared' && <Issue key="window" icon={AlertTriangle} tone="danger" label="Incognito not verified"/>,
-    // Left while typing and back within moments - most likely the keyboard's own app. Not counted as leaving.
-    record?.flags?.keyboard_app > 0 && (
-      <Issue key="keyboard" icon={Keyboard} tone="warn" label={`Keyboard opened another app while typing ${record.flags.keyboard_app}× (back within 15 s; not counted as leaving)`}>{record.flags.keyboard_app}</Issue>
-    ),
     // Noted to be checked, never counted as leaving: the times are in their activity log.
     offlineNoted(record) > 0 && (
       <Issue key="offline" icon={WifiOff} tone="warn" label={`Went offline ${offlineNoted(record)}× for ${Math.round((record.offline.ms || 0) / 1000)}s in total (not counted as leaving): see their activity log`}>{offlineNoted(record)}</Issue>

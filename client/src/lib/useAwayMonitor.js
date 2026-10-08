@@ -302,9 +302,10 @@ export function useAwayMonitor({ enabled, enforceFullscreen, serverAway, onLeave
 /**
  * A web page cannot stop a screenshot - the operating system takes it - so
  * this does what a page can: notice the usual keys (Print Screen, Win+Shift+S,
- * Cmd+Shift+3/4/5), report them, wipe what Print Screen put on the clipboard,
- * and hide the paper for a moment. Printing is refused outright. On phones the
- * screenshot buttons never reach the page at all, so nothing can stop them.
+ * Cmd+Shift+3/4/5), wipe what Print Screen put on the clipboard, and hide the
+ * paper for a moment. They are not reported: a phone's screenshot buttons and
+ * most shortcuts never reach the page, so a count would only mislead (see
+ * RETIRED_FLAGS in src/domain/integrity.js). Printing is refused outright.
  */
 const isScreenshotKey = (event) => event.key === 'PrintScreen'
   || (event.shiftKey && (event.metaKey || event.getModifierState?.('OS')) && ['s', 'S', '3', '4', '5'].includes(event.key));
@@ -332,7 +333,7 @@ export function useClipboardGuard({ enabled, onFlag, onScreenshot }) {
       shotRef.current?.('capture');
       // Print Screen on Windows copies the screen: overwrite it where allowed.
       navigator.clipboard?.writeText?.('').catch(() => {});
-      flag('screenshot')(event);
+      event.preventDefault();
     };
     // Every PC and Mac screenshot shortcut starts with the Windows / Cmd key,
     // so the paper is hidden the moment it goes down - before the shortcut is
@@ -381,10 +382,6 @@ export function useClipboardGuard({ enabled, onFlag, onScreenshot }) {
  * page. Leaving fullscreen then means holding Esc, which counts as leaving.
  */
 const TYPING_KEYS = new Set(['Backspace', 'Delete', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'Shift', 'CapsLock']);
-export const isDevToolsKey = (event) => event.key === 'F12'
-  || ((event.ctrlKey || event.metaKey) && event.shiftKey && ['i', 'I', 'j', 'J', 'c', 'C'].includes(event.key))
-  || ((event.ctrlKey || event.metaKey) && event.altKey && ['i', 'I', 'j', 'J'].includes(event.key))
-  || ((event.ctrlKey || event.metaKey) && ['u', 'U'].includes(event.key));
 
 // A phone keyboard (Gboard, Samsung) reports every key as "Unidentified",
 // key code 229, and a desktop IME as "Process" while it composes a word.
@@ -400,20 +397,17 @@ export function typingAllowed(event) {
   return event.key.length === 1 || TYPING_KEYS.has(event.key) || isComposingKey(event);
 }
 
-export function useKeyboardLockdown({ enabled, onFlag }) {
-  const flagRef = useRef(onFlag);
-  const lastFlag = useRef(0);
-  flagRef.current = onFlag;
-
+/**
+ * Developer-tools shortcuts are swallowed with every other key, and not
+ * reported: the browser's menu opens them unseen, so a count would mislead
+ * (see RETIRED_FLAGS in src/domain/integrity.js).
+ */
+export function useKeyboardLockdown({ enabled }) {
   useEffect(() => {
     if (!enabled) return undefined;
     const onKey = (event) => {
       if (typingAllowed(event)) return;
       event.preventDefault();
-      if (event.type === 'keydown' && isDevToolsKey(event) && Date.now() - lastFlag.current > 5_000) {
-        lastFlag.current = Date.now();
-        flagRef.current('devtools');
-      }
     };
     const refuse = (event) => {
       const target = event.target;

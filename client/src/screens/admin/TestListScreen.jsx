@@ -245,7 +245,7 @@ export function TestListScreen({ go, showToast }) {
 
   const switcher = (
     <div className="segmented ql-switch" role="radiogroup" aria-label="Which quizzes">
-      {[['created', 'Created by me', tests.filter((test) => !test.archivedAt).length], ['taken', 'Taken by me', taken?.length]].map(([id, label, count]) => (
+      {[['created', 'Created', tests.filter((test) => !test.archivedAt).length], ['taken', 'Taken', taken?.length]].map(([id, label, count]) => (
         <button key={id} type="button" role="radio" aria-checked={view === id} className={view === id ? 'is-on' : ''} onClick={() => choose(id)}>
           {label}{known(count) && <span className="segmented-count">{count}</span>}
         </button>

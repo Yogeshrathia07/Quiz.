@@ -44,5 +44,8 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.1",
     "vite": "^8.3.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

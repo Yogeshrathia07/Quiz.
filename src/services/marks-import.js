@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { PublicTestError } from '../lib/errors.js';
+import { checkZip } from '../lib/zip-guard.js';
 import { isSapId } from '../domain/test-builder.js';
 import { earnedMarks, questionMarks, roundMarks } from '../domain/marks.js';
 import { refuseIfFrozen } from '../domain/freeze.js';
@@ -64,6 +65,8 @@ export async function importMarks(req, code, buffer) {
   if (!buffer?.length) throw new PublicTestError(400, 'Choose the Excel file to upload.');
   const test = await requireOwnedTest(req, code);
   refuseIfFrozen(test, 'upload marks');
+  // Read the file's own table of contents first: one built to unpack to gigabytes is refused before it is unpacked.
+  checkZip(buffer, { refuse: () => new PublicTestError(400, 'That file is not an Excel workbook (.xlsx) this portal can read.') });
   const workbook = new ExcelJS.Workbook();
   try { await workbook.xlsx.load(buffer); } catch {
     throw new PublicTestError(400, 'That file is not an Excel workbook (.xlsx).');

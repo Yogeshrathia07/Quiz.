@@ -3,6 +3,7 @@ import { portalSessions } from '../db/index.js';
 import { hash, randomId } from '../lib/crypto.js';
 import { now } from '../lib/time.js';
 import { mailConfigured } from '../lib/mailer.js';
+import { cookieIsSecure } from '../lib/security.js';
 
 /**
  * Who someone is comes from their email: they log in with email + password
@@ -58,10 +59,11 @@ export const SIGNED_IN_ELSEWHERE = 'signed_in_elsewhere';
 
 const accountSessionEnd = () => new Date(Date.now() + (Number(config.sessionDays) || 30) * 24 * 60 * 60 * 1000);
 
-const cookieOptions = (expiresAt) => ({
+// Secure whenever the page came over https (lib/security.js), so the cookie never travels in clear.
+const cookieOptions = (req, expiresAt) => ({
   httpOnly: true,
   sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
+  secure: cookieIsSecure(req),
   signed: true,
   maxAge: Math.max(0, new Date(expiresAt).getTime() - Date.now())
 });
@@ -95,7 +97,7 @@ export async function issueSession(res, account, expiresAt = null) {
     expiresAt: endsAt,
     revokedAt: null
   });
-  res.cookie(cookieName, token, cookieOptions(endsAt));
+  res.cookie(cookieName, token, cookieOptions(res.req, endsAt));
 }
 
 /**
@@ -137,7 +139,7 @@ export async function portalSessionMiddleware(req, res, next) {
         const update = { lastSeenAt: now() };
         if (!isGuestAccount(session.email)) {
           update.expiresAt = accountSessionEnd();
-          res.cookie(cookieName, token, cookieOptions(update.expiresAt));
+          res.cookie(cookieName, token, cookieOptions(req, update.expiresAt));
         }
         await portalSessions().updateOne({ _id: session._id }, { $set: update });
       }
@@ -192,6 +194,6 @@ export async function logout(req, res) {
   if (token) await portalSessions().updateOne({ tokenHash: hash(token), revokedAt: null }, { $set: { revokedAt: now() } });
   // Same path/security attributes as the issued cookie, without a positive
   // maxAge, so every browser removes the signed session reliably.
-  res.clearCookie(cookieName, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', path: '/' });
+  res.clearCookie(cookieName, { httpOnly: true, sameSite: 'lax', secure: cookieIsSecure(req), path: '/' });
   res.status(204).end();
 }

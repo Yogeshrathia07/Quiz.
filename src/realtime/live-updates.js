@@ -33,6 +33,12 @@ const counters = {
 
 let heartbeat = null;
 
+// One person's open streams. A page needs one; a few tabs or a reconnect
+// overlapping its old socket need a couple more. Past this, the oldest of
+// theirs is closed, so one account cannot take the slots everyone shares.
+const STREAMS_PER_PERSON = 6;
+const streamsByOwner = new Map();
+
 const add = (map, key, client) => {
   const members = map.get(key) || new Set();
   members.add(client);
@@ -64,6 +70,7 @@ function detachClient(client) {
   client.res.off?.('error', client.onClose);
   client.unsubscribe?.();
   clients.delete(client);
+  if (client.owner) remove(streamsByOwner, client.owner, client);
   stopHeartbeatIfIdle();
 }
 
@@ -166,6 +173,9 @@ function rejectStream(res) {
 }
 
 function openStream(req, res, subscribe) {
+  const owner = req.portalUser?._id ? `session:${req.portalUser._id}` : null;
+  const theirs = owner ? streamsByOwner.get(owner) : null;
+  while (theirs && theirs.size >= STREAMS_PER_PERSON) endClient(theirs.values().next().value);
   if (clients.size >= liveStreamLimit()) return rejectStream(res);
 
   res.status(200).set({
@@ -190,7 +200,8 @@ function openStream(req, res, subscribe) {
     onDrain: null,
     onClose: null,
     closed: false,
-    unsubscribe: null
+    unsubscribe: null,
+    owner
   };
   client.unsubscribe = subscribe(client);
   client.onClose = () => detachClient(client);
@@ -198,6 +209,7 @@ function openStream(req, res, subscribe) {
   res.once?.('close', client.onClose);
   res.once?.('error', client.onClose);
   clients.add(client);
+  if (owner) add(streamsByOwner, owner, client);
   // Track the stream before its first write. If the peer drops between
   // flushHeaders() and this retry hint, detachClient must be able to remove
   // it from the global cap instead of leaving a closed socket counted forever.

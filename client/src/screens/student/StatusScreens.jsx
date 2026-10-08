@@ -117,10 +117,12 @@ export function EndLine({ test, brief = false }) {
 /**
  * Before the start. A scheduled test counts down on the server's clock and
  * asks again the moment it reaches zero; one the administrator starts by hand
- * checks every few seconds.
+ * is told of Start by the live stream at once - and while that stream is down
+ * (`live` false), the page asks every few seconds instead, so nobody sits
+ * waiting for a start that has already happened.
  */
-export function WaitingForStart({ test, serverTime, reload }) {
-  usePolling(reload, 25_000, 35_000);
+export function WaitingForStart({ test, serverTime, reload, live = true, venue = null }) {
+  usePolling(reload, live ? 25_000 : 5_000, live ? 35_000 : 9_000);
   const scheduled = test.startMode === 'scheduled' && test.opensAt;
   const { secondsLeft, known } = useCountdown(scheduled ? test.opensAt : null, serverTime);
   const due = scheduled && known && secondsLeft <= 0;
@@ -146,6 +148,7 @@ export function WaitingForStart({ test, serverTime, reload }) {
         </>
       )}
       <p className="help"><EndLine test={test}/></p>
+      {venue}
     </section>
   );
 }

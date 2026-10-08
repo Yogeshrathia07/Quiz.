@@ -13,6 +13,10 @@ import { startScheduler } from './services/scheduler.js';
 import { isLiveStreamRequest, trafficMiddleware } from './services/traffic.js';
 import { closeExportWorkers } from './export/worker-pool.js';
 import { closeLiveUpdates } from './realtime/live-updates.js';
+import { rejectDangerousKeys, requireRealSecret, sameOriginWrites, securityHeaders } from './lib/security.js';
+
+// A deployed server will not start signing cookies with a placeholder secret.
+requireRealSecret();
 
 await initializeCoordination();
 // Index creation and legacy-data repairs are safe to repeat, but they should
@@ -45,19 +49,20 @@ app.use(compression({
     return compression.filter(req, res);
   }
 }));
+// What the page may load, who may frame it, https only once seen (lib/security.js).
+app.use(securityHeaders);
 app.use((_req, res, next) => {
-  res.set({
-    'Referrer-Policy': 'same-origin',
-    'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY',
-    // API responses are never cacheable: an answer, a deadline or a roll call
-    // must always be the live one. Static files override this below.
-    'Cache-Control': 'no-store'
-  });
+  // API responses are never cacheable: an answer, a deadline or a roll call
+  // must always be the live one. Static files override this below.
+  res.set('Cache-Control', 'no-store');
   next();
 });
 app.use(express.json({ limit: '256kb' }));
+// No "$" or "__proto__" keys in a body: no operator injection, no prototype pollution.
+app.use(rejectDangerousKeys);
 app.use(cookieParser(config.sessionSecret));
+// Changes come only from the portal's own pages.
+app.use(sameOriginWrites);
 app.use(trafficMiddleware);
 app.use(portalSessionMiddleware);
 app.use(createApiRouter());
@@ -77,10 +82,25 @@ app.use(express.static(path.join(root, 'client', 'dist'), {
 app.use(express.static(path.join(root, 'public'), { index: false }));
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Endpoint not found.' }));
+// A request the body parser could not read is the browser's mistake, said plainly;
+// any other unexpected error is logged here and never described to the browser.
+const PARSER_ERRORS = {
+  'entity.parse.failed': [400, 'The request could not be read.'],
+  'entity.too.large': [413, 'The request is too large.'],
+  'encoding.unsupported': [415, 'The request uses an unsupported encoding.'],
+  'charset.unsupported': [415, 'The request uses an unsupported character set.']
+};
 app.use((error, _req, res, _next) => {
-  const status = error instanceof PublicTestError ? error.status : 500;
+  if (res.headersSent) return;
+  const parser = PARSER_ERRORS[error?.type];
+  if (parser) return res.status(parser[0]).json({ error: parser[1] });
+  const isPublic = error instanceof PublicTestError;
+  const status = isPublic ? error.status : 500;
   if (status >= 500) console.error(error);
-  res.status(status).json({ error: error.message || 'Unexpected server error.', ...(error.code && status < 500 ? { code: error.code } : {}) });
+  res.status(status).json({
+    error: isPublic ? error.message || 'Unexpected server error.' : 'Unexpected server error. Please try again.',
+    ...(isPublic && error.code && status < 500 ? { code: error.code } : {})
+  });
 });
 
 // A class submits in the same instant. Room for that many new connections at

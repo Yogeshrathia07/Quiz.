@@ -219,9 +219,9 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
             {user.hasAccount === false && <InfoPill>Account deleted</InfoPill>}
           </p>
         </div>
-        <div className="user-actions">
+        <div className="user-actions user-buttons">
           {blocked
-            ? <button className="button button-success button-small swap-button" type="button" disabled={busy} onClick={onUnblock}><CircleCheck size={15} aria-hidden="true"/>Unblock</button>
+            ? <button className="button button-unblock button-small swap-button" type="button" disabled={busy} onClick={onUnblock}><CircleCheck size={15} aria-hidden="true"/>Unblock</button>
             : <button className="button button-warning button-small swap-button" type="button" disabled={busy || isSelf} onClick={onBlock} title={isSelf ? 'You cannot block yourself' : undefined}><Ban size={15} aria-hidden="true"/>Block</button>}
           {user.hasAccount !== false && (
             <button className="button button-danger button-small" type="button" disabled={busy || isSelf} onClick={onDelete} title={isSelf ? 'You cannot delete yourself' : undefined}><Trash2 size={15} aria-hidden="true"/>Delete</button>
@@ -291,6 +291,8 @@ export function UserDetailModal({ account, currentEmail, isSelf, isBlocked, busy
           registration={{ id: paper.registrationId, name: user.name }}
           // Your own test: the full view, short answers can be marked. Someone else's: read-only.
           readOnly={paper.ownerEmail !== currentEmail}
+          // Already on their page under Users: their name has nowhere else to go.
+          linkPerson={false}
           analysisPath={paper.ownerEmail !== currentEmail ? `${userPath(email)}/tests/${encodeURIComponent(paper.code)}/registrations/${encodeURIComponent(paper.registrationId)}/analysis` : null}
           onClose={closePaper}
           onSaved={() => load().catch(() => {})}

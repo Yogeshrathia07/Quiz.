@@ -735,7 +735,7 @@ th.cell-num{text-align:right}
 [data-area] .dashboard-tabs .dashboard-tab.is-selected .tab-count{background:#1598D1;color:#fff}
 [data-area] .dashboard-tabs .dashboard-tab:has(input:focus-visible){outline:2px solid #52C8F4;outline-offset:2px}
 @media (max-width:680px){
-  [data-area] .dashboard-tabs{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  [data-area] .dashboard-tabs{width:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr))}
   [data-area] .dashboard-tabs .dashboard-tab{min-width:0;padding:0 8px;gap:5px}
   [data-area] .dashboard-tabs .tab-label{overflow:hidden;text-overflow:ellipsis}
 }
@@ -931,16 +931,6 @@ th.cell-num{text-align:right}
 [data-area] .banner-extend{margin-top:10px}
 [data-area] .banner-extend button{min-height:30px;padding:0 12px;border:0;border-radius:999px;background:var(--bg-input);color:var(--text);font-size:.8rem}
 [data-area] .banner-extend button:hover:not(:disabled){background:#474C52}
-/* The bar's buttons are one size: equal columns, as wide as the widest. */
-[data-area] .banner-actions{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);align-items:center;gap:10px}
-[data-area] .banner-actions .action-menu{display:grid}
-[data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{width:100%;justify-content:center;gap:8px}
-[data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{min-height:42px;height:42px;padding-left:18px;padding-right:18px;font-size:.93rem}
-@media (max-width: 760px){
-  /* Phone: the main action across the top, Edit and More side by side, equal. */
-  [data-area] .banner-actions{width:100%;grid-auto-flow:row;grid-template-columns:1fr 1fr;grid-auto-columns:auto}
-  [data-area] .banner-actions>.button:first-child:not(:only-of-type){grid-column:1 / -1}
-}
 
 
 /* Test / Students / Results on a phone: no radio circles (they squashed
@@ -971,8 +961,7 @@ th.cell-num{text-align:right}
 
 /* Very narrow screens (a small phone, or a narrow window): nothing may push
    past its card, tabs become icon + count, and "Edit test" becomes "Edit". */
-[data-area] .overview-panel>*,[data-area] .banner-text,[data-area] .banner-actions>*{min-width:0}
-[data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{white-space:nowrap}
+[data-area] .overview-panel>*,[data-area] .banner-text{min-width:0}
 [data-area] .dashboard-tabs .tab-icon{display:none;flex:0 0 auto}
 @media (max-width:400px){
   [data-area] .dashboard-tabs .tab-icon{display:block}
@@ -981,7 +970,6 @@ th.cell-num{text-align:right}
   [data-area] .label-more{display:none}
   [data-area] .overview-panel{padding:12px}
   [data-area] .schedule-banner{padding:14px 14px 14px 16px}
-  [data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{padding-left:10px;padding-right:10px}
   [data-area] .dashboard-head h1{font-size:1.3rem}
 }
 
@@ -998,26 +986,12 @@ th.cell-num{text-align:right}
 [data-area] .dashboard-head .dashboard-tabs{flex:0 0 auto}
 @media (max-width:1024px){
   [data-area] .dashboard-head{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
-  [data-area] .dashboard-head .dashboard-tabs{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));box-sizing:border-box}
+  [data-area] .dashboard-head .dashboard-tabs{width:100%;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));box-sizing:border-box}
   [data-area] .dashboard-head .dashboard-tab{justify-content:center;min-width:0}
 }
 
-/* The status bar arranges its buttons by its OWN width, not the screen's: in
-   the two-column dashboard (status card + QR) it can be narrow on a wide
-   screen. Too narrow for three in a row, the main action takes the full row
-   and Edit / More share the next; narrower still, "Edit test" says "Edit". */
+/* The status bar is a container: its buttons arrange by its own width (the overview, below). */
 [data-area] .schedule-banner{container-type:inline-size}
-/* Too narrow for words: one row of equal round buttons, each just its icon -
-   its name stays its tooltip and what a screen reader says. */
-@container (max-width: 620px){
-  [data-area] .banner-actions{display:flex;flex-wrap:nowrap;width:100%;gap:10px}
-  [data-area] .banner-actions .action-menu{display:block}
-  [data-area] .banner-actions>.button,[data-area] .banner-actions .action-menu>.button{flex:none;width:44px;min-width:44px;max-width:44px;height:44px;min-height:44px;padding:0;gap:0;border-radius:50%;justify-content:center}
-  [data-area] .banner-actions :is(.toolbar-text,.toolbar-chevron){display:none}
-}
-@container (max-width: 340px){
-  [data-area] .label-more{display:none}
-}
 
 /* ------------------------------------------------ GUI audit fixes (phone / tablet) */
 
@@ -1415,26 +1389,85 @@ th.cell-num{text-align:right}
    the buttons under them. Each column scrolls on its own, so a long question
    never pushes its answers away. The card itself steps aside (display:
    contents) so its two halves sit straight in these columns, lined up. */
-@media (min-width:1024px), (orientation:landscape) and (max-height:540px){
+/* Hide the chrome, not the scrolling: wheel, touch, keyboard and programmatic
+   scrolling still work in the paper, numbered rail and notices. */
+.exam-screen .exam-body,.exam-screen .q-dots,.exam-screen .exam-notices,
+.exam-screen .q-ask,.exam-screen .q-answer,
+html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){scrollbar-width:none;-ms-overflow-style:none}
+.exam-screen .exam-body::-webkit-scrollbar,.exam-screen .q-dots::-webkit-scrollbar,
+.exam-screen .exam-notices::-webkit-scrollbar,.exam-screen .q-ask::-webkit-scrollbar,
+.exam-screen .q-answer::-webkit-scrollbar,
+html:has(.exam-screen.is-list)::-webkit-scrollbar,body:has(.exam-screen.is-list)::-webkit-scrollbar{display:none;width:0;height:0}
+.exam-splitter{display:none}
+@media (min-width:1024px), (orientation:landscape) and (min-width:560px) and (max-height:540px){
   .shell.is-exam .main{width:calc(100% - 48px);max-width:2000px}
   .exam-screen:not(.is-list){
-    position:relative;display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
+    position:relative;display:grid;grid-template-columns:minmax(0,var(--exam-question-fr,53fr)) 24px minmax(0,var(--exam-answer-fr,47fr));
     grid-template-rows:auto auto minmax(0,1fr) auto;
-    grid-template-areas:"head dots" "ask notices" "ask answer" "ask foot";column-gap:20px;row-gap:0
+    grid-template-areas:"head head dots" "ask divider notices" "ask divider answer" "ask divider foot";column-gap:0;row-gap:0
   }
+  .exam-screen:not(.is-list)>.exam-splitter{
+    grid-area:divider;position:relative;z-index:2;display:flex;align-items:center;justify-content:center;
+    min-width:0;min-height:0;cursor:col-resize;touch-action:none;user-select:none;outline:none
+  }
+  /* The slider between the question and the answers, the same on a phone and
+     a computer: one small rounded bar in the middle of the gap - no outline,
+     padding or margin - in a muted grey that sits quietly in the dark page, to
+     take hold of and drag. Shown as the paper opens, then faded away; back
+     under the mouse, while dragged, or reached with Tab - a little brighter
+     and wider under the mouse. */
+  .exam-splitter-handle{
+    display:block;width:5px;height:36px;margin:0;padding:0;border:0;border-radius:999px;background:#5C636A;
+    pointer-events:none;transition:background .15s,transform .15s;animation:exam-splitter-fade 2.8s ease-out both
+  }
+  @keyframes exam-splitter-fade{0%,45%{opacity:1}100%{opacity:0}}
+  @media (prefers-reduced-motion:reduce){
+    .exam-splitter-handle{animation:none;opacity:.2}
+  }
+  @media (hover:hover){
+    .exam-splitter:hover .exam-splitter-handle{animation:none;opacity:1;background:#8A949B;transform:scaleX(1.3)}
+  }
+  .exam-splitter:focus-visible .exam-splitter-handle,.exam-splitter.is-dragging .exam-splitter-handle{animation:none;opacity:1;background:#8A949B}
+  .exam-splitter:focus-visible .exam-splitter-handle{outline:2px solid var(--primary);outline-offset:3px}
+  /* The leaving warning (⚠) at the start of the title line: that line ends
+     where the question does, so at its end the sign moved with the slider. */
+  .exam-screen:not(.is-list) .exam-head-top .exam-integrity{order:-1}
+  .exam-screen:not(.is-list) .exam-integrity-pop::before{left:11px;right:auto}
   .exam-screen:not(.is-list)>.exam-head{grid-area:head;align-self:end;margin-bottom:14px}
-  .exam-screen:not(.is-list)>.q-dots{grid-area:dots;align-self:end;flex-wrap:wrap;align-content:flex-end;max-height:84px;overflow-y:auto;margin-bottom:14px}
+  /* Rows from the top: lined up from the bottom, the first rows overflowed upwards, out of reach. */
+  .exam-screen:not(.is-list)>.q-dots{grid-area:dots;align-self:end;flex-wrap:wrap;align-content:flex-start;max-height:84px;overflow-y:auto;margin-bottom:14px}
   .exam-screen:not(.is-list)>.exam-notices{grid-area:notices;max-height:30dvh;overflow-y:auto;margin-bottom:10px}
   .exam-screen:not(.is-list)>.exam-foot{grid-area:foot;margin-top:12px;gap:10px}
   .exam-screen:not(.is-list)>.exam-body,.exam-screen:not(.is-list) .q-card{display:contents}
   .exam-screen:not(.is-list) .q-ask{grid-area:ask}
   .exam-screen:not(.is-list) .q-answer{grid-area:answer}
-  .exam-screen:not(.is-list) .q-ask,.exam-screen:not(.is-list) .q-answer{min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:22px 24px;border-radius:var(--r-lg);background:var(--bg-card)}
+  .exam-screen:not(.is-list) .q-ask,.exam-screen:not(.is-list) .q-answer{min-width:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:22px 24px;border-radius:var(--r-lg);background:var(--bg-card)}
   .exam-screen:not(.is-list) .q-answer .q-hint{margin-top:0}
   .exam-screen:not(.is-list) .q-prompt{font-size:1.15rem}
   /* The picture as big as the question's column and the screen's height allow; a tap opens it bigger still. */
   .exam-screen:not(.is-list) .q-ask .q-image-button{width:min(100%,var(--q-image-width),calc(max(140px,100dvh - 330px) * var(--q-image-r)))}
   .exam-screen:not(.is-list) .exam-submit{max-width:none}
+}
+/* Desktop paper: question numbers form a slim rail, with the prompt beside
+   them and answers/actions in their own column. Touch tablets and the
+   existing phone layouts keep the layout above. */
+@media (min-width:1200px) and (min-height:600px) and (hover:hover) and (pointer:fine){
+  .exam-screen:not(.is-list){
+    grid-template-columns:76px minmax(0,var(--exam-question-fr,53fr)) 24px minmax(0,var(--exam-answer-fr,47fr));
+    grid-template-areas:"head head head head" "dots ask divider notices" "dots ask divider answer" "dots ask divider foot"
+  }
+  .exam-screen:not(.is-list)>.exam-head{align-self:stretch}
+  .exam-screen:not(.is-list)>.q-dots{
+    display:flex;flex-direction:column;align-items:center;align-self:stretch;
+    flex-wrap:nowrap;align-content:initial;justify-content:flex-start;
+    width:60px;min-width:0;min-height:0;max-height:none;gap:5px;
+    margin:0;padding:10px 6px;border-radius:var(--r-lg);
+    overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;
+    background:var(--bg-card)
+  }
+  .exam-screen:not(.is-list)>.q-dots .q-dot{display:grid;place-items:center;flex:0 0 36px;width:36px;height:36px}
+  .exam-screen:not(.is-list)>.exam-notices{min-width:0}
+  .exam-screen:not(.is-list) .q-ask,.exam-screen:not(.is-list) .q-answer{min-width:0}
 }
 /* A big screen: the words a size up, so they are read easily from a little further back. */
 @media (min-width:1400px) and (min-height:760px){
@@ -1444,9 +1477,9 @@ th.cell-num{text-align:right}
   .exam-screen:not(.is-list) .exam-heading{font-size:1.5rem}
 }
 /* A phone held sideways: the same columns, tighter. */
-@media (orientation:landscape) and (max-height:540px){
+@media (orientation:landscape) and (min-width:560px) and (max-height:540px){
   .shell.is-exam .main{width:calc(100% - 20px);padding-top:calc(8px + env(safe-area-inset-top));padding-bottom:calc(8px + env(safe-area-inset-bottom))}
-  .exam-screen:not(.is-list){column-gap:14px;height:calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
+  .exam-screen:not(.is-list){height:calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom))}
   .exam-screen:not(.is-list)>.exam-head{gap:4px;margin-bottom:8px}
   .exam-screen:not(.is-list)>.q-dots{flex-wrap:nowrap;max-height:none;overflow-x:auto;overflow-y:hidden;margin-bottom:8px;scrollbar-width:none}
   .exam-screen:not(.is-list)>.q-dots::-webkit-scrollbar{display:none}
@@ -1468,7 +1501,7 @@ th.cell-num{text-align:right}
 /* × and ⋮: one size, one line - the name row's. */
 .student-analysis-sheet.student-modal>.modal-close{top:24px;right:24px;width:40px;min-width:40px;height:40px;min-height:40px}
 /* The students bar: before, search (dropping down the matches), after, Filter & sort, where this one is. */
-.student-nav{display:flex;align-items:center;flex:none;gap:8px;min-height:40px;margin:0 0 16px;padding:0 52px 14px 0;border-bottom:1px solid var(--border)}
+.student-nav{display:flex;align-items:center;flex:none;gap:8px;min-height:40px;margin:0 0 16px;padding:0 50px 14px 0;border-bottom:1px solid var(--border)}
 .student-nav .student-nav-step{flex:none;width:40px;min-width:40px;height:40px;min-height:40px;border:1px solid var(--border);background:transparent;color:var(--text)}
 .student-nav .student-nav-step:hover:not(:disabled){background:var(--bg-raised)}
 .student-nav .student-nav-step:disabled{opacity:.35}
@@ -1485,6 +1518,15 @@ th.cell-num{text-align:right}
 .student-picker-states .state-chip{width:24px;height:24px}
 .student-picker-empty{color:var(--text-2);cursor:default}
 .student-nav-count{margin-left:auto;color:var(--text-2);font-size:.82rem;font-weight:650;white-space:nowrap}
+/* On to a handed-in paper's answers and marks: beside the ×, one size, as in the review and the activity log (review.css). */
+.student-nav .sheet-switch{flex:none;align-self:flex-start;width:184px;height:40px;min-height:40px;padding:0 14px;justify-content:center;gap:7px;white-space:nowrap}
+/* Up to 760px, the review's frame too (review.css): 10px in from every edge over the blurred page, 16px inside, the × 16px in. */
+@media (max-width:760px){
+  .qr-preview-overlay:has(.student-modal){padding:10px}
+  .student-analysis-sheet.student-modal{width:100%;height:calc(100dvh - 20px);padding:16px;border-radius:16px}
+  .student-analysis-sheet.student-modal>.modal-close{top:16px;right:16px}
+  .student-nav .sheet-switch{width:92px;padding:0 10px;gap:6px}
+}
 .student-modal-empty{display:grid;justify-items:center;gap:8px;margin:auto;text-align:center}
 .student-modal-empty p{margin:0;color:var(--text-2)}
 .student-modal-head{display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;flex:none;gap:12px;min-height:40px;margin:0 0 12px}
@@ -1508,9 +1550,6 @@ th.cell-num{text-align:right}
 /* A list scrolled to its end stops there: the page behind never takes over the scroll. */
 .qr-preview-overlay,.student-modal .student-part,.student-modal .activity-log.is-bare ol,.student-modal .loc-list,.student-picker-list{overscroll-behavior:contain}
 @media (max-width:600px){
-  .qr-preview-overlay:has(.student-modal){padding:0}
-  .student-analysis-sheet.student-modal{width:100%;height:100dvh;max-height:none;padding:16px;border-radius:0}
-  .student-analysis-sheet.student-modal>.modal-close{top:16px;right:16px}
   .student-modal-head{flex-wrap:nowrap}
   /* Two lines: ‹ 3 of 12 › and the Filter button beside the ×, then the search
      across the whole width - room to type a name, and the matches under it as wide. */
@@ -1521,6 +1560,10 @@ th.cell-num{text-align:right}
   .student-nav-count{grid-area:count;margin:0;min-width:64px;text-align:center;font-variant-numeric:tabular-nums}
   .student-nav .filter-trigger-label,.student-nav .toolbar-chevron{display:none}
   .student-nav .filter-menu{grid-area:filter}
+  /* Answers & marks where the review keeps its switch - beside the × - and Filter beside the search. */
+  .student-nav.has-switch{grid-template-columns:40px auto 40px minmax(0,1fr) 92px 44px;grid-template-areas:"prev count next . switch ." "pick pick pick pick pick filter";column-gap:6px}
+  .student-nav.has-switch .student-nav-count{min-width:0}
+  .student-nav .sheet-switch{grid-area:switch;align-self:start;width:92px}
   .student-nav .filter-trigger{width:40px;min-width:40px;padding:0;justify-content:center}
   .student-picker{grid-area:pick;max-width:none}
   .student-picker .text-input{min-height:44px;font-size:1rem}
@@ -1543,7 +1586,6 @@ th.cell-num{text-align:right}
 
 /* Tests: what you created, or - once you have sat someone else's - what you took. */
 .ql-switch{justify-self:start;align-self:start;width:max-content;margin:0}
-.ql-taken{max-width:760px}
 @media (max-width:560px){
   .ql-switch{display:grid;grid-template-columns:1fr 1fr;justify-self:stretch;width:100%}
 }
@@ -1560,13 +1602,26 @@ th.cell-num{text-align:right}
 .my-score span.is-mid{color:var(--warn)}
 .my-score span.is-low{color:var(--bad)}
 
-/* Tablet and laptop: the three numbers down the side, the tests beside them. */
+/* My results' (and Taken's) search and Filter button, above the lists. */
+.my-toolbar{margin:0 0 18px}
+
+/* Laptops and wider: the three numbers as tiles across the top, each with its
+   icon; then each test a card of its own, one under the other, each the
+   list's full width - their columns still in line (the subgrid above). A
+   teacher's Taken spans the page, in line with its heading and Created. */
 @media (min-width:900px){
-  .my-dash,.ql-taken{max-width:1040px}
-  .my-tests:has(> .my-stats){display:grid;grid-template-columns:220px minmax(0,1fr);gap:24px;align-items:start}
-  .my-tests>.my-stats{position:sticky;top:76px;grid-template-columns:1fr;margin:30px 0 0;padding:4px 0}
-  .my-tests>.my-stats div{padding:14px 18px;text-align:left}
-  .my-tests>.my-stats div+div{border-left:0;border-top:1px solid var(--border)}
+  .my-dash{max-width:1040px}
+  .my-stats{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 26px;padding:0;background:none;border-radius:0}
+  .my-stats div{position:relative;display:grid;align-content:center;min-height:78px;padding:14px 18px 14px 76px;border-radius:var(--r-lg);background:var(--bg-card);text-align:left}
+  .my-stats div+div{border-left:0}
+  .my-stats dt{font-size:.8rem}
+  .my-stats dd{font-size:1.5rem}
+  .my-stats .my-stat-icon{display:grid}
+  .card.my-list{row-gap:12px;padding:0;border:0;border-radius:0;background:none;box-shadow:none;overflow:visible}
+  .card.my-list>.my-row{min-height:84px;padding:14px 16px 14px 18px;border-radius:var(--r-lg);background:var(--bg-card);transition:background .15s}
+  .card.my-list>.my-row+.my-row{border-top:0}
+  .card.my-list>.my-row:hover{background:var(--bg-raised)}
+  .my-section{margin:0 0 26px}
 }
 
 /* A handed-in paper: the score, then every answer on the page - no download needed. */
@@ -1670,16 +1725,6 @@ th.cell-num{text-align:right}
 .result-heading{margin:0;font-size:1.3rem;line-height:1.3;overflow-wrap:anywhere}
 .result-when{margin:6px 0 0;color:var(--text-2);font-size:.82rem}
 .result-side>.notice,.result-side>.help{margin:0}
-.result-score-block{display:grid;justify-items:center;gap:18px}
-.score-ring{position:relative;width:150px;aspect-ratio:1}
-.score-ring svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}
-.score-ring circle{fill:none;stroke-width:8}
-.score-ring-track{stroke:var(--bg-raised)}
-.score-ring-fill{stroke:var(--primary);stroke-linecap:round;transition:stroke-dasharray .6s ease}
-.score-ring-text{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:4px}
-.score-ring-text strong{color:var(--text);font-size:2.2rem;font-weight:750;line-height:1;font-variant-numeric:tabular-nums}
-.score-ring-text small{margin-left:1px;color:var(--text-2);font-size:.48em;font-weight:650}
-.score-ring-text>span{color:var(--text-2);font-size:.84rem;font-weight:700}
 .result-tally{--tile:80px;--gap:8px;display:flex;flex-wrap:wrap;justify-content:center;gap:var(--gap);width:100%;margin:0}
 /* As many to a row as fit, all one width; one left over on a row of its own sits in the middle. */
 .result-tally div{flex:1 0 var(--tile);min-width:0;max-width:calc(50% - var(--gap) / 2);padding:9px 6px;border-radius:12px;background:var(--bg-raised);text-align:center}
@@ -1695,18 +1740,10 @@ th.cell-num{text-align:right}
   /* The narrow card beside the answers: four numbers as two rows of two, never three and one. */
   .result-layout.has-review .result-tally:has(>:nth-child(4)):not(:has(>:nth-child(5))) div{flex-basis:calc(50% - 4px)}
 }
-@media (min-width:600px) and (max-width:1023px){
-  .result-score-block{grid-template-columns:auto minmax(0,1fr);justify-items:stretch;align-items:center;gap:24px}
-  .score-ring{width:128px}
-}
 @media (max-width:599px){
   .result-side,.result-main{padding:16px}
   .result-side{gap:16px}
   .result-heading{font-size:1.15rem}
-  .result-score-block{grid-template-columns:auto minmax(0,1fr);justify-items:stretch;align-items:center;gap:16px}
-  .score-ring{width:104px}
-  .score-ring-text strong{font-size:1.6rem}
-  .score-ring-text>span{font-size:.76rem}
   .result-tally{--tile:78px;--gap:6px}
   .result-tally div{padding:8px 4px}
   .result-tally dd{font-size:1.1rem}
@@ -1896,3 +1933,1022 @@ th.cell-num{text-align:right}
   .user-tests .user-test{grid-template-columns:36px minmax(0,1fr) auto auto 12px;gap:8px;padding:10px 8px 10px 10px}
   .user-test-download{width:36px;height:36px}
 }
+
+/* Warning (Block) and danger (Delete) buttons: outlined at rest, a tint of
+   their colour under the pointer, solid while pressed. The ✕ that closes a
+   window: a dark circle with a red ✕, tinted on hover, solid red pressed. */
+.button.button-warning,.students-card .table-actions .button-warning{background:transparent;border:1px solid #E6BF24;color:#E6BF24;box-shadow:none}
+.button.button-warning:hover:not(:disabled),.students-card .table-actions .button-warning:hover:not(:disabled){background:rgba(230,191,36,.18);border-color:#E6BF24;color:#F2CC33}
+.button.button-warning:active:not(:disabled),.students-card .table-actions .button-warning:active:not(:disabled){background:#E6BF24;border-color:#E6BF24;color:#1E2124}
+.button.button-danger,.students-card .table-actions .button-danger,.button.icon-button.button-danger,.icon-button.button-danger{background:transparent;border:1px solid #E0505B;color:#F0606A;box-shadow:none}
+.button.button-danger:hover:not(:disabled),.students-card .table-actions .button-danger:hover:not(:disabled),.button.icon-button.button-danger:hover:not(:disabled),.icon-button.button-danger:hover:not(:disabled){background:rgba(224,80,91,.2);border-color:#E0505B;color:#FF7A82}
+.button.button-danger:active:not(:disabled),.students-card .table-actions .button-danger:active:not(:disabled),.button.icon-button.button-danger:active:not(:disabled),.icon-button.button-danger:active:not(:disabled){background:#D23847;border-color:#D23847;color:#FFFFFF}
+.button.icon-button.modal-close,.filter-panel-head .filter-close{background:#33373B;border-color:transparent;color:#F0606A;box-shadow:none}
+.button.icon-button.modal-close:hover:not(:disabled),.filter-panel-head .filter-close:hover{background:rgba(224,80,91,.24);border-color:transparent;color:#FF7A82}
+.button.icon-button.modal-close:active:not(:disabled),.filter-panel-head .filter-close:active{background:#D23847;border-color:transparent;color:#FFFFFF}
+
+/* The Users section's buttons: View (blue) and Unblock (green) in the same
+   way as Block and Delete - outlined, tinted under the pointer, solid while
+   pressed. One size for all of them, whatever they say and whatever state
+   they are in (the border is there in every state, so nothing moves). */
+.button.button-view{background:transparent;border:1px solid #1598D1;color:#3FB0E6;box-shadow:none}
+.button.button-view:hover:not(:disabled){background:rgba(21,152,209,.2);border-color:#1598D1;color:#5CC1F0}
+.button.button-view:active:not(:disabled){background:#1598D1;border-color:#1598D1;color:#FFFFFF}
+.button.button-unblock,.students-card .table-actions .button-unblock{background:transparent;border:1px solid #1BA566;color:#2FC27D;box-shadow:none}
+.button.button-unblock:hover:not(:disabled),.students-card .table-actions .button-unblock:hover:not(:disabled){background:rgba(27,165,102,.2);border-color:#1BA566;color:#45D38F}
+.button.button-unblock:active:not(:disabled),.students-card .table-actions .button-unblock:active:not(:disabled){background:#1BA566;border-color:#1BA566;color:#FFFFFF}
+.user-buttons{display:flex;flex-wrap:nowrap;gap:8px}
+.students-card .table-actions.user-buttons{justify-content:flex-end}
+.user-buttons .button{flex:none;gap:7px;width:108px;min-width:108px;height:40px;min-height:40px;padding:0 12px;font-size:.88rem;justify-content:center;white-space:nowrap}
+.user-buttons .button svg{flex:none}
+.user-buttons .button:disabled{opacity:.4}
+/* Pressing turns them solid; they do not shrink, so the size holds in every state. */
+.user-buttons .button:active:not(:disabled){transform:none}
+/* Narrow laptops: the words a touch smaller. Tablets showing the table:
+   too narrow for three worded buttons beside a person, so each is its icon
+   in one round button (the word is its tooltip and what a screen reader says). */
+@media (min-width:1101px) and (max-width:1240px){
+  .user-buttons .button{width:96px;min-width:96px;padding:0 10px}
+}
+@media (min-width:761px) and (max-width:1100px){
+  .students-card .user-buttons .button{width:42px;min-width:42px;height:42px;min-height:42px;padding:0;border-radius:50%}
+  .students-card .user-buttons .button-label{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+}
+/* Phones and tablets, where each person is a card: the buttons share its width equally. */
+@media (max-width:760px){
+  .students-card .table-actions.user-buttons,.user-actions.user-buttons{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;width:100%;justify-content:stretch}
+  .user-buttons .button{width:100%;min-width:0;height:44px;min-height:44px}
+  /* In a person's window the heading leaves room for ✕; the buttons, a line below it, take the whole width. */
+  .user-head .user-actions.user-buttons{width:calc(100% + 44px);margin-right:-44px}
+}
+/* Users tables: a long email or "blocked by" address wraps instead of pushing the table wider than its card. */
+.users-blocked .live-table td,.students-card .users-row-open td[data-label="Person"]{white-space:normal}
+.users-blocked td[data-label="Email"] strong,.users-blocked .table-subtext,.users-row-open td[data-label="Person"] .table-subtext{overflow-wrap:anywhere}
+
+/* Very narrow screens (a small phone, a narrow window): what does not fit
+   gives way - the SAP ID beside an email, the tiles' icons - and what
+   matters takes a line of its own instead of being squeezed. */
+@media (max-width:420px){
+  .students-card .users-row-open td[data-label="Person"] .table-subtext{white-space:normal;overflow-wrap:anywhere}
+  /* Narrow: the email goes first - the SAP ID is short and stays; narrower still, just the name. */
+  .users-row-open .user-email{display:none}
+  .users-row-open .user-sap-inline::before{content:none}
+  .stat-tiles{grid-auto-flow:row;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}
+  .stat-tile{min-width:0}
+  /* An odd one out at the end (5 tiles in 2 columns) takes the whole row, so the grid ends square. */
+  .stat-tiles>.stat-tile:last-child:nth-child(odd){grid-column:1/-1}
+  [data-area] .students-toolbar .controls{flex-wrap:wrap}
+  [data-area] .students-toolbar .controls>.search-field{flex:1 1 100%;width:auto;max-width:none}
+  /* A person's window: the search on its own line, the day under it; each test in two lines. */
+  .user-tests-toolbar{flex-wrap:wrap}
+  .user-tests-toolbar>.text-input{flex:1 1 100%}
+  .user-test-date{flex:1 1 auto;justify-content:center}
+  .user-tests .user-test{grid-template-columns:36px minmax(0,1fr) auto;grid-template-areas:"open open go" "dl score info";gap:8px 10px;padding:10px 10px 10px 12px}
+  .user-tests .user-test .user-test-download{grid-area:dl;align-self:center}
+  .user-tests .user-test .user-test-open{grid-area:open}
+  .user-tests .user-test .user-test-score{grid-area:score;justify-items:start}
+  .user-tests .user-test:not(:has(.download-round)) .user-test-score{grid-area:auto;grid-row:2;grid-column:1/3}
+  .user-tests .user-test .info-tip{grid-area:info;justify-self:end}
+  .user-tests .user-test .user-test-go{grid-area:go;justify-self:end}
+  .user-head .user-who p{overflow-wrap:anywhere}
+}
+@media (max-width:340px){
+  .users-row-open td[data-label="Person"] .table-subtext{display:none}
+}
+@media (max-width:360px){
+  .stat-tile .stat-tile-icon{display:none}
+  .stat-tile{grid-template-columns:minmax(0,1fr);padding:10px 12px}
+}
+
+.user-sap-inline::before{content:" · "}
+
+/* At rest outlined; under the pointer filled with the button's colour; while
+   pressed the outline brightens with a soft ring of its colour (on a phone,
+   with no pointer, a tap shows the ring). The size never changes. */
+.button.button-view:hover:not(:disabled){background:#1598D1;border-color:#1598D1;color:#FFFFFF;box-shadow:none}
+.button.button-warning:hover:not(:disabled),.students-card .table-actions .button-warning:hover:not(:disabled){background:#E6BF24;border-color:#E6BF24;color:#1E2124;box-shadow:none}
+.button.button-danger:hover:not(:disabled),.students-card .table-actions .button-danger:hover:not(:disabled),.button.icon-button.button-danger:hover:not(:disabled),.icon-button.button-danger:hover:not(:disabled){background:#D23847;border-color:#D23847;color:#FFFFFF;box-shadow:none}
+.button.button-unblock:hover:not(:disabled),.students-card .table-actions .button-unblock:hover:not(:disabled){background:#1BA566;border-color:#1BA566;color:#FFFFFF;box-shadow:none}
+.button.button-view:active:not(:disabled){background:rgba(21,152,209,.06);border-color:#3FB0E6;color:#6CCBF5;box-shadow:0 0 0 3px rgba(21,152,209,.22),0 0 14px rgba(21,152,209,.28)}
+.button.button-warning:active:not(:disabled),.students-card .table-actions .button-warning:active:not(:disabled){background:rgba(230,191,36,.06);border-color:#F2CC33;color:#FFD84D;box-shadow:0 0 0 3px rgba(230,191,36,.2),0 0 14px rgba(230,191,36,.26)}
+.button.button-danger:active:not(:disabled),.students-card .table-actions .button-danger:active:not(:disabled),.button.icon-button.button-danger:active:not(:disabled),.icon-button.button-danger:active:not(:disabled){background:rgba(224,80,91,.06);border-color:#F0606A;color:#FF8A91;box-shadow:0 0 0 3px rgba(224,80,91,.2),0 0 14px rgba(224,80,91,.26)}
+.button.button-unblock:active:not(:disabled),.students-card .table-actions .button-unblock:active:not(:disabled){background:rgba(27,165,102,.06);border-color:#2FC27D;color:#5BDB9E;box-shadow:0 0 0 3px rgba(27,165,102,.2),0 0 14px rgba(27,165,102,.26)}
+@media (prefers-reduced-motion:no-preference){
+  .button-view,.button-warning,.button-danger,.button-unblock{transition:background .15s,border-color .15s,color .15s,box-shadow .2s}
+}
+
+/* A person in the Users list: name and details, and - where the list is
+   cards (phones, tablets) - a ⋮ menu with View, Block and Delete. */
+.user-card-head{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.user-card-who{display:grid;min-width:0}
+.user-card-menu{display:none;flex:none}
+.user-card-menu .icon-button{width:40px;min-width:40px;height:40px;min-height:40px}
+@media (max-width:760px){
+  .user-card-menu{display:block}
+}
+.users-row-open:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+
+/* Narrow phones, the quiz list: a quiz card's code line and its "1 / 3
+   submitted" wrap rather than run past the card; the status and the count
+   share a line while they fit. */
+@media (max-width:420px){
+  .ql-card{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px}
+  .ql-card>.ql-card-title,.ql-card>.ql-actions{flex:1 1 100%}
+  .ql-card-title h2{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .ql-card-title p{overflow-wrap:anywhere}
+  .ql-progress-text{white-space:normal}
+}
+
+/* Narrow phones, My results (and a teacher's Taken): each test in two lines -
+   its name and day across the top with the arrow, the download and the marks
+   below - instead of a name squeezed to a few letters. */
+@media (max-width:420px){
+  .card.my-list{display:block}
+  .my-row{grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"text text go" "dl side side";gap:8px 10px}
+  .my-row-text{grid-area:text}
+  .my-download{grid-area:dl;margin:0}
+  .my-row-side,.my-row-side.is-action{grid-area:side;margin-left:0}
+  .my-row-chevron{grid-area:go;margin-left:0}
+  .my-row:not(:has(.my-download)) .my-row-side{grid-column:1/-1;grid-row:2}
+  .my-row-side:has(.my-go){grid-area:side}
+  .my-row-text>span{white-space:normal}
+}
+
+/* My results: each test's marks in a small open gauge, the percentage (or
+   what is still to mark) under it. */
+.my-score{display:grid;justify-items:center;gap:3px}
+.my-score>span:not(.marks-gauge){font-size:.72rem;white-space:nowrap}
+.hover-tip{white-space:pre-line}
+
+/* The marks gauge (components/MarksGauge.jsx), drawn as LeetCode draws its
+   solved count: three equal parts of an open ring, a thin rounded line -
+   Right blue, Unmarked yellow, Wrong red, as the tiles beside it. Each part
+   solid for its share of the full marks, the rest of it the same colour at a
+   fifth of its strength. The score in the middle. */
+.marks-gauge{--gauge-size:156px;position:relative;display:grid;place-items:center;flex:none;width:var(--gauge-size);aspect-ratio:1;cursor:default}
+.marks-gauge.is-small{--gauge-size:60px}
+.marks-gauge svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+.marks-gauge circle{fill:none;stroke-width:var(--gauge-stroke,3);stroke-linecap:round}
+.marks-gauge-part.is-right{stroke:var(--primary)}
+.marks-gauge-part.is-unmarked{stroke:#E6BF24}
+.marks-gauge-part.is-wrong{stroke:var(--bad)}
+.marks-gauge-track{stroke-opacity:.2}
+.marks-gauge-fill{transition:stroke-dasharray .4s cubic-bezier(.6,1.37,.81,.97)}
+.marks-gauge-center{position:relative;display:grid;justify-items:center;gap:4px;margin-top:-6%;pointer-events:none}
+.marks-gauge-center strong{color:var(--text);font-size:2.1rem;font-weight:750;line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap}
+.marks-gauge-center strong small{margin-left:2px;color:var(--text-2);font-size:.5em;font-weight:650}
+.marks-gauge-center>span{color:var(--text-2);font-size:.86rem;font-weight:700}
+.marks-gauge-caption{position:absolute;left:0;right:0;bottom:3%;color:var(--text-2);font-size:.78rem;font-weight:600;text-align:center;white-space:nowrap;pointer-events:none}
+.marks-gauge-caption b{color:#E6BF24;font-weight:750}
+.marks-gauge.is-small .marks-gauge-center{margin-top:-2%}
+.marks-gauge.is-small .marks-gauge-center strong{font-size:.92rem}
+.marks-gauge.is-small .marks-gauge-center strong small{margin-left:1px;font-size:.72em}
+.marks-gauge.is-small.is-long .marks-gauge-center strong{font-size:.76rem}
+
+/* A result's page: the gauge and, beside it, Right / Unmarked / Wrong one under the other. */
+.result-gauge-card{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:14px 18px}
+.result-tally.is-stack{display:grid;flex:0 1 128px;gap:8px;width:auto;min-width:104px}
+.result-tally.is-stack div{flex:none;max-width:none;padding:9px 14px;text-align:center}
+.result-tally.is-stack dt{font-size:.8rem;letter-spacing:0;text-transform:none}
+.result-tally.is-stack dd{font-size:1.15rem}
+.result-tally .is-right dt{color:var(--primary)}
+.result-tally .is-pending dt{color:#E6BF24}
+.result-tally .is-wrong dt{color:var(--bad)}
+.result-tally [data-tip]{cursor:default}
+@media (min-width:1024px){
+  /* The narrow card beside the answers: gauge and tiles still side by side. */
+  .result-layout.has-review .result-gauge-card{column-gap:14px}
+  .result-layout.has-review .marks-gauge{--gauge-size:132px}
+  .result-layout.has-review .result-tally.is-stack{flex-basis:100px;min-width:96px}
+}
+@media (min-width:600px) and (max-width:1023px){
+  .marks-gauge.is-large{--gauge-size:170px}
+}
+@media (max-width:599px){
+  .marks-gauge.is-large{--gauge-size:146px}
+  .marks-gauge-center strong{font-size:1.85rem}
+}
+@media (max-width:360px){
+  .result-gauge-card{column-gap:12px}
+  .marks-gauge.is-large{--gauge-size:120px}
+  .marks-gauge-center strong{font-size:1.55rem}
+  .marks-gauge-caption{font-size:.72rem}
+  .result-tally.is-stack{flex-basis:92px;min-width:84px}
+  .result-tally.is-stack div{padding:8px}
+}
+
+/* A number's icon (My results, a teacher's Taken): shown where the numbers are tiles. */
+.my-stat-icon{display:none;position:absolute;left:18px;top:50%;place-items:center;width:42px;height:42px;border-radius:12px;transform:translateY(-50%);background:rgba(21,152,209,.16);color:#3DB3E6}
+.my-stats .is-best .my-stat-icon{background:rgba(39,182,111,.16);color:#43CF88}
+/* How many tests a list holds, beside its heading. */
+.my-section h2{display:flex;align-items:center;gap:8px}
+.my-count{display:inline-grid;place-items:center;min-width:22px;height:20px;padding:0 6px;border-radius:999px;background:var(--bg-raised);color:var(--text-2);font-size:.72rem;font-weight:750;font-variant-numeric:tabular-nums}
+
+/* A person's name that opens them under Users (components/PersonLink.jsx):
+   it looks as it did, and reads as a link under the pointer or the keyboard. */
+.person-link{color:inherit;text-decoration:none;cursor:pointer;border-radius:4px}
+.person-link:hover{color:#3DB3E6;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.person-link:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.person-link.att-name{width:fit-content;max-width:100%}
+
+/* A paper's numbers (modals/StudentAnalysisModal.jsx): each line of tiles
+   fills its row - four, three or two across - and every value sits level
+   with its neighbours', however its label wraps. Two across on a phone, an
+   odd last tile taking the whole row. */
+.analysis-summary{grid-template-columns:repeat(var(--tiles,4),minmax(0,1fr))}
+.analysis-summary>div{display:flex;flex-direction:column;justify-content:space-between;gap:6px;min-width:0}
+.analysis-summary strong{text-transform:none;font-variant-numeric:tabular-nums}
+.integrity-report .analysis-summary{margin:12px 0;padding-bottom:0;border-bottom:0}
+@media (max-width:680px){
+  .analysis-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .analysis-summary>div:last-child:nth-child(odd){grid-column:1/-1}
+}
+/* Why they left: each reason that happened, how often - what "Left the test" is made of. */
+.integrity-why{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:2px 0 4px;color:var(--text-2);font-size:.82rem}
+.integrity-why-label{font-weight:700}
+.integrity-reason{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;background:var(--bg-raised);color:var(--text)}
+.integrity-reason strong{color:var(--warn);font-variant-numeric:tabular-nums}
+
+/* ---------------------------------------------------- Test tab: the overview
+   One card for where the test stands - its status as a flat bar (the state's
+   dot, one line of facts, the one solid action, Edit outlined, More as ⋮),
+   number tiles for this stage of the test, and how far the class got - with
+   the QR beside it only while students can still join. Below, two columns
+   of panels that each grow with their own content (TestOverview.jsx). */
+
+/* Header: a smaller title, the code as a chip, one centre line with the tabs. */
+[data-area] .dashboard-head{align-items:center;padding-bottom:14px}
+[data-area] .dashboard-head h1{margin:0;font-size:clamp(1.35rem,1.9vw,1.75rem);line-height:1.25}
+[data-area] .dashboard-head-copy{align-items:center;gap:6px 12px}
+[data-area] .dashboard-head h1 .status-dot{margin-top:0;align-self:center}
+[data-area] .dash-code{display:inline-flex;align-items:center;height:24px;padding:0 9px;border:1px solid var(--border);border-radius:999px;background:var(--bg-card);color:var(--text-2);font-size:.74rem;letter-spacing:.04em}
+/* The dot by the title says what the status bar says: blue before, green live, red over. */
+.status-dot.is-idle{background:#1598D1;box-shadow:0 0 0 4px rgba(21,152,209,.18)}
+.status-dot.is-done{background:#E0414F;box-shadow:0 0 0 4px rgba(224,65,79,.18)}
+
+.ov{display:grid;gap:16px}
+.ov-top{display:grid;gap:16px;align-items:start}
+[data-area] .ov .overview-panel{display:grid;grid-template-rows:none;gap:18px;padding:22px 24px;align-content:start}
+
+/* The status, flat: no box inside the card, a rule beneath it. */
+[data-area] .overview-panel .schedule-banner{min-height:0;margin:0;padding:0 0 18px;border:0;border-bottom:1px solid var(--border);border-radius:0;background:transparent}
+[data-area] .overview-panel .schedule-banner strong{font-size:1.1rem}
+.ov-actions{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-left:auto}
+.ov-actions>.button{height:40px;min-height:40px;padding:0 18px;gap:8px;font-size:.92rem;white-space:nowrap}
+.ov-actions .action-menu .icon-button{width:40px;min-width:40px;height:40px;min-height:40px;background:transparent;border:1px solid var(--border);color:var(--text-2);box-shadow:none}
+.ov-actions .action-menu .icon-button:hover:not(:disabled){background:var(--bg-raised);border-color:#5A6066;color:var(--text)}
+@container (max-width:560px){
+  .ov-actions{width:100%;margin-left:0}
+  .ov-actions>.ov-primary{flex:1 1 auto;justify-content:center}
+}
+@container (max-width:340px){
+  .ov-actions>.ov-edit{width:40px;min-width:40px;padding:0;border-radius:50%;justify-content:center}
+  .ov-actions>.ov-edit .toolbar-text{display:none}
+}
+
+/* Tiles: as many to a row as fit, never a gap left at the end of a row. */
+[data-area] .ov-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin:0}
+[data-area] .ov-tiles>div{padding:12px 14px}
+[data-area] .ov-tiles strong{font-size:1.7rem}
+/* Two to a row on a phone: an odd one out takes the whole last row. */
+@media (max-width:600px){
+  [data-area] .ov-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  [data-area] .ov-tiles>div:last-child:nth-child(odd){grid-column:1 / -1}
+}
+
+/* The QR: big, its code beneath, one button. */
+.ov-qr{display:grid;justify-items:center;align-content:center;gap:12px;min-width:0;text-align:center}
+.ov-qr .qr{display:block;width:min(100%,280px);height:auto;margin:0;padding:10px;border:1px solid var(--border);border-radius:var(--r-md);background:#FFFFFF}
+.ov-qr-image{display:block;max-width:100%;padding:0;border:0;border-radius:var(--r-md);background:none;cursor:zoom-in}
+.ov-qr-image:focus-visible{outline:2px solid var(--primary);outline-offset:3px}
+.ov-qr .test-code-display{margin:0!important;font-size:1.05rem;letter-spacing:.12em}
+.ov-qr .button{height:40px;min-height:40px;padding:0 18px;font-size:.9rem}
+@media (min-width:1100px){.ov-qr .qr{width:min(100%,320px)}}
+/* Before the start: the status card, then one card with the QR beside the
+   test's settings. */
+.ov-share{grid-template-columns:auto minmax(0,1fr);align-items:center;gap:20px 40px;padding:22px 28px}
+.ov-share-details{display:grid;gap:8px;align-content:start;min-width:0}
+.ov-share-details h2{margin:0;font-size:1rem;font-weight:650}
+.ov-qr-foot{display:grid;justify-items:center;gap:12px}
+@media (max-width:760px){
+  .ov-share{grid-template-columns:minmax(0,1fr);padding:20px}
+  .ov-share .ov-qr .qr{width:min(100%,280px)}
+}
+
+/* Wider than a phone, the tab is exactly one screen tall (DashboardScreen
+   useFitToScreen sets --ov-fit): the status card as it is, the QR card
+   filling the rest. Inside, everything is sized to that card's own height
+   (container units): the QR as big as it allows, the settings in one, two
+   or more columns as it gets shorter. Only on a phone does the page scroll. */
+@media (min-width:761px){
+  .ov.is-fit{height:var(--ov-fit,auto);min-height:300px;grid-template-rows:auto minmax(0,1fr)}
+  /* Once begun, the two panels below share what is left: level at the top and the bottom. */
+  .ov.is-fit>.ov-columns{height:100%;min-height:0;align-items:stretch}
+  .ov.is-fit .ov-column{grid-template-rows:minmax(0,1fr);min-height:0}
+  .ov.is-fit .ov-column>.ov-panel{height:100%;min-height:0;overflow:auto;align-content:start}
+  /* A panel too short for what it holds scrolls inside, with no bar showing. */
+  .ov.is-fit .ov-panel{scrollbar-width:none;-ms-overflow-style:none}
+  .ov.is-fit .ov-panel::-webkit-scrollbar{display:none}
+  /* A test under way: Right now, the QR and the settings. Narrower, the QR
+     fills the column under Right now; across a wide screen, three columns. */
+  .ov.is-fit .ov-live{grid-template-rows:auto minmax(0,1fr);grid-template-areas:"steps details" "qr details"}
+  .ov.is-fit .ov-live>.ov-panel{min-height:0;overflow:auto;align-content:start}
+  .ov.is-fit .ov-live>.ov-panel:nth-child(1){grid-area:steps}
+  .ov.is-fit .ov-live>.ov-qr-card{grid-area:qr;height:100%}
+  .ov.is-fit .ov-live>.ov-panel:nth-child(3){grid-area:details;height:100%}
+  .ov.is-fit .ov-qr-card{container-type:size;overflow:hidden;align-content:center;padding:16px}
+  .ov.is-fit .ov-qr-card .qr{width:max(80px,min(300px,calc(100cqh - 96px),100cqw))}
+  /* The settings in a half-page panel: as many to a row as fit. */
+  /* The settings: one column; when the panel is too short, the list scrolls
+     under its heading (with no bar showing - see .ov-details). */
+  .ov.is-fit :is(.ov-column,.ov-live)>.ov-details-panel{grid-template-rows:auto minmax(0,1fr);overflow:hidden}
+  .ov.is-fit .ov-details-panel .ov-details,.ov.is-fit .ov-share .ov-details{min-height:0;overflow-y:auto}
+  .ov.is-fit .ov-share-details{grid-template-rows:auto minmax(0,1fr);max-height:100cqh;min-height:0}
+  .ov.is-fit .ov-share{height:100%;min-height:0;overflow:hidden;container-type:size;padding:20px 28px}
+  .ov.is-fit .ov-share .qr{width:max(100px,min(400px,calc(100cqh - 96px),42cqw))}
+}
+@media (min-width:761px) and (max-height:640px){
+  .ov.is-fit .ov-share{padding:14px 20px;column-gap:28px}
+}
+/* A short window: the panels and their steps tighter - shorter still, each step its title and its button. */
+@media (min-width:761px) and (max-height:760px){
+  .ov.is-fit :is(.ov-column,.ov-live)>.ov-panel:not(.ov-share):not(.ov-qr-card){padding:16px 20px;gap:10px}
+  .ov.is-fit .ov-step{padding:8px 0}
+}
+@media (min-width:761px) and (max-height:700px){
+  .ov.is-fit .ov-step{padding:6px 0}
+  .ov.is-fit .ov-step-text span{display:none}
+  .ov.is-fit .button.ov-step-button{height:30px;min-height:30px}
+}
+@media (min-width:1200px){
+  .ov.is-fit .ov-live{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:minmax(0,1fr);grid-template-areas:"steps qr details"}
+  .ov.is-fit .ov-live>.ov-panel:nth-child(1){height:100%}
+}
+@media (min-width:761px) and (max-height:620px){
+  .ov.is-fit :is(.ov-column,.ov-live)>.ov-panel:not(.ov-share):not(.ov-qr-card){padding:12px 16px;gap:6px}
+  .ov.is-fit .ov-step{padding:4px 0}
+  .ov.is-fit .ov-details>div{padding:7px 0}
+}
+/* A short window: the status card tighter, each tile one line. */
+@media (min-width:761px) and (max-height:760px){
+  [data-area] .ov.is-fit .overview-panel{gap:12px;padding:16px 20px}
+  [data-area] .ov.is-fit .overview-panel .schedule-banner{padding-bottom:12px}
+  [data-area] .ov.is-fit .ov-tiles>div{padding:9px 12px}
+  [data-area] .ov.is-fit .ov-tiles .dash-stat-link,[data-area] .ov.is-fit .ov-tiles>div:not(.is-link){display:flex;align-items:baseline;gap:8px}
+  [data-area] .ov.is-fit .ov-tiles strong{font-size:1.3rem}
+}
+/* A very short window: the status card without its one-line hint, or the
+   quick +5 / +10 / +15 min (⋮ → Extend time still gives more time). */
+@media (min-width:761px) and (max-height:620px){
+  [data-area] .ov.is-fit .overview-panel .schedule-banner .banner-text>span,
+  [data-area] .ov.is-fit .overview-panel .schedule-banner .banner-extend{display:none}
+}
+/* A short card: under the QR only the button (the code is in the header). */
+@container (max-height:400px){
+  .ov.is-fit .ov-share .ov-qr{gap:10px}
+  .ov.is-fit .ov-share .ov-qr-foot .test-code-display{display:none}
+  .ov.is-fit .ov-share .qr{width:max(100px,min(400px,calc(100cqh - 50px),42cqw))}
+}
+/* A very short card: the QR alone, as tall as the card - tapping it is the button. */
+@container (max-height:260px){
+  .ov.is-fit .ov-share .ov-qr-foot{display:none}
+  .ov.is-fit .ov-share .qr{width:max(90px,min(100cqh,42cqw));padding:6px}
+}
+/* The QR filling the left column (a test under way): short, under it only the button; shorter, the QR alone - tapping it is the button. */
+@container (max-height:300px){
+  .ov.is-fit .ov-qr-card .test-code-display{display:none}
+  .ov.is-fit .ov-qr-card .qr{width:max(80px,min(300px,calc(100cqh - 50px),100cqw))}
+}
+@container (max-height:200px){
+  .ov.is-fit .ov-qr-card .ov-qr-foot{display:none}
+  .ov.is-fit .ov-qr-card .qr{width:max(64px,min(100cqh,100cqw));padding:6px}
+}
+/* Barely room: a small QR with its button beside it, rather than a QR too small to scan. */
+@container (max-height:130px){
+  .ov.is-fit .ov-qr-card .ov-qr{grid-auto-flow:column;align-items:center;justify-content:center;gap:14px}
+  .ov.is-fit .ov-qr-card .ov-qr-foot{display:grid}
+  .ov.is-fit .ov-qr-card .qr{width:max(40px,100cqh);padding:4px}
+}
+
+/* The panels: two columns, each as tall as its own content; one on a phone. */
+.ov-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.ov-column{display:grid;gap:16px;align-content:start;min-width:0}
+@media (max-width:760px){.ov-columns{grid-template-columns:minmax(0,1fr)}}
+.ov-panel{display:grid;gap:14px;align-content:start;min-width:0;padding:20px 22px}
+.ov-panel-head{display:flex;align-items:center;justify-content:space-between;gap:10px 12px;flex-wrap:wrap}
+.ov-panel-head h2{margin:0;font-size:1rem;font-weight:650}
+.ov-panel-note{margin:-6px 0 0;color:var(--text-2);font-size:.82rem;line-height:1.45}
+.ov-empty{margin:0;color:var(--text-3);font-size:.88rem;line-height:1.5}
+.ov-wait{padding:22px 24px;color:var(--text-2)}
+@media (max-width:480px){.ov-panel,[data-area] .ov .overview-panel{padding:16px}}
+
+/* How the marks spread: ten thin columns from one baseline; the tallest says its count, each says it on hover or focus. */
+.ov-spread{display:grid;gap:6px;margin:0}
+.ov-spread-plot{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));align-items:end;height:118px;padding-top:18px;border-bottom:1px solid var(--border)}
+.ov-spread-col{position:relative;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%;outline:none}
+.ov-spread-bar{display:block;width:min(24px,72%);background:var(--primary);border-radius:4px 4px 0 0;transition:background .15s}
+.ov-spread-label{margin-bottom:3px;color:var(--text-2);font-size:.72rem;font-weight:650}
+.ov-spread-col:hover .ov-spread-bar{background:#3FB0E6}
+.ov-spread-col:focus-visible .ov-spread-bar{outline:2px solid var(--text);outline-offset:2px}
+.ov-spread-col:is(:hover,:focus-visible)::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:3;padding:5px 9px;border-radius:7px;background:#111315;color:var(--text);font-size:.74rem;white-space:nowrap;box-shadow:0 8px 20px rgba(0,0,0,.45);pointer-events:none}
+.ov-spread-col:first-child::after{left:0;transform:none}
+.ov-spread-col:last-child::after{left:auto;right:0;transform:none}
+.ov-spread-axis{display:flex;justify-content:space-between;color:var(--text-3);font-size:.72rem;font-variant-numeric:tabular-nums}
+
+/* What to do next: a tick once done, the button that does it at the end. */
+.ov-steps{display:grid;margin:0;padding:0;list-style:none}
+.ov-step{display:grid;grid-template-columns:22px minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--border)}
+.ov-step:first-child{padding-top:2px;border-top:0}
+.ov-step.is-alert{grid-template-columns:minmax(0,1fr) auto}
+.ov-step-mark{color:var(--text-3)}
+.ov-step.is-done .ov-step-mark{color:var(--ok)}
+.ov-step-text{display:grid;gap:2px;min-width:0}
+.ov-step-text strong{color:var(--text);font-size:.92rem;font-weight:650}
+.ov-step-text span{color:var(--text-2);font-size:.8rem;line-height:1.4}
+.ov-step.is-done .ov-step-text strong{color:var(--text-2)}
+/* Every step's button one size, whatever it says (room for "Mark 128"). */
+.button.ov-step-button{width:120px;min-width:120px;height:34px;min-height:34px;padding:0 10px;gap:6px;justify-content:center;font-size:.82rem;white-space:nowrap}
+@media (max-width:420px){
+  .ov-step{grid-template-columns:22px minmax(0,1fr)}
+  .ov-step>.button{grid-column:2;justify-self:start}
+  .ov-step.is-alert{grid-template-columns:minmax(0,1fr)}
+  .ov-step.is-alert>.button{grid-column:1}
+}
+
+/* The test's settings: one column - each label on the left, its value beside
+   it, a line between. A list too long for its box scrolls inside it, with no
+   bar showing (a mouse wheel, a finger or the keyboard still scroll it). */
+.ov-details{display:grid;grid-template-columns:minmax(0,1fr);align-content:start;margin:0;scrollbar-width:none;-ms-overflow-style:none}
+.ov-details::-webkit-scrollbar{display:none}
+.ov-details>div{display:grid;grid-template-columns:minmax(120px,170px) minmax(0,1fr);align-items:baseline;gap:2px 16px;min-width:0;padding:10px 0;border-top:1px solid var(--border)}
+.ov-details>div:first-child{padding-top:2px;border-top:0}
+.ov-details dt{color:var(--text-2);font-size:.82rem}
+.ov-details dd{margin:0;color:var(--text);font-size:.9rem;font-weight:600;overflow-wrap:anywhere}
+@media (max-width:420px){.ov-details>div{grid-template-columns:minmax(0,1fr)}}
+
+/* A phone: the test's heading and tabs scroll away with the page rather than
+   staying pinned - pinned, a two-line title, its code and the tabs covered a
+   third of the screen, over the content passing under them. */
+@media (max-width:760px){[data-area] .dashboard-head{position:relative;top:auto}}
+
+/* ---------------------------------------------------- The Analysis tab
+   How the class did (AnalysisSection.jsx), in two views: Charts and the
+   Rank list, under one toolbar. Wider than a phone it is exactly one screen
+   tall (useFitToScreen sets --ov-fit), lists scrolling inside with no bar
+   showing; on a phone it flows. The rank list is a bright white sheet. */
+
+.an{display:grid;min-width:0}
+.an-view{display:grid;gap:12px;min-width:0}
+.an :is(.an-table,.an-legend,.an-qbars){scrollbar-width:none;-ms-overflow-style:none}
+.an :is(.an-table,.an-legend,.an-qbars)::-webkit-scrollbar{display:none}
+@media (min-width:761px){
+  .an{height:var(--ov-fit,auto);min-height:330px;grid-template-rows:minmax(0,1fr)}
+  .an>.ov-panel{align-self:start}
+  .an-view{height:100%;min-height:0}
+  .an-view.is-charts{grid-template-rows:auto auto minmax(0,1fr)}
+  .an-view:is(.is-list,.is-questions){grid-template-rows:auto minmax(0,1fr)}
+}
+
+/* The header: when, how long, out of what; how far marking has got; Export. Then the toolbar both views share. */
+.an-bar{display:grid;gap:10px;padding:12px 16px}
+.an-meta{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;min-width:0}
+.an-meta>p{flex:1 1 auto;min-width:0;margin:0;color:var(--text-2);font-size:.84rem}
+.an-meta .an-count{margin-left:auto}
+.an-progress{display:inline-flex;align-items:center;gap:10px;color:var(--text-2);font-size:.8rem;font-weight:650;white-space:nowrap}
+.an-progress-track{display:block;width:clamp(90px,10vw,160px);height:6px;border-radius:999px;background:var(--bg-raised);overflow:hidden}
+.an-progress-track>span{display:block;height:100%;border-radius:inherit;background:var(--primary)}
+.button.an-export{height:34px;min-height:34px;padding:0 14px;gap:6px;font-size:.82rem}
+.an-filters{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;min-width:0}
+.an-filters .filter-trigger{height:38px;min-height:38px}
+.an-search{flex:0 1 240px;min-width:150px}
+.an-search .text-input{height:38px;min-height:38px;font-size:.84rem}
+/* The menus small and one size whatever they say (cut short, whole on hover), the search and the views as low:
+   a toolbar that stays out of the way of the charts, the questions and the rank list below it. */
+.an-filters .filter-trigger{width:176px;min-width:176px;max-width:176px;height:34px;min-height:34px;padding:0 12px;gap:6px;font-size:.8rem}
+.an-filters .filter-trigger svg{flex:none;width:15px;height:15px}
+.an-search .text-input{height:34px;min-height:34px;font-size:.82rem}
+.an-filters .an-chip{min-height:26px}
+.an-chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 9px 0 11px;border:1px solid rgba(21,152,209,.55);border-radius:999px;background:rgba(21,152,209,.12);color:#5CC1F0;font:inherit;font-size:.78rem;font-weight:650;cursor:pointer}
+.an-chip:hover{background:rgba(21,152,209,.22);color:var(--text)}
+.an-chip:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-count{color:var(--text-3);font-size:.78rem;font-variant-numeric:tabular-nums;white-space:nowrap}
+/* Wider than a phone: the test's line stays one line (whole on hover), so the toolbar is two short rows and the charts get the height. */
+@media (min-width:761px){
+  .an-meta{flex-wrap:nowrap}
+  .an-meta>p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .an-meta>:not(p){flex:none}
+}
+/* Narrower: Export and the three views keep their icons (and a tip) without their words; search and the menus give way. */
+@media (min-width:761px) and (max-width:1199px){
+  .an-meta{gap:8px 14px}
+  .an-progress-track{width:70px}
+  .button.an-export{width:36px;padding:0;justify-content:center}
+  .an-filters .an-views button{padding:0 13px}
+  .an :is(.an-export,.an-views) .an-word{display:none}
+  .an-search{flex:1 1 150px;min-width:120px}
+  .an-filters .filter-trigger{width:156px;min-width:156px;max-width:156px}
+}
+
+/* Charts | Rank list. */
+.an-views{display:inline-flex;flex:none;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--bg-raised)}
+/* The views are where you are, not one more filter: a darker track a little taller than the menus,
+   the open view an indigo pill (the Marks chart's colour, apart from the blue menus), and a hairline
+   setting them apart from the search and menus after them. */
+.an-filters .an-views{height:38px;box-sizing:border-box;margin-right:6px;background:#1E2124;border-color:#3A3F44;box-shadow:inset 0 1px 2px rgba(0,0,0,.35)}
+.an-filters .an-views::after{content:"";align-self:center;width:1px;height:24px;margin:0 -10px 0 13px;background:var(--border)}
+.an-filters .an-views button{min-height:30px;padding:0 16px;font-size:.86rem;font-weight:750}
+.an-filters .an-views button svg{color:var(--text-3);transition:color .15s}
+.an-filters .an-views button:hover:not([aria-pressed="true"]){background:rgba(255,255,255,.06);color:var(--text)}
+.an-filters .an-views button:hover:not([aria-pressed="true"]) svg{color:var(--text-2)}
+.an-filters .an-views button[aria-pressed="true"]{background:#5A65CC;color:#FFFFFF;box-shadow:0 2px 10px rgba(90,101,204,.45)}
+.an-filters .an-views button[aria-pressed="true"] svg{color:#FFFFFF}
+.an-views button{display:inline-flex;align-items:center;gap:7px;min-height:30px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:var(--text-2);font:inherit;font-size:.84rem;font-weight:700;white-space:nowrap;cursor:pointer;transition:background .15s,color .15s}
+.an-views button:hover{color:var(--text)}
+.an-views button[aria-pressed="true"]{background:var(--primary);color:#FFFFFF;box-shadow:0 2px 8px rgba(21,152,209,.35)}
+.an-views button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+
+/* Questions: a large window (a sheet on a phone) - quick picks, a small tile
+   per question by type (its number and average), and a strip at the foot
+   reading the question pointed at, focused or tapped in full. Nothing scrolls
+   sideways; a long paper scrolls down inside, with no bar showing. */
+.filter-panel.an-qpanel.is-dialog{width:min(900px,calc(100vw - 32px));max-height:min(760px,calc(100dvh - 48px))}
+.filter-extra{container-type:inline-size;flex:none;padding:12px 18px 10px;border-bottom:1px solid var(--border)}
+/* Marks and Rank side by side, a line between; stacked where the panel is narrow (a phone, a small window). */
+.an-range{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 0;min-width:0;margin:0;padding:0;border:0}
+.an-range legend{margin-bottom:8px;padding:0;color:var(--text-2);font-size:.74rem;font-weight:750;letter-spacing:.04em;text-transform:uppercase}
+.an-range-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.an-range-row label{display:inline-flex;align-items:center;gap:6px;color:var(--text-2);font-size:.84rem;font-weight:650}
+.an-range-row .text-input{width:76px;height:38px;min-height:38px;padding:0 10px;font-size:.92rem;font-weight:700;text-align:center}
+.an-range-row b{color:var(--text-3);font-weight:700}
+.an-range-clear{min-height:30px;padding:0 12px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text-2);font:inherit;font-size:.78rem;font-weight:700;cursor:pointer}
+.an-range-clear:hover{border-color:var(--primary);color:var(--text)}
+.an-range-count{margin:0;color:var(--text-2);font-size:.82rem;line-height:1.4}
+.an-span{display:grid;align-content:start;gap:7px;min-width:0;padding:0 20px 0 0}
+.an-span+.an-span{padding:0 0 0 20px;border-left:1px solid var(--border)}
+@container (max-width:640px){
+  .an-range{grid-template-columns:minmax(0,1fr)}
+  .an-span{padding:0}
+  .an-span+.an-span{padding:10px 0 0;border-left:0;border-top:1px solid var(--border)}
+}
+.an-span-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;min-height:30px}
+.an-span-title{min-width:52px;color:var(--text);font-size:.88rem;font-weight:750}
+.an-span-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.an-span-end{display:inline-flex;align-items:center;gap:6px}
+.an-span-end .text-input{width:74px;height:34px;min-height:34px;padding:0 8px;font-size:.9rem;font-weight:700;text-align:center}
+.an-span-end .text-input::placeholder{color:var(--text-3);font-weight:600}
+.an-span-to{color:var(--text-3);font-weight:700}
+.an-span-unit{color:var(--text-3);font-weight:700}
+/* Min, Max and Clear: one size. */
+.an-span-fill{width:50px;min-height:30px;padding:0;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text-2);font:inherit;font-size:.76rem;font-weight:700;cursor:pointer}
+.an-span-fill:hover{border-color:var(--primary);background:rgba(21,152,209,.14);color:var(--text)}
+.an-span-fill:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-span-clear{margin-left:auto}
+/* Marks or %: two buttons of one size. */
+.an-unit{display:inline-grid;grid-template-columns:repeat(2,64px);padding:2px;border:1px solid var(--border);border-radius:999px;background:var(--bg-input)}
+.an-unit button{min-height:26px;padding:0;border:0;border-radius:999px;background:transparent;color:var(--text-2);font:inherit;font-size:.78rem;font-weight:700;white-space:nowrap;cursor:pointer}
+.an-unit button.is-on{background:var(--primary);color:#FFFFFF}
+.an-unit button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-range-count strong{color:#5CC1F0;font-size:1.05rem;font-weight:800}
+.an-range-count.is-wrong{color:var(--warn)}
+.an-qpanel-quick{flex:none;display:flex;flex-wrap:wrap;gap:6px;padding:12px 18px 6px}
+.an-qpanel-quick button{min-height:32px;padding:0 14px;border:1px solid var(--border);border-radius:999px;background:var(--bg-input);color:var(--text);font:inherit;font-size:.82rem;font-weight:650;cursor:pointer}
+.an-qpanel-quick button:hover{border-color:var(--primary);background:rgba(21,152,209,.18)}
+.an-qpanel-quick button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-qpanel-body{flex:1 1 auto;min-height:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:4px 18px 12px;scrollbar-width:none;-ms-overflow-style:none}
+.an-qpanel-body::-webkit-scrollbar{display:none}
+.an-qgroup{display:grid;gap:10px;padding:10px 0}
+.an-qgroup+.an-qgroup{border-top:1px solid var(--border)}
+.an-qgroup h3{display:flex;align-items:baseline;gap:8px;margin:0;color:var(--text-2);font-size:.74rem;font-weight:750;letter-spacing:.05em;text-transform:uppercase}
+.an-qgroup h3 span{color:var(--text-3);font-weight:650;letter-spacing:0;text-transform:none}
+.an-qgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:8px}
+.an-qtile{position:relative;display:grid;justify-items:center;align-content:center;gap:2px;min-width:0;min-height:68px;padding:24px 6px 8px;-webkit-tap-highlight-color:transparent;border:1.5px solid var(--border);border-radius:12px;background:var(--bg-input);color:var(--text-3);font:inherit;cursor:pointer;opacity:.7;transition:border-color .12s,background .12s,opacity .12s,transform .12s}
+.an-qtile b{color:var(--text);font-size:.98rem;font-weight:750;line-height:1.1}
+.an-qtile small{font-size:.74rem;font-weight:650;font-variant-numeric:tabular-nums}
+.an-qtile.is-on{border-color:var(--primary);background:rgba(21,152,209,.2);color:#9FDAF5;opacity:1}
+.an-qtile:hover,.an-qtile.is-reading{border-color:#5CC1F0;opacity:1;transform:translateY(-1px)}
+.an-qtile:focus-visible{outline:2px solid var(--primary);outline-offset:2px;opacity:1}
+.an-qtile-box{position:absolute;top:6px;left:6px;display:grid;place-items:center;width:15px;height:15px;border:1.5px solid #6B737B;border-radius:4px;color:#FFFFFF}
+.an-qtile.is-on .an-qtile-box{border-color:var(--primary);background:var(--primary)}
+.an-qtile-wait{position:absolute;top:6px;right:7px;line-height:15px;color:var(--warn);font-size:.68rem;font-style:normal;font-weight:800}
+.an-qread{flex:none;min-height:104px;max-height:190px;overflow-y:auto;padding:12px 18px;border-top:1px solid var(--border);background:var(--bg-card);scrollbar-width:none;-ms-overflow-style:none}
+.an-qread::-webkit-scrollbar{display:none}
+.an-qread p{margin:0}
+.an-qread-title{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.an-qread-title b{color:var(--text);font-size:1rem;font-weight:750}
+.an-qread-title span{padding:1px 9px;border-radius:999px;background:var(--bg-raised);color:var(--text-2);font-size:.72rem;font-weight:700}
+.an-qread-title .is-in{background:rgba(39,182,111,.16);color:#5DD39A}
+.an-qread-title .is-out{background:rgba(239,91,95,.14);color:#F28B8E}
+.an-qread .an-qread-prompt{margin-top:6px;color:var(--text);font-size:.92rem;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere}
+.an-qread .an-qread-facts{margin-top:6px;color:var(--text-3);font-size:.78rem;line-height:1.45}
+.an-qread-hint{color:var(--text-3);font-size:.86rem;line-height:1.5}
+@media (max-width:560px){
+  .filter-panel.an-qpanel.is-dialog{width:100%;max-height:min(90vh,calc(100dvh - 24px))}
+  .an-qpanel-quick{padding:10px 14px 6px}
+  .an-qpanel-quick button{min-height:38px}
+  .an-qpanel-body{padding:4px 14px 10px}
+  .an-qgrid{grid-template-columns:repeat(auto-fill,minmax(64px,1fr))}
+  .an-qtile{min-height:64px;padding-top:22px}
+  .an-qread{min-height:96px;max-height:32vh;padding:10px 14px}
+}
+
+/* Six small figures in a strip. */
+.an-tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+.an-tile{display:grid;gap:1px;min-width:0;padding:8px 14px;border:1px solid var(--border);border-radius:var(--r-md);background:var(--bg-card)}
+.an-tile strong{color:var(--text);font-size:1.25rem;font-weight:650;line-height:1.2;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-tile span{color:var(--text-2);font-size:.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-tile small{color:var(--text-3);font-size:inherit}
+
+/* Charts: the score bands and the marks chart side by side, every question's average across the bottom. */
+.an-charts{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.6fr);grid-template-rows:minmax(0,1fr);gap:12px;min-height:0}
+.an-card{display:grid;grid-template-rows:auto minmax(0,1fr);gap:10px;min-width:0;min-height:0;padding:12px 16px;overflow:hidden}
+.an-card-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;min-width:0}
+.an-card-head h2{margin:0;color:var(--text);font-size:.95rem;font-weight:650}
+.an-note{margin:0;color:var(--text-3);font-size:.76rem;line-height:1.4}
+.an-empty{margin:0;padding:24px;color:var(--text-3);font-size:.86rem;text-align:center}
+
+/* Score bands: the ring sized to its card, the legend beside it; each lists its students. */
+.an-donut-box{container-type:size;min-height:0}
+.an-donut{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:14px;height:100%;min-height:0}
+.an-donut svg{display:block;width:max(64px,min(210px,100cqh,48cqw));height:auto}
+/* A narrow card: a smaller ring, so the legend keeps its words. */
+@container (max-width:330px){.an-donut svg{width:max(64px,min(150px,100cqh,36cqw))}.an-donut{gap:10px}}
+/* A card taller than it is wide: the ring above its legend, as big as the room allows. */
+@container (orientation:portrait) and (min-height:330px){
+  .an-donut{grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto;justify-items:center;align-content:center;gap:18px}
+  .an-donut svg{width:max(120px,min(300px,82cqw,calc(100cqh - 230px)))}
+  .an-donut .an-legend{width:min(100%,340px);max-height:none}
+}
+@container (max-width:239px) or (max-height:89px){
+  .an-donut svg{display:none}
+  .an-donut .an-legend{margin-left:-14px}
+}
+.an-donut text{pointer-events:none}
+/* Pointing at a band: its slice thickens, the others fade, its legend line lights up. */
+.an-slice{transition:opacity .15s,stroke-width .15s}
+.an-donut.is-pointing .an-slice:not(.is-on){opacity:.32}
+.an-legend li{border-radius:7px;transition:background .12s,opacity .12s}
+.an-legend li:not(.is-empty){cursor:default}
+.an-legend li.is-on{background:var(--bg-raised);color:var(--text)}
+.an-donut.is-pointing .an-legend li:not(.is-on){opacity:.5}
+.an-donut-word{transition:fill .12s}
+.an-donut.is-pointing .an-donut-word{fill:var(--text-2);font-weight:650}
+.an-donut-total{fill:var(--text);font-size:26px;font-weight:650}
+.an-donut-word{fill:var(--text-3);font-size:11px}
+.an-legend{display:grid;gap:1px;align-content:safe center;max-height:100%;margin:0;padding:0;list-style:none;min-width:0;overflow-y:auto}
+.an-legend li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;align-items:center;gap:9px;min-height:26px;padding:0 4px;color:var(--text-2);font-size:.82rem}
+.an-legend li.is-empty{opacity:.45}
+.an-legend i{width:12px;height:12px;border-radius:4px}
+.an-legend-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.an-legend-count{color:var(--text);font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* The marks chart: its bars as tall as the card allows; a bar lists its students. */
+.an-histogram .an-card-head .an-note{flex:1 1 200px}
+.an-edit{margin-left:auto}
+.an-edit-button{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-raised);color:var(--text);font:inherit;font-size:.8rem;font-weight:700;cursor:pointer}
+.an-edit-button:hover,.an-edit-button.is-open{border-color:var(--primary);background:rgba(21,152,209,.18)}
+.an-edit-button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.filter-panel.an-options{width:min(340px,calc(100vw - 16px))}
+.an-options-body{flex:1 1 auto;min-height:0;overflow-y:auto;display:grid;gap:14px;padding:14px 18px}
+.an-option{display:grid;gap:7px;min-width:0;margin:0;padding:0;border:0}
+.an-option legend{margin-bottom:7px;padding:0;color:var(--text-2);font-size:.74rem;font-weight:750;letter-spacing:.04em;text-transform:uppercase}
+.an-option-choices{display:flex;padding:3px;border:1px solid var(--border);border-radius:999px;background:var(--bg-input)}
+.an-option-choices button{flex:1;min-height:32px;padding:0 10px;border:0;border-radius:999px;background:transparent;color:var(--text-2);font:inherit;font-size:.82rem;font-weight:700;white-space:nowrap;cursor:pointer}
+.an-option-choices button.is-on{background:var(--primary);color:#FFFFFF}
+.an-option-choices button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-bars-choice{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.an-bars-choice .text-input{width:78px;height:36px;min-height:36px;padding:0 10px;font-size:.95rem;font-weight:700;text-align:center}
+.an-bars-suggest{display:inline-flex;gap:6px}
+.an-bars-suggest button{min-width:44px;min-height:34px;padding:0 12px;border:1px solid var(--border);border-radius:999px;background:var(--bg-input);color:var(--text-2);font:inherit;font-size:.84rem;font-weight:700;cursor:pointer}
+.an-bars-suggest button:hover{border-color:var(--primary);color:var(--text)}
+.an-bars-suggest button.is-on{border-color:var(--primary);background:var(--primary);color:#FFFFFF}
+.an-bars-suggest button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-option-note{margin:6px 0 0;color:var(--warn);font-size:.78rem}
+.an-bars .ov-spread-plot{position:relative}
+.an-marker{position:absolute;top:0;bottom:0;width:0;border-left:2px solid #F7FAFC;pointer-events:none;opacity:.85}
+.an-marker.is-median{border-left-style:dashed;border-left-color:#E6BF24}
+.an-marker em{position:absolute;top:0;left:5px;padding:1px 6px;border-radius:6px;background:#111315;color:var(--text);font-size:.7rem;font-style:normal;font-weight:700;white-space:nowrap}
+.an-marker.is-median em{color:#E6BF24}
+.an-marker.is-second em{top:20px}
+.an-marker.is-flip em{left:auto;right:5px}
+.an-bars{grid-template-rows:minmax(0,1fr) auto;min-height:0;height:100%}
+.an-bars .ov-spread-plot{height:auto;min-height:0}
+/* Bars to read, not to press: hover brightens a bar in its band's colour (inline) and says its count. */
+.an-bars .ov-spread-col{cursor:default}
+.an-bars .ov-spread-col:hover .ov-spread-bar{filter:brightness(1.15) saturate(1.1)}
+
+/* Question averages: one column per ticked question, its average as a share of its worth. */
+.an-qbars{container-type:inline-size;display:grid;grid-template-columns:minmax(0,1fr);align-content:start;min-height:0;overflow-x:hidden;overflow-y:auto}
+.an-qbar{display:grid;grid-template-columns:44px 54px minmax(0,1.25fr) minmax(140px,1fr) 46px 96px;align-items:center;gap:12px;min-width:0;min-height:36px;padding:0 12px;border:0;border-bottom:1px solid rgba(255,255,255,.05);border-radius:0;background:transparent;color:var(--text-2);font:inherit;text-align:left;cursor:pointer}
+.an-qbar:last-child{border-bottom:0}
+.an-qbar-text{min-width:0;overflow:hidden;color:var(--text-2);font-size:.82rem;text-overflow:ellipsis;white-space:nowrap}
+.an-qbar-right{color:var(--text-3);font-size:.76rem;font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.an-qbar-right b{color:var(--text-2);font-weight:750}
+.an-qbar:hover .an-qbar-text{color:var(--text)}
+/* A narrow chart: the question's words and the right count give way to the bar. */
+@container (max-width:640px){
+  .an-qbar{grid-template-columns:40px 48px minmax(0,1fr) 44px;gap:8px;padding:0 8px}
+  .an-qbar :is(.an-qbar-text,.an-qbar-right){display:none}
+}
+.an-qbar:hover{background:var(--bg-raised);border-radius:8px}
+.an-qbar:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}
+.an-qbar-value{color:var(--text);font-size:.8rem;font-weight:700;text-align:right;font-variant-numeric:tabular-nums}
+.an-qbar-track{display:block;height:min(16px,42%);min-height:10px;border-radius:999px;background:var(--bg-raised);overflow:hidden}
+.an-qbar-fill{display:block;height:100%;border-radius:999px;background:var(--primary);transition:width .2s,filter .12s}
+.an-qbar:hover .an-qbar-fill{filter:brightness(1.12) saturate(1.1)}
+.an-qlegend{display:flex;flex-wrap:wrap;gap:4px 12px;margin:0 0 0 auto;padding:0;list-style:none;color:var(--text-3);font-size:.72rem;font-weight:650}
+.an-qlegend li{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.an-qlegend i{width:10px;height:10px;border-radius:3px}
+.an-qbar-label{color:var(--text);font-size:.8rem;font-weight:750}
+.an-qbar-sub{color:var(--text-3);font-size:.68rem;font-weight:650;white-space:nowrap}
+.an-qbar-sub em{color:var(--warn);font-style:normal}
+
+/* The rank list: a white sheet - Rank, Student, Marks and % stay put while the questions scroll past, each answer a bright tile. */
+.an-sheet{
+  --sheet-bg:#E8ECF0;--sheet-table:#F4F6F9;--sheet-head:#E1E6EC;--sheet-line:#D3DAE2;--sheet-text:#0F172A;--sheet-text-2:#475569;--sheet-text-3:#8A97A8;--sheet-hover:#E4F0F9;
+  display:grid;grid-template-rows:auto minmax(0,1fr);gap:10px;min-width:0;min-height:0;padding:14px 16px;border-radius:var(--r-lg);background:var(--sheet-bg);color:var(--sheet-text);box-shadow:0 12px 32px rgba(0,0,0,.28)
+}
+.an-sheet-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;min-width:0}
+.an-sheet-head h2{margin:0;color:var(--sheet-text);font-size:1rem;font-weight:750}
+.an-sheet-head p{flex:1 1 320px;min-width:0;margin:0;color:var(--sheet-text-2);font-size:.78rem}
+.an-key{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--sheet-text-2);font-size:.74rem;font-weight:650}
+.an-key span{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.an-key i{width:12px;height:12px;border-radius:3px}
+.an-key .is-O i{background:#4ADE80}
+.an-key .is-P i{background:#FDE047}
+.an-key .is-W i{background:#F87171}
+.an-key .is-B i{background:#E2E8F0;box-shadow:inset 0 0 0 1px #CBD5E1}
+.an-key .is-Q i{background:#FB923C}
+.an-key .is-none i{background:repeating-linear-gradient(45deg,#F8FAFC 0 3px,#E2E8F0 3px 6px);box-shadow:inset 0 0 0 1px #CBD5E1}
+/* Too narrow for the key beside the title (a phone, a small window): one Key button opens it. */
+.an-sheet{container-type:inline-size}
+.an-key-holder{display:none;margin-left:auto}
+.an-key-button{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:0 14px;border:1px solid #C9D1DB;border-radius:999px;background:#FFFFFF;color:var(--sheet-text);font:inherit;font-size:.82rem;font-weight:750;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.an-key-button:hover,.an-key-button[aria-expanded="true"]{border-color:#1598D1;background:#EAF6FD;color:#0E7DB0}
+.an-key-button:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+@container (max-width:720px){
+  .an-sheet-head :is(p,.an-key){display:none}
+  .an-key-holder{display:block}
+}
+/* The name opens the paper; on a narrow list, the eye beside it opens the student's card. */
+.an-row-card{display:inline-grid;place-items:center;width:30px;height:28px;padding:0;border:1px solid #C9D1DB;border-radius:8px;background:#FFFFFF;color:#0E7DB0;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.an-row-card:hover,.an-row-card:active{border-color:#1598D1;background:#E4F0F9}
+.an-row-card:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+/* The student's card. */
+.student-analysis-sheet.an-student-sheet{display:grid;gap:14px;width:min(100%,480px)}
+.an-student-head{display:flex;align-items:center;gap:12px;min-width:0;padding-right:40px}
+.an-student-head .an-rank-no{flex:none;min-width:34px;height:34px;font-size:1rem;color:var(--text);background:var(--bg-raised)}
+.an-student-head .an-rank-no.is-1{background:#FACC15;color:#713F12}
+.an-student-head .an-rank-no.is-2{background:#CBD5E1;color:#1E293B}
+.an-student-head .an-rank-no.is-3{background:#FDBA74;color:#7C2D12}
+.an-student-head .an-rank-wait{flex:none;width:34px;color:var(--text-3);font-size:1.1rem;font-weight:800;text-align:center}
+.an-student-head h2{margin:0;overflow:hidden;color:var(--text);font-size:1.1rem;font-weight:750;text-overflow:ellipsis;white-space:nowrap}
+.an-student-head p{margin:2px 0 0;color:var(--text-3);font-size:.8rem}
+.an-student-score{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;padding:12px 14px;border-radius:var(--r-md);background:var(--bg-raised)}
+.an-student-score strong{color:var(--text);font-size:1.8rem;font-weight:750;line-height:1.1;font-variant-numeric:tabular-nums}
+.an-student-score strong small{color:var(--text-3);font-size:1rem;font-weight:650}
+.an-student-pct{padding:2px 10px;border-radius:999px;background:rgba(21,152,209,.18);color:#5CC1F0;font-size:.9rem;font-weight:750}
+.an-student-score em{flex:1 1 100%;color:var(--warn);font-size:.82rem;font-style:normal;font-weight:700}
+.an-student-counts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:0;padding:0;list-style:none}
+.an-student-counts li{display:grid;justify-items:center;gap:1px;padding:8px 4px;border-radius:10px;font-size:.7rem;font-weight:700;text-align:center;line-height:1.2}
+.an-student-counts b{font-size:1.15rem;font-weight:800}
+.an-student-counts .is-O{background:#4ADE80;color:#064E3B}
+.an-student-counts .is-P{background:#FDE047;color:#713F12}
+.an-student-counts .is-W{background:#F87171;color:#7F1D1D}
+.an-student-counts .is-B{background:#E2E8F0;color:#475569}
+.an-student-counts .is-Q{background:#FB923C;color:#7C2D12}
+.an-student-counts .is-zero{opacity:.35}
+.an-student-title{margin:2px 0 -6px;color:var(--text-3);font-size:.72rem;font-weight:750;letter-spacing:.05em;text-transform:uppercase}
+.an-student-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(58px,1fr));gap:6px;max-height:min(40vh,320px);overflow-y:auto;scrollbar-width:none}
+.an-student-grid::-webkit-scrollbar{display:none}
+.an-student-tile{display:grid;justify-items:center;gap:1px;padding:7px 4px;border-radius:9px;font-variant-numeric:tabular-nums}
+.an-student-tile b{font-size:.84rem;font-weight:800}
+.an-student-tile small{font-size:.74rem;font-weight:700}
+.an-student-tile.is-O{background:#4ADE80;color:#064E3B}
+.an-student-tile.is-P{background:#FDE047;color:#713F12}
+.an-student-tile.is-W{background:#F87171;color:#7F1D1D}
+.an-student-tile.is-B{background:#E2E8F0;color:#475569}
+.an-student-tile.is-Q{background:#FB923C;color:#7C2D12}
+.an-student-flags{display:flex;align-items:center;gap:7px;margin:0;color:var(--warn);font-size:.82rem;font-weight:650}
+.an-student-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+.an-student-actions .button{gap:6px}
+@media (max-width:420px){
+  .an-student-counts{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .an-student-actions .button{flex:1 1 100%;justify-content:center}
+}
+.filter-panel.an-keypanel{width:min(380px,calc(100vw - 16px))}
+.an-keypanel-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:12px 18px 14px;scrollbar-width:none}
+.an-keypanel-body::-webkit-scrollbar{display:none}
+.an-keypanel-summary{margin:0 0 12px;color:var(--text-2);font-size:.84rem;line-height:1.5}
+.an-keypanel-body h3{margin:12px 0 6px;color:var(--text-3);font-size:.72rem;font-weight:750;letter-spacing:.05em;text-transform:uppercase}
+.an-keylist{display:grid;gap:2px;margin:0;padding:0;list-style:none}
+.an-keylist li{display:grid;grid-template-columns:30px minmax(0,auto) minmax(0,1fr);align-items:center;gap:4px 10px;min-height:32px;color:var(--text-2);font-size:.82rem}
+.an-keylist b{color:var(--text);font-weight:700;white-space:nowrap}
+.an-keylist span{min-width:0}
+.an-keylist i{justify-self:center;width:22px;height:22px;border-radius:6px}
+.an-keylist i.is-O{background:#4ADE80}
+.an-keylist i.is-P{background:#FDE047}
+.an-keylist i.is-W{background:#F87171}
+.an-keylist i.is-B{background:#E2E8F0}
+.an-keylist i.is-Q{background:#FB923C}
+.an-keylist i.is-none{background:repeating-linear-gradient(45deg,#F8FAFC 0 4px,#CBD5E1 4px 8px)}
+.an-keylist .an-rank-no{justify-self:center;min-width:24px;height:24px}
+.an-keylist .an-rank-wait{justify-self:center;color:var(--text-3);font-weight:800}
+.an-keylist em{justify-self:center;color:#F39A4A;font-size:.78rem;font-style:normal;font-weight:800}
+@media (max-width:420px){.an-keylist li{grid-template-columns:30px minmax(0,1fr);grid-template-rows:auto auto;padding:4px 0}.an-keylist li>span:last-child{grid-column:2}}
+.an-sheet .an-table{position:relative;min-height:0;overflow:auto;border:1px solid var(--sheet-line);border-radius:10px;background:var(--sheet-table)}
+.an-table table{border-collapse:separate;border-spacing:0;min-width:100%;font-size:.84rem;font-variant-numeric:tabular-nums}
+.an-table th,.an-table td{height:34px;box-sizing:border-box;padding:0 8px;border-bottom:1px solid var(--sheet-line);background:var(--sheet-table);color:var(--sheet-text);white-space:nowrap;text-align:center}
+.an-table thead th{position:sticky;top:0;z-index:2;background:var(--sheet-head);color:var(--sheet-text-2);font-size:.74rem;font-weight:750}
+.an-table thead th button{padding:0;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer;white-space:nowrap}
+.an-table thead th button:hover{color:var(--sheet-text)}
+.an-table thead th.is-sorted{color:#0E7DB0}
+.an-table thead th button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:3px}
+.an-table tbody tr:hover td:not(.an-cell){background:var(--sheet-hover)}
+.an-table tbody tr.is-unranked td:not(.an-cell){color:var(--sheet-text-2)}
+.an-table .an-sticky{position:sticky;z-index:1}
+.an-table thead .an-sticky{z-index:3}
+.an-table .an-col-rank{left:0;width:64px;min-width:64px}
+.an-table .an-col-name{left:64px;width:210px;min-width:210px;max-width:210px;text-align:left}
+.an-table .an-col-total{left:274px;width:120px;min-width:120px;font-weight:750}
+.an-table .an-col-pct{left:394px;width:104px;min-width:104px;border-right:2px solid var(--sheet-line)}
+.an-table th.an-col-q{width:var(--tile,34px);min-width:var(--tile,34px);padding:0 2px}
+.an-table .an-col-time{min-width:64px;border-left:2px solid var(--sheet-line);color:var(--sheet-text-2)}
+.an-table .an-col-flags{width:100%;min-width:90px;text-align:left}
+.an-table .an-col-more{display:none;width:48px;padding:0 6px}
+.an-rank-no{display:inline-grid;place-items:center;min-width:26px;height:26px;padding:0 6px;border-radius:999px;color:var(--sheet-text);font-weight:800}
+.an-rank-no.is-top{box-shadow:0 2px 6px rgba(15,23,42,.18)}
+.an-rank-no.is-1{background:#FACC15;color:#713F12}
+.an-rank-no.is-2{background:#CBD5E1;color:#1E293B}
+.an-rank-no.is-3{background:#FDBA74;color:#7C2D12}
+.an-rank-wait{color:#B4BEC9;font-weight:700}
+.an-name{display:block;max-width:100%;padding:0;border:0;background:transparent;color:var(--sheet-text);font:inherit;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.an-name:hover{color:#0E7DB0;text-decoration:none}
+.an-name:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:3px}
+.an-col-total small{color:var(--sheet-text-3);font-size:.78rem;font-weight:600}
+.an-col-total em{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:#FFEDD5;color:#C2410C;font-style:normal;font-size:.72rem;font-weight:800;line-height:1.45;vertical-align:1px}
+/* The share: its number, then a slim bar on the same line, both in the middle of the row. */
+.an-pct{display:flex;align-items:center;gap:8px;width:100%}
+.an-pct b{flex:none;min-width:38px;font-weight:750;text-align:right}
+.an-pct-track{flex:1;min-width:0;height:5px;border-radius:3px;background:var(--sheet-line);overflow:hidden}
+.an-pct-track i{display:block;height:100%;border-radius:inherit;background:#1598D1}
+.an-table td.an-cell{width:var(--tile,34px);min-width:var(--tile,34px);padding:0;border:3px solid var(--sheet-table);border-radius:9px;font-size:.74rem;font-weight:800}
+.an-table tbody tr:hover td.an-cell{border-color:var(--sheet-hover)}
+/* The tile is a button to that answer in the marking window: the whole tile, a shade darker on hover. */
+.an-cell-open{display:block;width:100%;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;cursor:pointer}
+.an-table td.an-cell:has(.an-cell-open:hover){filter:brightness(.93)}
+.an-table td.an-cell.is-Q:has(.an-cell-open:hover){box-shadow:inset 0 0 0 2px #C2410C}
+.an-cell-open:focus-visible{outline:2px solid #1598D1;outline-offset:1px}
+.an-student-tile{border:0;font:inherit;cursor:pointer}
+.an-student-tile:hover{filter:brightness(.95)}
+.an-student-tile:focus-visible{outline:2px solid #1598D1;outline-offset:2px}
+.an-table td.is-O{background:#4ADE80;color:#064E3B}
+.an-table td.is-P{background:#FDE047;color:#713F12}
+.an-table td.is-W{background:#F87171;color:#7F1D1D}
+.an-table td.is-B{background:#DDE3EA;color:#64748B}
+.an-table td.is-Q{background:#FB923C;color:#7C2D12}
+.an-table td.is-none{background:repeating-linear-gradient(45deg,#EEF1F5 0 5px,#E2E7ED 5px 10px)}
+.an-table tbody tr:hover td.an-cell:is(.is-O,.is-P,.is-W,.is-Q){filter:saturate(1.15) brightness(1.04)}
+.an-table .an-spacer td{height:auto;padding:0;border:0}
+.an-flags{display:inline-flex;gap:5px}
+.an-flag{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;background:#FFEDD5;color:#C2410C;font-size:.78rem;font-weight:800}
+.an-flag.is-locked{background:#FEE2E2;color:#B91C1C}
+.an-flags-none{color:var(--sheet-text-3)}
+/* A student's Flags: a button to their activity log. */
+.an-flags-button{display:inline-flex;align-items:center;min-height:26px;margin:-4px 0 -4px -6px;padding:2px 6px;border:1px solid transparent;border-radius:7px;background:transparent;font:inherit;cursor:pointer}
+.an-flags-button:hover{border-color:var(--sheet-line);background:var(--sheet-hover)}
+.an-flags-button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.an-sheet .an-empty{color:var(--sheet-text-2)}
+
+/* Short windows: tighter cards, and the rank list's note goes. */
+@media (min-width:761px) and (max-height:820px){
+  .an-view{gap:10px}
+  .an-card,.an-bar{padding:10px 14px}
+  .an-card{gap:8px}
+  .an-bar{gap:8px}
+  .an-sheet{padding:10px 12px;gap:8px}
+  .an-tile{display:flex;align-items:baseline;gap:8px;padding:6px 12px}
+  .an-tile strong{flex:none;font-size:1.1rem}
+  .an-legend li{min-height:20px;font-size:.76rem}
+  .an-sheet-head p,.an-qchart .an-note{display:none}
+}
+/* Very short windows: the cards give up height first, their contents scrolling inside. */
+@media (min-width:761px) and (max-height:660px){
+  .an-tile small{display:none}
+  .an-card{gap:6px}
+  .an-card,.an-bar{padding:8px 12px}
+  .an-bars .ov-spread-plot{padding-top:4px}
+  .an-bars .ov-spread-label{display:none}
+}
+/* Narrower screens: the chart controls drop their words. */
+@media (min-width:761px) and (max-width:1199px){
+  /* After the short-window rules above, so a short and narrow window gets both. */
+  .an-tiles{gap:8px}
+  .an-tile{gap:6px;padding:6px 8px}
+  .an-tile strong{font-size:.98rem}
+  .an-tile span{font-size:.7rem}
+  .an-filters .an-views button{padding:0 12px}
+}
+/* A phone: one column, the page scrolls; the rank list keeps its own scroll so its heading stays in view. */
+@media (max-width:760px){
+  .an-tiles{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .an-charts{grid-template-columns:minmax(0,1fr);grid-template-rows:none}
+  .an-donut-box{container-type:inline-size}
+  .an-donut svg{width:min(130px,38cqw)}
+  .an-bars{height:auto}
+  .an-bars .ov-spread-plot{height:140px}
+  .an-qbars{height:auto !important;overflow:visible}
+  .an-qbar-track{height:12px}
+  .an-qlegend{margin-left:0}
+  .an-sheet .an-table{max-height:75vh}
+  .an-filters .an-views{flex:1 1 100%;min-width:0;margin-right:0}
+  .an-filters .an-views::after{display:none}
+  .an-filters .an-views button{flex:1;min-width:0;justify-content:center;gap:5px;padding:0 6px;font-size:.82rem}
+  .an-meta .an-count{margin-left:0}
+  .an-filters>.filter-menu{flex:1 1 0;min-width:0}
+  .an-filters .filter-trigger{width:100%;min-width:0;max-width:none;height:36px;min-height:36px;gap:6px;padding:0 12px}
+  .an-search{flex:1 1 100%}
+  .an-count{margin-left:0}
+  .an-table .an-col-name{width:140px;min-width:140px;max-width:140px}
+  .an-table .an-col-total{left:204px}
+  .an-table .an-col-pct{left:324px}
+}
+/* A small phone: only Rank and Student stay put, or there would be no room to scroll; each menu its own row, its words whole. */
+@media (max-width:480px){
+  .an-filters>.filter-menu{flex:1 1 100%}
+  .an-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .an-table :is(.an-col-total,.an-col-pct).an-sticky{position:static}
+}
+
+
+/* A rank list too narrow for its questions (a phone, a small window): Rank,
+   Student, Marks and % fill the width, and the arrow at the end of each row
+   opens that student's marks and answers. With room, the questions show and
+   the arrow does not - one or the other, never both cut short. */
+@container (max-width:720px){
+  .an-sheet .an-table table{table-layout:fixed;width:100%;min-width:0}
+  .an-sheet .an-table :is(.an-col-q,.an-cell,.an-col-time,.an-col-flags){display:none}
+  .an-sheet .an-table .an-col-more{display:table-cell}
+  .an-sheet .an-table .an-sticky{position:static}
+  .an-sheet .an-table .an-col-rank{width:52px;min-width:0}
+  .an-sheet .an-table .an-col-name{width:auto;min-width:0;max-width:none}
+  .an-sheet .an-table .an-col-total{width:96px;min-width:0}
+  .an-sheet .an-table .an-col-pct{width:64px;min-width:0;border-right:0}
+  .an-pct{display:grid;gap:3px;justify-items:center}
+  .an-pct b{min-width:0;text-align:center}
+  .an-pct-track{width:100%;flex:none}
+}
+@container (max-width:380px){
+  .an-sheet .an-table .an-col-rank{width:42px;padding:0 4px}
+  .an-sheet .an-table .an-col-total{width:76px;padding:0 4px}
+  .an-sheet .an-table .an-col-pct{width:52px;padding:0 4px}
+  .an-pct-track{display:none}
+  .an-sheet .an-table .an-col-more{width:42px;padding:0 4px}
+}
+
+/* A student's result: how their paper stands against the class - theirs in blue, the class in grey. */
+.result-insights{display:grid;gap:18px;margin-top:6px}
+.result-compare{display:grid;gap:10px}
+.result-compare h2{margin:0;color:var(--text-3);font-size:.7rem;font-weight:750;letter-spacing:.05em;text-transform:uppercase}
+.result-compare h3{margin:0 0 4px;color:var(--text-2);font-size:.76rem;font-weight:700}
+.result-rank{margin:0;color:var(--text-2);font-size:.9rem}
+.result-rank strong{color:var(--text);font-size:1.4rem;font-weight:650}
+.result-compare-bars{display:grid;gap:8px;margin:0;padding:0;list-style:none}
+.result-compare-bars li{display:grid;grid-template-columns:96px minmax(0,1fr) 44px;align-items:center;gap:10px}
+.result-compare-name{color:var(--text-2);font-size:.8rem}
+.result-compare-bar{height:8px;border-radius:999px;background:var(--bg-raised);overflow:hidden}
+.result-compare-bar span{display:block;height:100%;border-radius:inherit;background:#5A6066}
+.result-compare-bars li.is-you .result-compare-bar span{background:var(--primary)}
+.result-compare-bars li.is-you .result-compare-name{color:var(--text);font-weight:700}
+.result-compare-value{color:var(--text);font-size:.86rem;text-align:right;font-variant-numeric:tabular-nums}
+.result-compare-time{margin:0;color:var(--text-2);font-size:.82rem}
+.result-compare-time strong{color:var(--text)}
+.result-compare-types{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0;padding:0;list-style:none;color:var(--text-2);font-size:.8rem}
+.result-compare-types span{margin-right:6px;color:var(--text);font-weight:700}
+.result-compare-list ul{display:grid;gap:4px;margin:0;padding:0;list-style:none;color:var(--text-2);font-size:.82rem}
+.result-compare-list strong{margin-right:6px;color:var(--text)}
+.result-class{margin:2px 0 0;color:var(--text-3);font-size:.76rem}
+
+/* Results list: Mark and Review are one button that changes its word - one width either way.
+   Both outlined at rest: Mark blue (a paper still to mark), Review yellow. */
+.button.result-open{min-width:84px;justify-content:center}
+/* Like the other outlined buttons: filled yellow under the pointer, a brighter outline with a glow while pressed, one size throughout. */
+.button.result-open.is-review{background:transparent;border:1px solid #E6BF24;color:#E6BF24;box-shadow:none}
+.button.result-open.is-review:hover:not(:disabled){background:#E6BF24;border-color:#E6BF24;color:#1E2124}
+.button.result-open.is-review:active:not(:disabled){background:rgba(230,191,36,.06);border-color:#F2CC33;color:#FFD84D;box-shadow:0 0 0 3px rgba(230,191,36,.2),0 0 14px rgba(230,191,36,.26)}
+.button.result-open.is-review:focus-visible{outline:2px solid #F2CC33;outline-offset:2px}
+.button.result-open:active:not(:disabled){transform:none}
+/* Mark: the same, in blue - like View on the Users page. */
+.button.result-open.is-mark{background:transparent;border:1px solid #1598D1;color:#3FB0E6;box-shadow:none}
+.button.result-open.is-mark:hover:not(:disabled){background:#1598D1;border-color:#1598D1;color:#FFFFFF}
+.button.result-open.is-mark:active:not(:disabled){background:rgba(21,152,209,.06);border-color:#3FB0E6;color:#6CCBF5;box-shadow:0 0 0 3px rgba(21,152,209,.22),0 0 14px rgba(21,152,209,.28)}
+.button.result-open.is-mark:focus-visible{outline:2px solid #3FB0E6;outline-offset:2px}
+
+/* Four dashboard tabs (Test, Students, Results, Analysis): too narrow for a
+   word and a three-digit count each, every tab is its icon and its count -
+   the word stays its tooltip and what a screen reader says. */
+@media (max-width:560px){
+  [data-area] .dashboard-tabs .tab-icon{display:block}
+  [data-area] .dashboard-tabs .tab-label{position:absolute;width:1px;height:1px;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+  [data-area] .dashboard-tabs .dashboard-tab{gap:6px;padding:0 4px}
+}
+

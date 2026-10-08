@@ -18,8 +18,9 @@ export const registrationCookie = (code) => `test_access_${code}`;
 export const publicCode = () => `TEST-${randomId(5).toUpperCase()}`;
 
 const normalizeCode = (code) => String(code || '').toUpperCase();
-// A registration as the app knows it: without the collection's own bookkeeping.
-const REGISTRATION_VIEW = { projection: { _id: 0, testCode: 0 } };
+// A registration as the app knows it: without the collection's own bookkeeping,
+// nor a paper made ahead while waiting for Start (read only at Begin: preparedPaperOf).
+const REGISTRATION_VIEW = { projection: { _id: 0, testCode: 0, preparedPaper: 0 } };
 // A test as the app knows it. Only a test not yet moved to per-student
 // documents still has the list inline; it is never read from there.
 const TEST_VIEW = { projection: { registrations: 0 } };
@@ -78,6 +79,19 @@ export async function requireOwnedTest(req, code, options) {
   return test;
 }
 
+/**
+ * The paper made for this student while they waited for Start (see
+ * preparePaper in services/attempt-service.js), or null. Kept out of every
+ * other read: it is needed only the moment they press Begin.
+ */
+export async function preparedPaperOf(code, registrationId) {
+  const found = await registrations().findOne(
+    { testCode: normalizeCode(code), id: String(registrationId ?? '') },
+    { projection: { _id: 0, preparedPaper: 1 } }
+  );
+  return found?.preparedPaper || null;
+}
+
 export const findRegistrationById = (test, registrationId) => (test.registrations || []).find((entry) => entry.id === registrationId);
 export const findRegistrationByAttempt = (test, attemptId) => (test.registrations || []).find((entry) => entry.attempt?.id === attemptId);
 
@@ -96,7 +110,7 @@ export async function requireOwnedRegistration(req, code, registrationId) {
  */
 export async function testsForEmail(email, code = null) {
   const filter = { collegeEmail: email, ...(code ? { testCode: normalizeCode(code) } : {}) };
-  const own = await registrations().find(filter, { projection: { _id: 0 } }).sort({ _id: 1 }).toArray();
+  const own = await registrations().find(filter, { projection: { _id: 0, preparedPaper: 0 } }).sort({ _id: 1 }).toArray();
   if (!own.length) return [];
   const codes = [...new Set(own.map((entry) => entry.testCode))];
   const docs = await tests().find({ code: { $in: codes } }, TEST_VIEW).sort({ createdAt: -1 }).toArray();
@@ -128,7 +142,7 @@ export async function attemptContext(attemptId) {
   if (!id) return null;
   const guess = attemptTests.get(id);
   const [found, guessed] = await Promise.all([
-    registrations().findOne({ 'attempt.id': id }, { projection: { _id: 0 } }),
+    registrations().findOne({ 'attempt.id': id }, { projection: { _id: 0, preparedPaper: 0 } }),
     guess ? cachedTestDocByCode(guess) : null
   ]);
   if (!found?.attempt) return null;

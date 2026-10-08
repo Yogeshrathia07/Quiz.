@@ -4,6 +4,7 @@ import { useAppUpdate, useExamInProgress } from './lib/useAppUpdate.js';
 import { clearCache, dropCached } from './lib/cache.js';
 import { prefetchRoute, preloadScreens, rememberRole, rememberedRole, watchLinks } from './lib/prefetch.js';
 import { reloadFresh } from './lib/app-shell.js';
+import { ViewerContext, setNavigator } from './lib/people.js';
 import { lazyScreen, screens } from './screens/loaders.js';
 import { SiteHeader } from './components/SiteHeader.jsx';
 import { HoverTips } from './components/HoverTips.jsx';
@@ -100,11 +101,14 @@ export default function App() {
   // then (a thin line along the top says it is on its way), and what it needs
   // is asked for in the same moment, not after it has drawn.
   const [navigating, startNavigation] = useTransition();
-  const go = useCallback((url) => {
+  // `state` rides along in the history entry (a person opened from their name: lib/people.js).
+  const go = useCallback((url, state = {}) => {
     prefetchRoute(url, roleRef.current);
-    window.history.pushState({}, '', url);
+    window.history.pushState(state, '', url);
     startNavigation(() => setRoute(currentRoute()));
   }, []);
+  // A name in any table opens that person under Users through the same navigation.
+  useEffect(() => { setNavigator(go); }, [go]);
   // Tell other open tabs the account changed, then pick it up here.
   const onSignedIn = useCallback(async () => {
     try { window.localStorage.setItem(SESSION_SIGNAL, String(Date.now())); } catch { /* storage may be blocked */ }
@@ -270,7 +274,8 @@ export default function App() {
   const isWideScreen = Boolean(auth?.user && !auth.user.isGuest && !route.test && !route.attend &&!['create', 'edit'].includes(route.admin));
 
   return (
-    <>
+    // Who is signed in, for what a page offers them (a name opening the person: components/PersonLink.jsx).
+    <ViewerContext.Provider value={auth?.user || null}>
       <div className={`nav-progress${navigating ? ' is-active' : ''}`} aria-hidden="true"/>
       <div className={`shell${sitting ? ' is-exam' : ''}`}>
         {/* A test in progress has the whole screen: no header, no way out but Submit. */}
@@ -292,6 +297,6 @@ export default function App() {
       {changingPassword && <Suspense fallback={null}><ChangePasswordModal onClose={closePasswordModal} showToast={showToast}/></Suspense>}
       {toast && <Toast key={toast.id} toast={toast}/>}
       <HoverTips/>
-    </>
+    </ViewerContext.Provider>
   );
 }

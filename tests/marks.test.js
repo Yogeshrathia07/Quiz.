@@ -55,3 +55,24 @@ test('an imported quiz brings its marks; a value equal to its type\'s default fo
   assert.deepEqual(imported.details.typeMarks, { mcq: 1, msq: 2, short: 5 });
   assert.deepEqual(imported.questions.map((question) => [question.timeSeconds, question.marks]), [[null, null], [45, 2], [null, null]]);
 });
+
+test('marks still to be marked: the unmarked short answers given, at their worth', async () => {
+  const { pendingMarks } = await import('../src/domain/marks.js');
+  const paper = {
+    questions: [
+      { id: 1, type: 'mcq', options: ['a', 'b'], correctOptions: ['0'] },
+      { id: 2, type: 'msq', manualGrading: true, marks: 3 },
+      { id: 3, type: 'msq', manualGrading: true },
+      { id: 4, type: 'msq', manualGrading: true }
+    ],
+    typeMarks: { mcq: 1, msq: 1, short: 2 }
+  };
+  const attempt = { answers: [
+    { questionId: 1, isCorrect: null, answeredAt: new Date() },
+    { questionId: 2, isCorrect: null, answeredAt: new Date() },
+    { questionId: 3, isCorrect: null, answeredAt: new Date() },
+    { questionId: 4, isCorrect: true, answeredAt: new Date() }
+  ] };
+  assert.equal(pendingMarks(paper, attempt), 5, 'its own 3, the short-answer default 2; a choice and a marked one count nothing');
+  assert.equal(pendingMarks(paper, { answers: [{ questionId: 2, isCorrect: null, answeredAt: null }] }), 0, 'left blank: nothing to mark');
+});

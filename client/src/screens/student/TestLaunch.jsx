@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { leavingRules } from './leaving-rules.js';
 import { isRetryable, post } from '../../lib/api.js';
 import { durationLabel } from '../../lib/format.js';
-import { LocationHelp, LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
+import { LocationHelp, LocationPanel } from '../../components/LocationCheck.jsx';
 import { locationPermission } from '../../lib/geo.js';
 import { readDeviceSignals } from '../../lib/device.js';
 import { fullscreenSupported, markBegan, requestTestFullscreen } from '../../lib/useAwayMonitor.js';
@@ -14,14 +14,21 @@ const START_TIMEOUT_MS = 8_000;
 const START_TRIES = 5;
 const wait = (ms) => new Promise((resolve) => { window.setTimeout(resolve, ms); });
 
-export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast, windowKind, deviceBlock = null, deviceChecking = false, onDeviceRefused }) {
+/** The venue step's own words, while waiting for Start and above Begin. */
+export const venueIntro = (test) => `Your location confirms you are within ${test.locationRadiusMeters} m of the test venue.`;
+
+/**
+ * `location`: the venue check (components/LocationCheck), begun while the
+ * student waited for Start (StudentScreen), so a reading found then is used
+ * here with nothing asked again.
+ */
+export function TestLaunch({ test, code, reload, location, onStarted = () => {}, showToast, windowKind, deviceBlock = null, deviceChecking = false, onDeviceRefused }) {
   const [busy, setBusy] = useState(false);
   // Begin had to be asked again: the connection is slow, and the button says so.
   const [slow, setSlow] = useState(false);
   // The venue check is its own step above Begin (components/LocationCheck).
   // What the server says about the reading - too vague to place them - is kept
   // on the page too: a toast would be gone before the steps could be followed.
-  const location = useLocationCheck(Boolean(test.locationRequired));
   const [serverProblem, setServerProblem] = useState('');
   const venueRef = useRef(null);
   const showVenue = () => venueRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -160,7 +167,7 @@ export function TestLaunch({ test, code, reload, onStarted = () => {}, showToast
       </ul>
       {test.locationRequired && (
         <div ref={venueRef} className="launch-venue">
-          <LocationPanel check={location} intro={`Your location confirms you are within ${test.locationRadiusMeters} m of the test venue.`}/>
+          <LocationPanel check={location} intro={venueIntro(test)}/>
           {serverProblem && <LocationHelp problem={serverProblem}/>}
         </div>
       )}

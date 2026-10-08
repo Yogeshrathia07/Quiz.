@@ -83,7 +83,7 @@ function SaveState({ question, connection = 'online' }) {
  * Mounted with `key={question.id}`, so the typed draft below belongs to exactly
  * one question and a background refresh can never overwrite it mid-sentence.
  */
-export function QuestionPaper({ question, total, onSave, flushRef, draftRef, connection }) {
+export function QuestionPaper({ question, total, onSave, flushRef, draftRef, connection, splitPanes = false }) {
   const [answerText, setAnswerText] = useState(question.answerText);
   const box = useRef(null);
 
@@ -161,7 +161,7 @@ export function QuestionPaper({ question, total, onSave, flushRef, draftRef, con
     <article className="q-card" id={`question-${question.id}`}>
       {/* The question, then the answer: one under the other - or, on a phone held
           sideways, side by side (theme.css), so neither is squeezed. */}
-      <div className="q-ask">
+      <div className="q-ask" id={splitPanes ? 'exam-question-pane' : undefined}>
         <div className="q-head">
           <span className="q-count">
             Question {question.number}<span>/{total}</span>
@@ -173,7 +173,7 @@ export function QuestionPaper({ question, total, onSave, flushRef, draftRef, con
         <RichText className="q-prompt" text={question.prompt}/>
         {question.image && <QuestionImage image={question.image} label={`Picture for question ${question.number}`}/>}
       </div>
-      <div className="q-answer">
+      <div className="q-answer" id={splitPanes ? 'exam-answer-pane' : undefined}>
         <p className="q-hint">{HINT[question.type]}</p>
 
         {question.type === 'short' ? (

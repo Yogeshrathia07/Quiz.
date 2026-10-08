@@ -2,20 +2,20 @@ import { config } from '../config.js';
 import { paperHasImages, questionHasImage, shownGraceMs } from '../domain/question-image.js';
 import { registrations, tests } from '../db/index.js';
 import { PublicTestError } from '../lib/errors.js';
-import { asInteger, hmac, randomId, stableSort } from '../lib/crypto.js';
+import { asInteger, hash, hmac, randomId, stableSort } from '../lib/crypto.js';
 import { currentMs, dateMs, now } from '../lib/time.js';
-import { selectedAttemptQuestions } from '../domain/question-bank.js';
+import { activeQuestions, questionType, selectedAttemptQuestions } from '../domain/question-bank.js';
 import { attemptView } from '../domain/presenters.js';
 import { TIME_OVER_MESSAGE, acceptsAttemptAnswers, isAttemptTimeOver, isPerStudent, isTimeOver } from '../domain/attempt-rules.js';
 import { MAX_EVENTS, RETIRED_FLAGS, emptyIntegrity, flagReason, leaveReason, locksOnViolation, violationActionOf, warningsBeforeLockOf } from '../domain/integrity.js';
 import { ANSWER_LOG_MAX, TYPING_MERGE_MS } from '../domain/activity.js';
-import { automaticMarks, earnedMarks, paperMarks, paperScore, questionMarks } from '../domain/marks.js';
+import { automaticMarks, earnedMarks, paperMarks, paperScore, pendingMarks, questionMarks } from '../domain/marks.js';
 import {
-  adminEmail, attemptContext, hasRegistrationCookie, registrationFor, requireRegistration, requireTestForStudent,
+  adminEmail, attemptContext, hasRegistrationCookie, preparedPaperOf, registrationFor, requireRegistration, requireTestForStudent,
   serializePaperWrite, updateAttemptWhere, updateRegistrationFields
 } from '../data/test-repository.js';
 import { startIfDue } from './test-lifecycle.js';
-import { deviceFromRequest, ownsTest, recordDevice } from './device-service.js';
+import { deviceFromRequest, deviceUpdate, ownsTest, recordDevice } from './device-service.js';
 import { deviceRefusal, deviceVerdict } from '../domain/device.js';
 import { justWokeUp } from './outage.js';
 import {
@@ -27,21 +27,10 @@ import { resultsFrozen } from '../domain/freeze.js';
 // Faculty have no SAP ID, so their paper is seeded from their email instead.
 const attemptSeed = (test, registration) => hmac(`${test.code}:${registration.sapId || registration.collegeEmail}`, config.sessionSecret);
 
-/**
- * A fresh paper for one student. The deadline is not stored here: it is the
- * test's own `endsAt`, shared by everyone, so moving that end time immediately
- * moves every attempt with it.
- */
-export function buildAttempt(existingId, test, registration) {
-  const startedAt = now();
-  const seed = attemptSeed(test, registration);
+/** A student's questions in their order, each with its options' order, and an empty answer for each. */
+function paperQuestions(test, registration, seed) {
   const selected = selectedAttemptQuestions(test, seed, registration.paperSlot ?? null);
   return {
-    id: existingId || randomId(18),
-    status: 'in_progress',
-    startedAt,
-    submittedAt: null,
-    seed,
     questions: selected.map((question, index) => ({
       questionIndex: index,
       questionId: question.id,
@@ -49,7 +38,41 @@ export function buildAttempt(existingId, test, registration) {
     })),
     answers: selected.map((question) => ({
       questionId: question.id, selectedOptions: [], answerText: '', answeredAt: null, isCorrect: null
-    })),
+    }))
+  };
+}
+
+/**
+ * What a student's paper is made from, as one short string: the questions
+ * (each kind and number of options), how many of each kind, the draw and the
+ * shuffle, and the student's own seed (their SAP ID, which an admin may
+ * correct). A paper made ahead from anything since changed is not used
+ * (preparePaper).
+ */
+export const paperBasis = (test, registration) => hash(JSON.stringify([
+  activeQuestions(test).map((question) => [question.id, questionType(question), (question.options || []).length]),
+  test.questionMix || null, test.questionCount ?? null, test.questionDraw || null, Boolean(test.shuffleQuestions),
+  attemptSeed(test, registration)
+])).slice(0, 24);
+
+/**
+ * A fresh paper for one student. The deadline is not stored here: it is the
+ * test's own `endsAt`, shared by everyone, so moving that end time immediately
+ * moves every attempt with it. `prepared`: the questions and answers made
+ * ahead (preparePaper) - the very ones this would make now.
+ */
+export function buildAttempt(existingId, test, registration, prepared = null) {
+  const startedAt = now();
+  const seed = attemptSeed(test, registration);
+  const { questions, answers } = prepared || paperQuestions(test, registration, seed);
+  return {
+    id: existingId || randomId(18),
+    status: 'in_progress',
+    startedAt,
+    submittedAt: null,
+    seed,
+    questions,
+    answers,
     fullscreenExitCount: 0,
     fullscreenTotalAbsenceMs: 0,
     // outsideStreak: readings in a row placing them outside; outsideSince is
@@ -314,8 +337,9 @@ const WINDOW_CHECKS = ['private', 'mobile', 'declared', 'unknown'];
 const mustUsePrivateWindow = (req, test) => Boolean(test.requirePrivateWindow) && test.ownerEmail !== adminEmail(req);
 
 /**
- * Spread draw: this student's place in the order papers are begun, taken once
- * and kept, so a reload or an admin's restart gives them the same block.
+ * Spread draw: this student's place in the order papers are made - while they
+ * wait (preparePaper), or at Begin - taken once and kept, so a reload or an
+ * admin's restart gives them the same block.
  */
 async function paperSlotFor(test, registration) {
   if (test.questionDraw !== 'spread') return null;
@@ -347,6 +371,56 @@ async function refuseIfSittingAnotherTest(test, registration) {
   }
 }
 
+/**
+ * Made while the student waits for the test to start (their waiting page asks
+ * for the test every few seconds - getTest), so that Begin - when the whole
+ * class presses it at once - has less to do: their place in the question draw
+ * is taken now, one student at a time, rather than by everyone in the same
+ * instant, and their questions and option order are put in order now. The very
+ * paper Begin would make (the same seed and place), kept on the server and
+ * never sent: nothing of it reaches the page before they begin. Made again if
+ * the paper changes before Start (paperBasis); never once the test has started.
+ */
+export async function preparePaper(test, registration) {
+  if (!registration || registration.status !== 'approved' || registration.attempt || test.isStarted || test.isClosed) return;
+  const basis = paperBasis(test, registration);
+  if (registration.preparedBasis === basis || preparing >= PREPARING_AT_ONCE) return;
+  preparing += 1;
+  try {
+    await makePaperAhead(test, registration, basis);
+  } finally {
+    preparing -= 1;
+  }
+}
+
+/**
+ * Papers made ahead at the same moment, at most. A whole class polling in the
+ * same second - just after a bulk approval, say - is answered as before, and
+ * the rest of their papers are made on a later poll (or at Begin): the
+ * waiting page never queues behind this work.
+ */
+const PREPARING_AT_ONCE = 8;
+let preparing = 0;
+
+async function makePaperAhead(test, registration, basis) {
+  const paperSlot = await paperSlotFor(test, registration);
+  const slot = Number.isInteger(paperSlot) && paperSlot !== registration.paperSlot ? { paperSlot } : {};
+  const keep = (fields) => (Object.keys(fields).length
+    ? registrations().updateOne({ testCode: test.code, id: registration.id, attempt: null }, { $set: fields })
+    : null);
+  let preparedPaper;
+  try {
+    preparedPaper = { ...paperQuestions(test, { ...registration, paperSlot }, attemptSeed(test, registration)), preparedAt: now() };
+  } catch (error) {
+    // Not ready (a question bank still being written): the place in the draw
+    // is kept all the same, so the next poll does not take another.
+    await keep(slot);
+    throw error;
+  }
+  await keep({ preparedPaper, preparedBasis: basis, ...slot });
+  registration.preparedBasis = basis;
+}
+
 export async function startAttempt(req, code, raw = {}) {
   let test = await requireTestForStudent(req, code);
   // Pressing Begin the second the countdown ends may beat the scheduler.
@@ -362,22 +436,34 @@ export async function startAttempt(req, code, raw = {}) {
     throw new PublicTestError(403, 'The test time is over, so a new attempt cannot be started. Ask your administrator to extend the time.');
   }
 
-  await refuseIfSittingAnotherTest(test, registration);
+  // The paper made while they waited (preparePaper), if it is still this test's paper.
+  const [prepared] = await Promise.all([
+    registration.preparedBasis === paperBasis(test, registration) ? preparedPaperOf(test.code, registration.id) : null,
+    refuseIfSittingAnotherTest(test, registration)
+  ]);
   if (mustUsePrivateWindow(req, test) && raw.window === 'normal') {
     throw new PublicTestError(403, 'This test must be taken in an Incognito (private) window. Open the test link in one and sign in there.');
   }
   // Phones only, or laptops only: decided here from what the page and the
   // request say (domain/device.js), whatever the page itself showed. Kept
-  // first, so the teacher sees a refused device too.
+  // even when Begin is refused, so the teacher sees a refused device too;
+  // otherwise kept by the same write that creates the paper.
   const device = deviceFromRequest(req, raw.device);
-  await recordDevice(test, registration, device, 'begin');
+  const deviceWrite = deviceUpdate(registration, device, 'begin');
+  const keepDevice = () => (deviceWrite ? recordDevice(test, registration, device, 'begin') : null);
   const deviceCheck = deviceVerdict(test, registration, device, { exempt: ownsTest(req, test) });
-  if (!deviceCheck.allowed) throw new PublicTestError(403, deviceRefusal(deviceCheck.rule, device), 'DEVICE_NOT_ALLOWED');
-  const initialLocation = await verifyStartLocation(test, registration, raw);
+  if (!deviceCheck.allowed) {
+    await keepDevice();
+    throw new PublicTestError(403, deviceRefusal(deviceCheck.rule, device), 'DEVICE_NOT_ALLOWED');
+  }
+  const initialLocation = await verifyStartLocation(test, registration, raw).catch(async (error) => {
+    await keepDevice();
+    throw error;
+  });
   // The administrator's explicit Start action is the gate. Registration times
   // organise the cohort; they are not a second block after Start.
   const paperSlot = await paperSlotFor(test, registration);
-  const attempt = buildAttempt(null, test, { ...registration, paperSlot });
+  const attempt = buildAttempt(null, test, { ...registration, paperSlot }, prepared && { questions: prepared.questions, answers: prepared.answers });
   // Private-window tests: what the student's browser looked like when they
   // began - see client/src/lib/private-mode.js. Shown on the dashboard.
   if (test.requirePrivateWindow) attempt.windowCheck = WINDOW_CHECKS.includes(raw.window) ? raw.window : 'unknown';
@@ -394,7 +480,11 @@ export async function startAttempt(req, code, raw = {}) {
   // paper; any other gets the one that won rather than replacing it.
   const created = await registrations().updateOne(
     { testCode: test.code, id: registration.id, attempt: null },
-    { $set: { attempt, paperSlot } }
+    {
+      $set: { attempt, paperSlot, ...deviceWrite?.$set },
+      $unset: { preparedPaper: '', preparedBasis: '' },
+      ...(deviceWrite?.$push ? { $push: deviceWrite.$push } : {})
+    }
   );
   if (created.matchedCount === 1) return studentView(test, registration, attempt);
   const existing = registrationFor(req, await requireTestForStudent(req, code));
@@ -1232,6 +1322,8 @@ export function resultSummary(test, attempt) {
     // Marks earned out of the paper's full marks; an unmarked answer counts nothing until it is marked.
     score: paperScore(attempt),
     totalMarks: paperMarks(test, attempt),
+    // Worth of the short answers not marked yet: neither earned nor lost.
+    pendingMarks: pendingMarks(test, attempt),
     answered: (attempt.answers || []).filter((answer) => answer.answeredAt).length,
     pendingManual,
     canDownload

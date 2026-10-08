@@ -2,6 +2,7 @@ import { registrations, studentProfiles, tests } from '../db/index.js';
 import { config } from '../config.js';
 import { PublicTestError } from '../lib/errors.js';
 import { hash, randomId } from '../lib/crypto.js';
+import { cookieIsSecure } from '../lib/security.js';
 import { iso, now } from '../lib/time.js';
 import { cleanText, isSapId, normalizeSapId } from '../domain/test-builder.js';
 import { publicTest, studentResponseData, timeTakenSeconds } from '../domain/presenters.js';
@@ -14,7 +15,9 @@ import {
 import {
   GUEST_EMAIL_DOMAIN, hasLiveSession, isGuestAccount, issueSession, normalizeEmail, roleForEmail
 } from '../auth/portal-auth.js';
-import { finalizeAttempt, responsesAvailable, resultSummary } from './attempt-service.js';
+import { finalizeAttempt, preparePaper, responsesAvailable, resultSummary } from './attempt-service.js';
+import { classStats, standingIn } from './overview-service.js';
+import { paperMarks, paperScore } from '../domain/marks.js';
 import { startIfDue } from './test-lifecycle.js';
 
 const isDuplicateKey = (error) => error?.code === 11000;
@@ -103,7 +106,7 @@ async function endGuestRegistration(test, registration) {
 export async function endGuestVisit(email) {
   const address = normalizeEmail(email);
   if (!isGuestAccount(address)) return;
-  const seats = await registrations().find({ collegeEmail: address, exitedAt: null }, { projection: { _id: 0 } }).toArray();
+  const seats = await registrations().find({ collegeEmail: address, exitedAt: null }, { projection: { _id: 0, preparedPaper: 0 } }).toArray();
   for (const { testCode, ...registration } of seats) {
     const test = await tests().findOne({ code: testCode }, { projection: { registrations: 0 } });
     if (test) await endGuestRegistration(test, registration);
@@ -152,6 +155,14 @@ export async function getTest(req, code) {
   let test = await requireTestForStudent(req, code);
   if (await startIfDue(test)) test = await requireTestForStudent(req, code);
   const registration = registrationFor(req, test);
+  // Their paper is made now, while they wait, so that Begin has less to do.
+  // Begin makes it itself if this could not - a question bank still being
+  // written, say: the waiting page never fails over it.
+  if (registration) {
+    await preparePaper(test, registration).catch((error) => {
+      if (!(error instanceof PublicTestError)) console.error('Preparing a paper:', error.message);
+    });
+  }
   return {
     // The countdowns run on the server's clock, not the phone's.
     serverTime: new Date().toISOString(),
@@ -244,7 +255,7 @@ export async function registerForTest(req, res, code, raw) {
 const setSeatCookie = (res, code, id, token) => res.cookie(registrationCookie(code), JSON.stringify({ id, token }), {
   httpOnly: true,
   sameSite: 'lax',
-  secure: process.env.NODE_ENV === 'production',
+  secure: cookieIsSecure(res.req),
   signed: true,
   maxAge: 14 * 24 * 60 * 60 * 1000
 });
@@ -299,6 +310,7 @@ export async function myResults(req) {
         score: summary?.released ? summary.score : null,
         // Out of the paper's full marks, which can differ from its number of questions.
         totalMarks: summary?.released ? summary.totalMarks : null,
+        pendingMarks: summary?.released ? summary.pendingMarks || 0 : 0,
         message: summary && !summary.released ? summary.message : '',
         // Why the marks are not shown yet: 'admin' (waiting for release),
         // 'after_quiz' (shown when the test ends) or 'manual' (being marked).
@@ -315,12 +327,18 @@ export async function myResults(req) {
  * Built fresh on each request, so a sheet downloaded while short answers were
  * still unmarked shows their marks when downloaded again.
  */
-export async function myResponseData(req, code) {
+/** Their own handed-in paper, once the test is closed and its marks released. */
+async function myReleasedPaper(req, code) {
   const found = await submittedRegistrationFor(normalizeEmail(req.portalUser?.email), code);
   if (!found) throw new PublicTestError(404, 'You have no submitted attempt for this test.');
   if (!responsesAvailable(found.test, found.registration.attempt)) {
     throw new PublicTestError(403, 'Your responses can be downloaded once the test is closed and results are released.');
   }
+  return found;
+}
+
+export async function myResponseData(req, code) {
+  const found = await myReleasedPaper(req, code);
   return studentResponseData(found.test, found.registration);
 }
 
@@ -330,11 +348,20 @@ export async function myResponseData(req, code) {
  * (the test closed and its marks released), and nothing else of the record.
  */
 export async function myResponseView(req, code) {
-  const data = await myResponseData(req, code);
+  const { test, registration } = await myReleasedPaper(req, code);
+  const data = studentResponseData(test, registration);
+  // How the class did, beside their own paper - only now, with the test closed
+  // and the marks out (myReleasedPaper): numbers, never another student's name.
+  const attempt = registration.attempt;
+  const worth = paperMarks(test, attempt);
+  const stats = await classStats(test).catch(() => null);
   return {
     test: { code: data.test.code, title: data.test.title },
     summary: data.summary,
+    comparison: stats && stats.papers > 1 ? standingIn(stats, worth ? (paperScore(attempt) / worth) * 100 : 0, timeTakenSeconds(attempt)) : null,
     answers: data.answers.map((answer) => ({
+      // How many of the class got this question fully right.
+      classPercentRight: stats?.questions.get(answer.questionId) ?? null,
       questionNumber: answer.questionNumber,
       type: answer.type,
       prompt: answer.prompt,

@@ -19,9 +19,11 @@ import { useKeepAwake } from '../../lib/keep-awake.js';
 import { getBrowserLocation } from '../../lib/geo.js';
 import { LocationHelp } from '../../components/LocationCheck.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
-import { QuestionPalette } from './QuestionPalette.jsx';
+import { centerCurrentQuestion, QuestionPalette } from './QuestionPalette.jsx';
 import { QuestionPaper } from './QuestionPaper.jsx';
 import { QuestionList } from './QuestionList.jsx';
+import { ExamSplitDivider } from './ExamSplitDivider.jsx';
+import { DEFAULT_EXAM_SPLIT } from './exam-split.js';
 import { LockedAttempt, PausedAttempt } from './StatusScreens.jsx';
 import { ResultScreen } from './ResultScreen.jsx';
 import { ExamHeader } from './ExamHeader.jsx';
@@ -127,8 +129,10 @@ function Arrow({ back = false }) {
 
 /** Strict timing: where the student is on the paper. Nothing here can be clicked - there is no going back. */
 function StrictDots({ strict }) {
+  const rail = useRef(null);
+  useEffect(() => { centerCurrentQuestion(rail.current); }, [strict.index]);
   return (
-    <div className="q-dots strict-dots" aria-label={`Question ${strict.index + 1} of ${strict.total}`}>
+    <div className="q-dots strict-dots" aria-label={`Question ${strict.index + 1} of ${strict.total}`} ref={rail}>
       {Array.from({ length: strict.total }, (_unused, position) => {
         const closed = strict.closed?.[position];
         const classes = ['q-dot', closed ? 'is-done' : '', closed?.how === 'time' ? 'is-timed-out' : '', position === strict.index ? 'is-current' : '']
@@ -205,9 +209,7 @@ const FLAG_WARNINGS = {
   paste: 'Pasting is not allowed',
   drop: 'Dragging text in is not allowed',
   context_menu: 'That menu is not allowed',
-  screenshot: 'Screenshots are not allowed',
-  print: 'Printing is not allowed',
-  devtools: 'Developer tools are not allowed'
+  print: 'Printing is not allowed'
 };
 // Whether an answer carried with a move has anything in it (a cleared one does not).
 const hasContent = (answer) => Boolean((answer?.answerText || '').trim() || answer?.selectedOptions?.length);
@@ -340,6 +342,8 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   const [attempt, setAttempt] = useState(() => initialAttempt || null);
   const [result, setResult] = useState(null);
   const [index, setIndex] = useState(0);
+  // A layout preference only: it does not alter answers or test timing.
+  const [examSplit, setExamSplit] = useState(DEFAULT_EXAM_SPLIT);
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [online, setOnline] = useState(() => (typeof navigator === 'undefined' ? true : navigator.onLine));
@@ -1007,10 +1011,7 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   }, [shielded]);
 
   // Mouse, finger and scroll only; keys work just for typing a short answer.
-  useKeyboardLockdown({
-    enabled: sitting && !attempt?.isLocked,
-    onFlag: (detail) => { reportPresence({ type: 'flag', detail }); warnFlag(detail); }
-  });
+  useKeyboardLockdown({ enabled: sitting && !attempt?.isLocked });
 
   const resume = async () => {
     if (enforceFullscreen && !inFullscreen() && !(await requestTestFullscreen())) {
@@ -1342,7 +1343,10 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
   });
 
   return (
-    <section className={`exam-screen exam-protected${showAll ? ' is-list' : ''}`}>
+    <section
+      className={`exam-screen exam-protected${showAll ? ' is-list' : ''}`}
+      style={!showAll ? { '--exam-question-fr': `${examSplit}fr`, '--exam-answer-fr': `${100 - examSplit}fr` } : undefined}
+    >
       {/* Said aloud when the connection drops; each question shows it in words beside its number. */}
       <span className="sr-only" role="status">
         {connection === 'offline' ? 'You are offline. Your answers are kept on this device.'
@@ -1397,12 +1401,13 @@ export function AttemptScreen({ code, initialAttempt = null, microsoft = null, s
         )}
         {showAll
           ? <QuestionList questions={questions} onSave={saveAnswer} connection={connection}/>
-          : <QuestionPaper key={current.id} question={strict && current.id === expiredId ? { ...current, locked: true } : current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} connection={connection}/>}
+          : <QuestionPaper key={current.id} question={strict && current.id === expiredId ? { ...current, locked: true } : current} total={totalCount} onSave={saveAnswer} flushRef={strict ? paperFlush : undefined} draftRef={strict ? paperDraft : undefined} connection={connection} splitPanes/>}
         {strict && movingOn && (
           <div className="strict-switching" role="status">{isLastStrict ? 'Submitting your paper…' : 'Opening the next question…'}</div>
         )}
       </div>
 
+      {!showAll && <ExamSplitDivider value={examSplit} onChange={setExamSplit}/>}
       {strict ? (
         <footer className="exam-foot strict-foot">
           {(!strict.canMoveOn || !isLastStrict) && (

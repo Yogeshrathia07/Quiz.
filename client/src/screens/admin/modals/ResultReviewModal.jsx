@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Check, ChevronLeft, ChevronRight, Lock, Undo2, X } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Check, ChevronLeft, ChevronRight, Lock, ScrollText, Undo2, X } from 'lucide-react';
 import { api, post } from '../../../lib/api.js';
 import { shortDateTime } from '../../../lib/format.js';
 import { Modal } from '../../../components/Modal.jsx';
 import { RichText } from '../../../components/RichText.jsx';
 import { QuestionImage } from '../../../components/QuestionImage.jsx';
 import { InfoTip } from '../../../components/InfoTip.jsx';
+import { PersonLink } from '../../../components/PersonLink.jsx';
+import { SheetSwitch } from './SheetSwitch.jsx';
 import { STATE_WORDS, answerOf, answerState, initialsOf, papersWith } from '../review.js';
 
 const TYPE_NAMES = { mcq: 'Single choice', msq: 'Multiple choice', short: 'Short answer' };
@@ -14,15 +16,19 @@ const oneLine = (text) => String(text || '').replace(/\*\*/g, '').replace(/\s+/g
 const clamp = (value, top) => Math.max(0, Math.min(value, Math.max(0, top)));
 const toTheSecond = (value) => new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
 
-/** The student's answer: every option, theirs and the right ones marked - or what they wrote. */
-function AnswerBody({ question, answer }) {
+/**
+ * The student's answer: every option, theirs and the right ones marked - or
+ * what they wrote. `packed`: the options two across, for a question too tall
+ * for the window one under another.
+ */
+function AnswerBody({ question, answer, packed = false }) {
   if (question.manualGrading) {
     return answer.answered && answer.answerText
       ? <div className="review-written">{answer.answerText}</div>
       : <p className="review-none">No answer written.</p>;
   }
   return (
-    <ul className="review-options">
+    <ul className={`review-options${packed ? ' is-packed' : ''}`}>
       {question.options.map((text, index) => {
         const id = String(index);
         const picked = answer.selectedOptions.includes(id);
@@ -106,9 +112,10 @@ function MarkPanel({ answer, question, frozen, saving, onSave, onNext, showToast
  * by question) or question by question (one question, student by student - the
  * quick way to mark a short answer across the class). Dots show where each
  * stands and jump straight there; the arrows (and ← →) move one at a time.
- * Any mark can be changed - a right or wrong choice answer's too.
+ * Any mark can be changed - a right or wrong choice answer's too. The paper
+ * on screen has a button to its student's window, on their activity log (`onOpenLog`).
  */
-export function ResultReviewModal({ code, startAt = null, startMode = 'student', onClose, onChanged, showToast }) {
+export function ResultReviewModal({ code, startAt = null, startQuestion = null, startMode = 'student', onClose, onChanged, showToast, onOpenLog = null }) {
   const [data, setData] = useState(null);
   const [failed, setFailed] = useState('');
   const [mode, setMode] = useState(startMode);
@@ -126,7 +133,12 @@ export function ResultReviewModal({ code, startAt = null, startMode = 'student',
         if (!alive) return;
         setData(next);
         const at = startAt ? next.papers.findIndex((paper) => paper.registrationId === startAt) : -1;
-        if (at >= 0) setStudent(at);
+        if (at >= 0) {
+          setStudent(at);
+          // Opened on one answer (a tile in the Analysis rank list): that question on their paper.
+          const spot = startQuestion === null ? -1 : next.papers[at].answers.findIndex((answer) => answer.questionId === startQuestion);
+          if (spot >= 0) setPosition(spot);
+        }
         // By question: start on the first question with something still to mark.
         if (startMode === 'question') {
           const first = next.questions.findIndex((question) => papersWith(next.papers, question.id, true).length);
@@ -135,7 +147,7 @@ export function ResultReviewModal({ code, startAt = null, startMode = 'student',
       })
       .catch((error) => { if (alive) setFailed(error.message); });
     return () => { alive = false; };
-  }, [code, startAt, startMode]);
+  }, [code, startAt, startQuestion, startMode]);
 
   const papers = data?.papers || [];
   const questions = data?.questions || [];
@@ -204,12 +216,35 @@ export function ResultReviewModal({ code, startAt = null, startMode = 'student',
   const bodyRef = useRef(null);
   useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }); }, [mode, paper?.registrationId, answer?.questionId]);
 
+  // A choice question fits the window without scrolling: one under another
+  // where that fits, else its options two across (where the window is wide
+  // enough for two). Measured before it is painted, again when the window resizes.
+  const shownKey = `${paper?.registrationId}:${answer?.questionId}`;
+  const [packed, setPacked] = useState(null);
+  const [bodyHeight, setBodyHeight] = useState(0);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => setBodyHeight(body.clientHeight));
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body || packed === shownKey || !body.querySelector('.review-options')) return;
+    if (body.scrollHeight > body.clientHeight + 1 && body.clientWidth >= 700) setPacked(shownKey);
+  }, [shownKey, packed, bodyHeight]);
+
   const ready = !failed && Boolean(data) && papers.length > 0;
 
   // The whole screen: who and where at the top, one answer in the middle (the
   // only part that scrolls), Previous and Next at the bottom.
   return (
     <Modal label="Review results" onClose={onClose} className="review-sheet">
+      {/* The student on screen - by question, the one whose answer this is: on to what they did while writing. */}
+      {ready && paper && onOpenLog && (
+        <SheetSwitch icon={ScrollText} label="Activity log" short="Log" tip={`${paper.name}'s activity log`} onClick={() => onOpenLog(paper.registrationId, { sapId: paper.sapId, name: paper.name })}/>
+      )}
       <div className="review-bar">
         <div className="review-column">
           <header className="review-head">
@@ -299,7 +334,7 @@ export function ResultReviewModal({ code, startAt = null, startMode = 'student',
               <header className="review-card-head">
                 <div>
                   {mode === 'question'
-                    ? <strong className="review-who"><span className="person-avatar" aria-hidden="true">{initialsOf(paper.name)}</span>{paper.name}{paper.sapId ? <span>{paper.sapId}</span> : null}</strong>
+                    ? <strong className="review-who"><span className="person-avatar" aria-hidden="true">{initialsOf(paper.name)}</span><PersonLink email={paper.email} guest={paper.accountType === 'guest'}>{paper.name}</PersonLink>{paper.sapId ? <span>{paper.sapId}</span> : null}</strong>
                     : <strong>Question {answer.position} <span>of {paper.answers.length}</span></strong>}
                   <span className="review-card-meta">{TYPE_NAMES[shown.type]} · out of {shown.maxMarks}{mode === 'question' ? ` · Q${shown.number}` : ''}</span>
                 </div>
@@ -307,7 +342,7 @@ export function ResultReviewModal({ code, startAt = null, startMode = 'student',
               </header>
               <RichText className="review-prompt" text={shown.prompt}/>
               {shown.image && <QuestionImage image={shown.image} label="Picture for this question" compact/>}
-              <AnswerBody question={shown} answer={answer}/>
+              <AnswerBody question={shown} answer={answer} packed={packed === shownKey}/>
               {/* Held on the student's device by a lost connection, and taken after its time: theirs to judge. */}
               {answer.late && (
                 <p className="notice review-late">

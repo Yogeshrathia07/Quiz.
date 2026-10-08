@@ -10,8 +10,9 @@ import { AttemptScreen } from './AttemptScreen.jsx';
 import { useKeepAwake } from '../../lib/keep-awake.js';
 import { RegistrationForm } from './RegistrationForm.jsx';
 import { SignInScreen } from './SignInScreen.jsx';
-import { TestLaunch } from './TestLaunch.jsx';
+import { TestLaunch, venueIntro } from './TestLaunch.jsx';
 import { OpenInBrowser, useInAppGate } from '../../components/OpenInBrowser.jsx';
+import { LocationPanel, useLocationCheck } from '../../components/LocationCheck.jsx';
 import {
   GuestsNotAllowed, RegistrationPending, RegistrationRejected, TestClosed,
   TestTimeOver, WaitingForStart
@@ -120,11 +121,33 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
     });
     if (needsReload) void reload();
   }, [reload]);
-  useLiveUpdate(
+  const live = useLiveUpdate(
     data?.registration && !data?.attemptId ? `/api/tests/${encodeURIComponent(code)}/events` : null,
     applyWaitingUpdate,
     Boolean(data?.registration && !data?.attemptId)
   );
+
+  // Back on this page while waiting - the phone was put away, another app was
+  // open, the connection came back: asked at once rather than at the next
+  // check, as a page put away misses what the live stream said meanwhile.
+  const waiting = Boolean(data?.registration && data.registration.status !== 'rejected' && !data.attemptId && !data.test?.isStarted && !data.test?.isClosed);
+  useEffect(() => {
+    if (!waiting) return undefined;
+    let last = Date.now();
+    const back = () => {
+      if (document.hidden || Date.now() - last < 2_000) return;
+      last = Date.now();
+      void reload();
+    };
+    const events = [[document, 'visibilitychange'], [window, 'pageshow'], [window, 'focus'], [window, 'online']];
+    for (const [target, name] of events) target.addEventListener(name, back);
+    return () => { for (const [target, name] of events) target.removeEventListener(name, back); };
+  }, [waiting, reload]);
+
+  // The venue check, begun while they wait for Start and kept fresh, so that
+  // Begin finds a reading ready and asks nothing (TestLaunch).
+  const ready = Boolean(data?.registration?.status === 'approved' && !data.attemptId && !startedAttempt && !data.test?.isClosed);
+  const location = useLocationCheck(Boolean(data?.test?.locationRequired) && ready, { keepFresh: ready });
 
   // After signing in (by email code or as a guest) there is a new account and a
   // new view of the test to pick up before the next screen can be chosen.
@@ -190,13 +213,20 @@ export function StudentScreen({ code, auth, refreshAuth, go, showToast }) {
   if (!registration) return <RegistrationForm test={test} user={auth.user} code={code} reload={reload} showToast={showToast}/>;
   if (registration.status === 'pending') return withDeviceCard(<RegistrationPending test={test} registration={registration} reload={reload}/>);
   if (registration.status === 'rejected') return <RegistrationRejected test={test}/>;
-  if (!test.isStarted) return withDeviceCard(<WaitingForStart test={test} serverTime={data.serverTime} reload={reload}/>);
+  if (!test.isStarted) {
+    const venue = test.locationRequired && !deviceBlocked ? (
+      <div className="launch-venue">
+        <LocationPanel check={location} intro={`${venueIntro(test)} Allow it now, while you wait, and Begin is quicker.`}/>
+      </div>
+    ) : null;
+    return withDeviceCard(<WaitingForStart test={test} serverTime={data.serverTime} reload={reload} live={live} venue={venue}/>);
+  }
   // Nobody may pick up a fresh paper once the time is up; say so rather than
   // offering a Begin button that the server will refuse.
   if (!attemptId && !startedAttempt && !test.untimed && Date.parse(test.endsAt) <= Date.now()) return <TestTimeOver test={test} reload={reload}/>;
   if (!attemptId && !startedAttempt) {
     return (
-      <TestLaunch test={test} code={code} reload={reload} onStarted={setStartedAttempt} showToast={showToast} windowKind={windowKind}
+      <TestLaunch test={test} code={code} reload={reload} location={location} onStarted={setStartedAttempt} showToast={showToast} windowKind={windowKind}
         deviceBlock={deviceBlocked ? deviceCard('launch') : null} deviceChecking={deviceRule !== 'any' && deviceCheck === null}
         onDeviceRefused={() => setDeviceRefresh((value) => value + 1)}/>
     );

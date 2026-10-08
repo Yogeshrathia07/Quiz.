@@ -25,11 +25,16 @@ const columnCount = (width) => (width <= 560 ? 1 : width >= 1180 ? 4 : width >= 
  *   sorts: [{ id, label, icon, directions: [{ id: 'asc' | 'desc', label }] }]
  *   sort:  'field-direction'. The first field's first direction is the usual
  *          order; choosing a field starts with its first direction.
+ *
+ * `extra` is a control of the list's own drawn above the groups (the
+ * Analysis tab's marks range); `extraActive` says how many filters it holds,
+ * `extraLabel` names it when it is the only one, and Reset calls `onReset`.
  */
 export function FilterMenu({
   groups, rows, selected, onChange, icons = {}, title = 'Filter', allLabel = 'Everyone',
   counts: suppliedCounts = null, total = null, shown: suppliedShown = null,
-  sorts = null, sort = null, onSort = () => {}, sortHint = null
+  sorts = null, sort = null, onSort = () => {}, sortHint = null,
+  extra = null, extraActive = 0, extraLabel = null, onReset = null
 }) {
   const [open, setOpen] = useState(false);
   const { holder, panel, style, isDialog, reposition } = useFloatingPanel(open, setOpen, 'right', { dialog: true });
@@ -54,7 +59,10 @@ export function FilterMenu({
   const labels = Object.fromEntries(groups.flatMap((group) => group.options).map((option) => [option.id, option.label]));
   const shown = suppliedShown ?? applyFilters(rows, groups, selected).length;
   const overall = total ?? rows.length;
-  const summary = selected.length === 0 ? allLabel : selected.length === 1 ? labels[selected[0]] : `${selected.length} filters`;
+  const active = selected.length + extraActive;
+  const summary = active === 0 ? allLabel
+    : active === 1 ? (selected.length ? labels[selected[0]] : extraLabel || '1 filter')
+      : `${active} filters`;
   const toggle = (id) => onChange(ticked.has(id) ? selected.filter((entry) => entry !== id) : [...selected, id]);
   const usualSort = sorts ? `${sorts[0].id}-${sorts[0].directions[0].id}` : null;
   const [fieldId, wayId] = String(sort || usualSort || '').split('-');
@@ -102,7 +110,8 @@ export function FilterMenu({
             <input type="checkbox" checked={on} onChange={() => toggle(option.id)}/>
             <span className="filter-box" aria-hidden="true">{on && <Check size={13} strokeWidth={3.2}/>}</span>
             {look && <look.icon className={`filter-icon tone-${look.tone || 'muted'}`} size={16} aria-hidden="true"/>}
-            <span className="filter-label">{option.label}</span>
+            {/* A label too long for a narrow column is cut with …; the whole of it on hover. */}
+            <span className="filter-label" title={option.label}>{option.label}</span>
             <span className="filter-count">{counts[option.id]}</span>
           </label>
         );
@@ -114,7 +123,7 @@ export function FilterMenu({
     <div className="filter-menu" ref={holder}>
       <button
         type="button"
-        className={`button button-secondary filter-trigger${selected.length || sorted ? ' is-active' : ''}${open ? ' is-open' : ''}`}
+        className={`button button-secondary filter-trigger${active || sorted ? ' is-active' : ''}${open ? ' is-open' : ''}`}
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-label={described}
@@ -125,7 +134,7 @@ export function FilterMenu({
         <span className="filter-trigger-label toolbar-text">{summary}</span>
         <ChevronDown className="toolbar-chevron" size={15} strokeWidth={2.5} aria-hidden="true"/>
         {/* Shown only when the button is down to its icon: filters are on. */}
-        {selected.length > 0 && <span className="filter-trigger-badge" aria-hidden="true">{selected.length}</span>}
+        {active > 0 && <span className="filter-trigger-badge" aria-hidden="true">{active}</span>}
       </button>
       {open && createPortal(<>
         {/* Beside its button when it fits there. When it does not - and always on
@@ -140,13 +149,14 @@ export function FilterMenu({
               <X size={17} aria-hidden="true"/>
             </button>
           </div>
+          {extra && <div className="filter-extra">{extra}</div>}
           <div className="filter-groups">
             {columns.map((column) => <div key={column[0].id} className="filter-col">{column.map(block)}</div>)}
           </div>
           <div className="filter-panel-foot">
             <button type="button" className="button button-quiet button-small" disabled={every.every((id) => ticked.has(id))} onClick={() => onChange(every)}>Select all</button>
-            <button type="button" className="button button-quiet button-small" disabled={!selected.length && !sorted}
-              onClick={() => { onChange([]); if (sorted) onSort(usualSort); }}>Reset</button>
+            <button type="button" className="button button-quiet button-small" disabled={!active && !sorted}
+              onClick={() => { onChange([]); onReset?.(); if (sorted) onSort(usualSort); }}>Reset</button>
             <button type="button" className="button button-primary button-small" onClick={() => setOpen(false)}>Done</button>
           </div>
         </div>

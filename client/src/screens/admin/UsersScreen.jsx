@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowDownUp, Ban, BadgeCheck, Check, ChevronLeft, ChevronRight, GraduationCap, KeyRound, Search, Users } from 'lucide-react';
+import { Activity, ArrowDownUp, Ban, BadgeCheck, Check, ChevronLeft, ChevronRight, CircleCheck, GraduationCap, KeyRound, MoreVertical, Search, Trash2, Users } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
 import { loadCached, setCached, useCached } from '../../lib/cache.js';
 import { shortDateTime } from '../../lib/format.js';
@@ -10,6 +10,7 @@ import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
 import { applyFilters } from '../../lib/filters.js';
+import { openedFromName } from '../../lib/people.js';
 import { USER_FILTERS } from './user-filters.js';
 
 /** People per page on the Users list. */
@@ -44,7 +45,7 @@ function BlockForm({ busy, onBlock }) {
     >
       <input className="text-input" type="email" required placeholder="Your college email" value={email} onChange={(event) => setEmail(event.target.value)}/>
       <input className="text-input" maxLength="200" placeholder="Reason (optional)" value={reason} onChange={(event) => setReason(event.target.value)}/>
-      <button className="button button-warning" disabled={busy} type="submit">Block email</button>
+      <button className="button button-warning" disabled={busy} type="submit"><Ban size={16} aria-hidden="true"/>Block email</button>
     </form>
   );
 }
@@ -63,7 +64,26 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
   const [opened, setOpened] = useState(null); // the account row, shown at once while its details load
-  const closeDetail = useCallback(() => setOpened(null), []);
+  // A person named in the address (?admin=users&user=<email>) - a name clicked
+  // elsewhere (components/PersonLink.jsx) - opens once the list is here.
+  const named = new URLSearchParams(window.location.search).get('user');
+  useEffect(() => {
+    if (!named || !data) return;
+    const email = named.trim().toLowerCase();
+    // Someone with no account any more still has their tests: their details fill in once loaded.
+    setOpened((current) => (current?.email === email ? current
+      : data.accounts.find((account) => account.email.toLowerCase() === email) || { email, name: email }));
+  }, [named, data]);
+  // Closing a person opened from their name goes back to where the name was;
+  // opened by its address, it stays on Users, without the person in the address.
+  const closeDetail = useCallback(() => {
+    setOpened(null);
+    if (!new URLSearchParams(window.location.search).get('user')) return;
+    if (openedFromName()) { window.history.back(); return; }
+    const url = new URL(window.location.href);
+    url.searchParams.delete('user');
+    window.history.replaceState(window.history.state, '', url);
+  }, []);
 
   const load = useCallback(() => loadCached('/api/admin/users', { force: true }), []);
   const firstFailure = !users.data && users.error;
@@ -197,10 +217,28 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
               {shown.map((account) => {
                 const self = account.email === currentEmail;
                 return (
-                  <tr key={account.email} className="users-row-open" title="Open to see tests, scores and SAP ID" onClick={() => setOpened(account)}>
+                  <tr key={account.email} className="users-row-open" title="Open to see tests, scores and SAP ID" onClick={() => setOpened(account)}
+                    tabIndex={0} aria-label={`${account.name}: open`}
+                    onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); setOpened(account); } }}>
                     <td data-label="Person">
-                      <strong>{account.name}</strong>
-                      <span className="table-subtext">{account.email}{account.sapId ? ` · ${account.sapId}` : ''}</span>
+                      <div className="user-card-head">
+                        <span className="user-card-who">
+                          <strong>{account.name}</strong>
+                          <span className="table-subtext"><span className="user-email">{account.email}</span>{account.sapId && <span className="user-sap-inline">{account.sapId}</span>}</span>
+                        </span>
+                        {/* On a phone or tablet the card has no room for the buttons: Block and Delete are in this
+                            menu (a tap on the card itself opens the person). Not offered for your own account. */}
+                        <span className="user-card-menu" onClick={(event) => event.stopPropagation()}>
+                          <ActionMenu
+                            label={<MoreVertical size={18} aria-label={`More for ${account.name}`}/>}
+                            trigger="icon"
+                            items={[
+                              !self && !busy && { label: 'Block', icon: Ban, tone: 'warn', onSelect: () => block(account.email) },
+                              !self && !busy && { label: 'Delete', icon: Trash2, danger: true, onSelect: () => remove(account) }
+                            ]}
+                          />
+                        </span>
+                      </div>
                     </td>
                     <td data-label="Role"><InfoPill tone={account.role === 'faculty' ? 'success' : 'muted'}>{account.role === 'faculty' ? 'Faculty' : 'Student'}</InfoPill></td>
                     <td data-label="Created" className="col-created">{shortDateTime(account.createdAt)}</td>
@@ -209,10 +247,9 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
                       {!account.hasPassword && <span className="table-subtext">No password (Microsoft only)</span>}
                     </td>
                     <td data-label="Actions" onClick={(event) => event.stopPropagation()}>
-                      <div className="table-actions">
-                        <button className="button button-secondary button-small" onClick={() => setOpened(account)}>View</button>
-                        <button className="button button-warning button-small" disabled={busy || self} onClick={() => block(account.email)}>Block</button>
-                        <button className="button button-danger button-small" disabled={busy || self} onClick={() => remove(account)}>Delete</button>
+                      <div className="table-actions user-buttons">
+                        <button className="button button-warning button-small" type="button" title="Block" disabled={busy || self} onClick={() => block(account.email)}><Ban size={16} aria-hidden="true"/><span className="button-label">Block</span></button>
+                        <button className="button button-danger button-small" type="button" title="Delete" disabled={busy || self} onClick={() => remove(account)}><Trash2 size={16} aria-hidden="true"/><span className="button-label">Delete</span></button>
                       </div>
                     </td>
                   </tr>
@@ -261,8 +298,8 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
                     <span className="table-subtext">by {entry.blockedBy}</span>
                   </td>
                   <td data-label="Actions">
-                    <div className="table-actions">
-                      <button className="button button-success button-small" disabled={busy} onClick={() => unblock(entry.email)}>Unblock</button>
+                    <div className="table-actions user-buttons">
+                      <button className="button button-unblock button-small" type="button" title="Unblock" disabled={busy} onClick={() => unblock(entry.email)}><CircleCheck size={16} aria-hidden="true"/><span className="button-label">Unblock</span></button>
                     </div>
                   </td>
                 </tr>

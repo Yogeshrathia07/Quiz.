@@ -2,6 +2,7 @@ import { PenLine } from 'lucide-react';
 import { shortDateTime } from '../../lib/format.js';
 import { initialsOf } from './review.js';
 import { isGuest } from './student-filters.js';
+import { PersonLink } from '../../components/PersonLink.jsx';
 
 const isFaculty = (registration) => registration.accountType === 'faculty';
 
@@ -21,7 +22,7 @@ export function ResponseRow({ registration, onReview, isBusy, frozen = false }) 
         <div className="person">
           <span className={`person-avatar${isGuest(registration) ? ' is-guest' : ''}`} aria-hidden="true">{initialsOf(registration.name)}</span>
           <div className="person-detail">
-            <strong>{registration.name}</strong>
+            <strong><PersonLink email={registration.email} guest={isGuest(registration)}>{registration.name}</PersonLink></strong>
             <span className="table-subtext">{isFaculty(registration) ? 'Faculty' : registration.sapId}</span>
           </div>
         </div>
@@ -33,7 +34,10 @@ export function ResponseRow({ registration, onReview, isBusy, frozen = false }) 
       </td>
       <td data-label="Finished" className="cell-muted">{shortDateTime(registration.submittedAt)}</td>
       <td data-label="Actions" className="result-action">
-        <button className="button button-secondary button-small" type="button" disabled={isBusy} onClick={open}>{toMark > 0 && !frozen ? 'Mark' : 'Review'}</button>
+        {/* Mark (blue: a paper waiting on you) or Review (yellow), both outlined: one width whichever it says, so the column lines up. */}
+        <button className={`button button-secondary button-small result-open ${toMark > 0 && !frozen ? 'is-mark' : 'is-review'}`} type="button" disabled={isBusy} onClick={open}>
+          {toMark > 0 && !frozen ? 'Mark' : 'Review'}
+        </button>
       </td>
     </tr>
   );

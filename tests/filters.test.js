@@ -9,6 +9,9 @@ import { USER_FILTERS } from '../client/src/screens/admin/user-filters.js';
 import {
   ARCHIVED, TEST_FILTERS, marksReleased, marksState, papersToMark, quizFacts, sortTests, statusOf, testFiltersFrom, unlessArchivedTicked
 } from '../client/src/screens/admin/test-filters.js';
+import {
+  MY_RESULT_FILTERS, band, byUrgency, finalScore, placeOf, searchResults, sortResults
+} from '../client/src/screens/student/result-filters.js';
 
 /** Every combination of every field the filters look at. */
 function product(fields) {
@@ -121,6 +124,37 @@ const QUIZZES = product({
   created: [{ createdAt: new Date().toISOString() }, { createdAt: '2025-01-15T09:00:00Z' }]
 });
 
+/** A student's own tests (My results, or a teacher's Taken). */
+const MINE = product({
+  place: [
+    { registrationStatus: 'pending', attemptStatus: null, testClosed: false },
+    { registrationStatus: 'rejected', attemptStatus: null, testClosed: true },
+    { registrationStatus: 'approved', attemptStatus: null, testClosed: false },
+    { registrationStatus: 'approved', attemptStatus: null, testClosed: true },
+    { registrationStatus: 'approved', attemptStatus: 'in_progress', testClosed: false },
+    { registrationStatus: 'approved', attemptStatus: 'submitted', testClosed: false },
+    { registrationStatus: 'approved', attemptStatus: 'submitted', testClosed: true }
+  ],
+  marks: [
+    { released: true, pendingManual: 0, waitingFor: null },
+    // Marks out while short answers wait: the score so far.
+    { released: true, pendingManual: 2, waitingFor: null },
+    { released: false, pendingManual: 0, waitingFor: 'manual' },
+    { released: false, pendingManual: 0, waitingFor: 'after_quiz' },
+    { released: false, pendingManual: 0, waitingFor: 'admin' }
+  ],
+  score: [
+    { score: 9, totalMarks: 10 },
+    { score: 4.5, totalMarks: 10 },
+    { score: 1, totalMarks: 10 },
+    // 59.5% shows as 60%.
+    { score: 5.95, totalMarks: 10 },
+    { score: 0, totalMarks: 0 },
+    // From before full marks were kept: out of the questions.
+    { score: 3, totalMarks: undefined, totalQuestions: 5 }
+  ]
+});
+
 const LISTS = [
   ['students', studentFilters({ locationRequired: true }), STUDENTS],
   ['results', RESULT_FILTERS, RESULTS],
@@ -128,7 +162,8 @@ const LISTS = [
   ['absent', ABSENT_FILTERS, ABSENT],
   ['sessions', sessionFilters(SESSIONS, NOW), SESSIONS],
   ['users', USER_FILTERS, ACCOUNTS],
-  ['quizzes', TEST_FILTERS, QUIZZES]
+  ['quizzes', TEST_FILTERS, QUIZZES],
+  ['my results', MY_RESULT_FILTERS, MINE]
 ];
 
 for (const [name, groups, rows] of LISTS) {
@@ -319,6 +354,55 @@ test('quizzes: sorting by created, title, average score (none last, either way) 
   assert.deepEqual(titles('score-desc'), ['Algorithms', 'DBMS', 'networks']);
   assert.deepEqual(titles('score-asc'), ['DBMS', 'Algorithms', 'networks'], 'no average yet goes last');
   assert.deepEqual(titles('registered-desc'), ['networks', 'DBMS', 'Algorithms']);
+});
+
+test('my results: where a test stands, its status and its score band', () => {
+  const row = (fields) => ({ registrationStatus: 'approved', attemptStatus: 'submitted', released: true, pendingManual: 0, score: 6, totalMarks: 10, ...fields });
+  const tick = (id, rows) => applyFilters(rows, MY_RESULT_FILTERS, [id]);
+  assert.equal(placeOf({ registrationStatus: 'rejected', attemptStatus: 'submitted' }).id, 'declined', 'declined, whatever came after');
+  assert.equal(placeOf({ registrationStatus: 'approved', attemptStatus: null, testClosed: true }).id, 'missed');
+  assert.equal(placeOf({ registrationStatus: 'approved', attemptStatus: null, testClosed: false }).id, 'open');
+  // Marks out while answers wait to be marked: being marked, and no final score yet.
+  const soFar = row({ pendingManual: 1 });
+  assert.equal(tick('state:marking', [soFar]).length, 1);
+  assert.equal(finalScore(soFar), false);
+  assert.equal(tick('score:none', [soFar]).length, 1);
+  // Held back for marking: being marked too; held until it ends: not out yet.
+  assert.equal(tick('state:marking', [row({ released: false, waitingFor: 'manual' })]).length, 1);
+  assert.equal(tick('state:held', [row({ released: false, waitingFor: 'after_quiz' })]).length, 1);
+  // A band goes by the percentage as it shows.
+  assert.deepEqual([59.5, 59.4, 34.5, 34.4].map(band), ['good', 'mid', 'mid', 'low']);
+  assert.equal(tick('score:good', [row({ score: 5.95 })]).length, 1);
+});
+
+test('my results: a search by name or code, in any case', () => {
+  const rows = [{ title: 'Session 2: Sample', code: 'TEST-AB12' }, { title: 'Research Methodology', code: 'TEST-CD34' }];
+  assert.deepEqual(searchResults(rows, '  session ').map((row) => row.code), ['TEST-AB12']);
+  assert.deepEqual(searchResults(rows, 'cd34').map((row) => row.title), ['Research Methodology']);
+  assert.equal(searchResults(rows, '').length, 2);
+  assert.equal(searchResults(rows, 'nothing like it').length, 0);
+});
+
+test('my results: sorting by date, score (no final score last, either way) and name; open ones most pressing first', () => {
+  const done = (title, submittedAt, score, pendingManual = 0) => ({ title, registrationStatus: 'approved', attemptStatus: 'submitted', submittedAt, released: true, pendingManual, score, totalMarks: 10 });
+  const tests = [
+    done('networks', '2026-09-02T04:00:00Z', 5),
+    done('DBMS', '2026-09-03T04:00:00Z', 9, 1),
+    done('Algorithms', '2026-09-01T04:00:00Z', 8),
+    { title: 'Compilers', registrationStatus: 'approved', attemptStatus: null, testClosed: true }
+  ];
+  const titles = (sort) => sortResults(tests, sort).map((test) => test.title);
+  assert.deepEqual(titles('date-desc'), ['DBMS', 'networks', 'Algorithms', 'Compilers'], 'missed, with no date, last');
+  assert.deepEqual(titles('date-asc'), ['Algorithms', 'networks', 'DBMS', 'Compilers']);
+  assert.deepEqual(titles('score-desc'), ['Algorithms', 'networks', 'DBMS', 'Compilers'], 'still being marked: no final score, last');
+  assert.deepEqual(titles('score-asc'), ['networks', 'Algorithms', 'DBMS', 'Compilers']);
+  assert.deepEqual(titles('title-asc'), ['Algorithms', 'Compilers', 'DBMS', 'networks'], 'case does not matter');
+  const open = [
+    { title: 'waiting', registrationStatus: 'pending' },
+    { title: 'begin', registrationStatus: 'approved', attemptStatus: null },
+    { title: 'continue', registrationStatus: 'approved', attemptStatus: 'in_progress' }
+  ];
+  assert.deepEqual(byUrgency(open).map((test) => test.title), ['continue', 'begin', 'waiting']);
 });
 
 test('quizzes: a filter named in the address is kept, an unknown or repeated one dropped', () => {

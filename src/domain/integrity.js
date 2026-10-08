@@ -44,16 +44,16 @@ export const FLAG_REASONS = Object.freeze({
   drop: 'Tried to drag text in',
   context_menu: 'Opened the context menu',
   fullscreen_denied: 'Browser refused fullscreen',
-  // A browser cannot stop a screenshot, but it can notice the usual keys.
-  screenshot: 'Tried to take a screenshot',
   print: 'Tried to print',
-  devtools: 'Tried to open developer tools',
-  // Left the page while typing an answer and back within moments: on an
-  // iPhone, a keyboard's own button (voice typing on Gboard or SwiftKey, its
-  // settings) opens that keyboard's app. Noted, not counted - see
-  // KEYBOARD_GRACE_MS in attempt-service.js.
-  keyboard_app: 'Keyboard opened another app while typing'
+  // Left the page while typing an answer and back within moments - often a
+  // keyboard's own button (voice typing on Gboard or SwiftKey, its settings)
+  // opening that keyboard's app on an iPhone, though the page cannot see why.
+  // Noted in the log, never counted, and not a blocked action - see
+  // KEYBOARD_GRACE_MS in attempt-service.js, which also caps how often.
+  keyboard_app: 'Left for a moment while typing (not counted)'
 });
+/** Notes that are not blocked actions, left out of `flagCount`. */
+const NOT_BLOCKED = new Set(['keyboard_app']);
 
 /**
  * Keep the event log bounded. Every student lives in one test document, and
@@ -86,14 +86,18 @@ export const warningsBeforeLockOf = (test) => (violationActionOf(test) === 'warn
 export const warnsOnViolation = (test) => ['warn', 'warn_lock'].includes(violationActionOf(test));
 
 /**
- * Checks taken out because they were guesses that misfired: a translator, a
- * password manager or the phone browser's own additions to the page passed for
- * a browser extension, and voice typing or a keyboard's suggestion passed for
- * pasted text. Never recorded again - a page still open from before may send
- * them, and they are dropped - and those already on a paper are left out of
- * every count (`integritySummary` counts FLAG_REASONS only), log and report.
+ * Checks taken out because they were guesses that misfired or could not see
+ * what they claimed to: a translator, a password manager or the phone
+ * browser's own additions to the page passed for a browser extension; voice
+ * typing or a keyboard's suggestion passed for pasted text; a screenshot is
+ * taken by the operating system (a phone's buttons, Win+Shift+S never reach
+ * the page), and developer tools open from the browser's menu unseen - only a
+ * few keys were ever noticed, so "0" said nothing. Never recorded again - a
+ * page still open from before may send them, and they are dropped - and those
+ * already on a paper are left out of every count (`integritySummary` counts
+ * FLAG_REASONS only), log and report.
  */
-export const RETIRED_FLAGS = Object.freeze(['extension', 'text_burst']);
+export const RETIRED_FLAGS = Object.freeze(['extension', 'text_burst', 'screenshot', 'devtools']);
 const isRetiredFlag = (event) => event?.type === 'integrity_flag' && RETIRED_FLAGS.includes(event.detail);
 /** A paper's event log, without the retired checks. */
 export const keptEvents = (events) => (events || []).filter((event) => !isRetiredFlag(event));
@@ -161,7 +165,8 @@ export function integritySummary(attempt) {
     lockCount: record.lockCount,
     leaves,
     flags,
-    flagCount: Object.values(flags).reduce((total, value) => total + value, 0),
+    // Blocked actions only: a moment away while typing is a note, not a blocked action.
+    flagCount: Object.entries(flags).reduce((total, [key, value]) => total + (NOT_BLOCKED.has(key) ? 0 : value), 0),
     // Offline periods, never counted as leaving; older papers' offline "leaves" are included.
     offline: {
       count: (Number(record.offlineCount) || 0) + leaves.offline,
@@ -215,7 +220,7 @@ export const describeEvent = (event) => ({
 export const integrityHeaders = [
   'Times left the test (total)', 'Time away in total (seconds)', 'Longest time away (seconds)',
   'Left fullscreen', 'Switched app or tab', 'Window lost focus', 'Reloaded the page', 'Not in fullscreen', 'Went offline',
-  'Copy / cut / paste / drag attempts', 'Times locked', 'Screenshot / print / developer-tools attempts', 'Used split screen',
+  'Copy / cut / paste / drag attempts', 'Times locked', 'Print attempts', 'Used split screen',
   'Time offline in total (seconds, not counted as leaving)', 'Answers that arrived late'
 ];
 
@@ -224,7 +229,7 @@ export const integrityCells = (summary) => (summary
     summary.leaveCount, Math.round(summary.awayMs / 1000), Math.round(summary.longestAwayMs / 1000),
     summary.leaves.fullscreen, summary.leaves.tab_switch, summary.leaves.focus_lost, summary.leaves.reload,
     summary.leaves.not_fullscreen, summary.offline?.count ?? summary.leaves.offline, summary.flags.copy + summary.flags.cut + summary.flags.paste + summary.flags.drop, summary.lockCount,
-    summary.flags.screenshot + summary.flags.print + summary.flags.devtools, summary.leaves.split_screen,
+    summary.flags.print, summary.leaves.split_screen,
     Math.round((summary.offline?.ms || 0) / 1000), summary.lateAnswers || 0
   ]
   : integrityHeaders.map(() => ''));

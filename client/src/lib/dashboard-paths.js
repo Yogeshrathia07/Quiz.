@@ -21,5 +21,10 @@ export function dashboardPath(code, { section = 'test', page = 1, pageSize = 100
 /** The whole class at once (when it fits): every tab, search, filter and order is then worked out in the browser. */
 export const wholeClassPath = (code) => dashboardPath(code, { section: 'students', pageSize: WHOLE_CLASS });
 
+/** The Test tab's overview: the whole class at a glance (services/overview-service.js). */
+export const overviewPath = (code) => `${testPath(code)}/overview`;
+/** The Analysis tab: every submitted paper against every question. */
+export const matrixPath = (code) => `${testPath(code)}/matrix`;
+
 /** One student's record on a test: `/analysis` for the log and readings, `/record.xlsx` to download. */
 export const recordPath = (code, registrationId) => `${testPath(code)}/registrations/${encodeURIComponent(registrationId)}`;

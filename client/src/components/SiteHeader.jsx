@@ -16,7 +16,7 @@ function activeLink(route, isAdmin) {
   if (route.admin === 'users') return 'users';
   // A student's results are their Home; a teacher's own attempts sit in the account menu.
   if (route.page === 'results') return isAdmin ? null : 'home';
-  // One handed-in test: a teacher reaches it from Tests (Taken by me), a student from Home.
+  // One handed-in test: a teacher reaches it from Tests (Taken), a student from Home.
   if (route.result) return isAdmin ? 'tests' : 'home';
   if (route.test || route.attend) return null;
   // The quiz list, and a test's dashboard, creator or editor: all the Tests section.

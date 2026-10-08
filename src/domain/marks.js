@@ -84,6 +84,17 @@ function bankOf(test) {
   return bank.byId;
 }
 
+/**
+ * What a paper's answers still waiting to be marked are worth: the short
+ * answers given and not marked yet. Counted as neither earned nor lost.
+ */
+export function pendingMarks(test, attempt) {
+  const bank = bankOf(test);
+  return roundMarks((attempt?.answers || [])
+    .filter((answer) => answer.isCorrect === null && answer.answeredAt && bank.get(answer.questionId)?.manualGrading)
+    .reduce((total, answer) => total + questionMarks(test, bank.get(answer.questionId)), 0));
+}
+
 /** A paper's full marks: what its questions are worth together. */
 export function paperMarks(test, attempt) {
   const bank = bankOf(test);

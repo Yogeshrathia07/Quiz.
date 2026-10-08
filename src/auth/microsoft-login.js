@@ -5,6 +5,7 @@ import { hash, randomId } from '../lib/crypto.js';
 import { now } from '../lib/time.js';
 import { microsoftConfigured, normalizeEmail, roleForEmail } from './portal-auth.js';
 import { refuseIfBlocked, signInAccount } from './account-login.js';
+import { plainText } from '../domain/test-builder.js';
 
 /**
  * Microsoft sign-in for any UPES account - students and faculty alike. It
@@ -21,6 +22,27 @@ const codeChallenge = (verifier) => crypto.createHash('sha256').update(verifier)
 
 function tenantClaims(idToken) {
   try { return JSON.parse(Buffer.from(String(idToken || '').split('.')[1], 'base64url').toString('utf8')); } catch { return {}; }
+}
+
+const ANY_DIRECTORY = new Set(['organizations', 'common', 'consumers']);
+
+/**
+ * Which address a Microsoft account signs in as. Any directory's own
+ * administrators can type whatever they like into a user's `mail` - a
+ * stranger's directory could claim a UPES address - but a user principal
+ * name is always on a domain that directory has proved it owns. So `mail`
+ * counts only from a directory this portal trusts (one on
+ * AZURE_ALLOWED_TENANTS, or the single directory it is registered in);
+ * otherwise the principal name decides.
+ */
+export function signInEmail(profile, tenant) {
+  const principal = normalizeEmail(profile?.userPrincipalName);
+  const mail = normalizeEmail(profile?.mail);
+  const allowed = config.microsoft.allowedTenants;
+  const trusted = allowed.length
+    ? allowed.includes(String(tenant || '').toLowerCase())
+    : !ANY_DIRECTORY.has(String(config.microsoft.tenantId || '').toLowerCase());
+  return trusted && mail ? mail : principal;
 }
 
 export async function beginMicrosoftLogin(req, res) {
@@ -77,14 +99,15 @@ export async function finishMicrosoftLogin(req, res) {
     // read without re-checking the signature.
     const claims = tenantClaims(tokens.id_token);
     const allowed = config.microsoft.allowedTenants;
-    if (allowed.length && !allowed.includes(String(claims.tid || '').toLowerCase())) {
+    const tenant = String(claims.tid || '').toLowerCase();
+    if (allowed.length && !allowed.includes(tenant)) {
       return res.redirect(`${baseUrl(req)}/?auth=not-allowed`);
     }
-    const email = normalizeEmail(profile.mail || profile.userPrincipalName);
+    const email = signInEmail(profile, tenant);
     if (!roleForEmail(email)) return res.redirect(`${baseUrl(req)}/?auth=not-allowed`);
     try { await refuseIfBlocked(email); } catch { return res.redirect(`${baseUrl(req)}/?auth=blocked`); }
 
-    const name = String(profile.displayName || email).trim().slice(0, 120);
+    const name = plainText(profile.displayName || email).slice(0, 120) || email;
     await signInAccount(res, { email, name, role: roleForEmail(email) });
     res.redirect(`${baseUrl(req)}${pending.returnTo}`);
   } catch (error) {

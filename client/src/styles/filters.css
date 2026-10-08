@@ -43,11 +43,12 @@
 .filter-panel.cols-1{width:min(340px,calc(100vw - 16px))}
 .filter-panel.cols-3{width:min(780px,calc(100vw - 16px))}
 .filter-panel.cols-4 .filter-groups{grid-template-columns:repeat(4,minmax(0,1fr))}
-.filter-panel.cols-4{width:min(1010px,calc(100vw - 16px))}
+.filter-panel.cols-4{width:min(1080px,calc(100vw - 16px))}
 .filter-col{display:grid;align-content:start;gap:4px;min-width:0}
-.filter-group{display:grid;align-content:start;gap:2px;min-width:0;margin:0;padding:6px 0 4px;border:0}
+/* One column that may shrink: an option's long label gives way (with …) rather than pushing the panel sideways. */
+.filter-group{display:grid;grid-template-columns:minmax(0,1fr);align-content:start;gap:2px;min-width:0;margin:0;padding:6px 0 4px;border:0}
 .filter-group legend{padding:0 10px 4px;color:var(--text-3,#75848B);font-size:.7rem;font-weight:700;letter-spacing:.07em;text-transform:uppercase}
-.filter-option{position:relative;display:flex;align-items:center;gap:10px;min-height:38px;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:.86rem;font-weight:600}
+.filter-option{position:relative;display:flex;align-items:center;gap:10px;min-width:0;min-height:38px;padding:6px 10px;border-radius:9px;cursor:pointer;font-size:.86rem;font-weight:600}
 .filter-option:hover{background:var(--bg-input,#3A3E43)}
 .filter-option.is-on{background:rgba(21,152,209,.14)}
 /* The real checkbox stays for keyboards and screen readers; the drawn box shows it. */
@@ -86,7 +87,7 @@
 .filter-panel.is-dialog .filter-panel-head strong{font-size:1rem}
 .filter-panel.is-dialog .filter-panel-foot{padding:10px 14px 12px}
 .filter-panel.is-dialog.cols-3{width:min(800px,calc(100vw - 32px))}
-.filter-panel.is-dialog.cols-4{width:min(1030px,calc(100vw - 32px))}
+.filter-panel.is-dialog.cols-4{width:min(1100px,calc(100vw - 32px))}
 .filter-panel.is-dialog.cols-1{width:min(380px,calc(100vw - 32px))}
 @keyframes filter-dialog-in{from{opacity:0;transform:translate(-50%,-47%)}to{opacity:1;transform:translate(-50%,-50%)}}
 

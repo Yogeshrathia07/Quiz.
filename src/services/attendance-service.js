@@ -1,6 +1,7 @@
 import { accounts, attendanceSessions, studentProfiles } from '../db/index.js';
 import { PublicTestError } from '../lib/errors.js';
 import { asInteger, randomId } from '../lib/crypto.js';
+import { cookieIsSecure } from '../lib/security.js';
 import { now } from '../lib/time.js';
 import { cleanText, coordinate, isSapId, normalizeSapId } from '../domain/test-builder.js';
 import {
@@ -170,7 +171,8 @@ export async function searchPeople(req, code, rawQuery) {
   const session = await requireOwnedSession(req, code);
   const query = String(rawQuery ?? '').trim().slice(0, 80);
   if (query.length < 2) return { people: [] };
-  const pattern = new RegExp(escapeRegex(query), 'i');
+  // What was typed, escaped and matched as plain text, ignoring case.
+  const pattern = { $regex: escapeRegex(query), $options: 'i' };
   const [profiles, accountList] = await Promise.all([
     studentProfiles().find({ $or: [{ displayName: pattern }, { sapId: pattern }, { email: pattern }] })
       .project({ email: 1, displayName: 1, sapId: 1 }).limit(20).toArray(),
@@ -397,13 +399,13 @@ export async function attendanceForStudent(req, res, code, key) {
   let passed = Boolean(usablePass(req, session));
   if (isOpen(session) && isFreshQrKey(session.secret, key)) {
     res.cookie(passCookie(session.code), issuePass(session.secret), {
-      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', signed: true, maxAge: PASS_MS
+      httpOnly: true, sameSite: 'lax', secure: cookieIsSecure(req), signed: true, maxAge: PASS_MS
     });
     passed = true;
   }
   if (!req.signedCookies?.[DEVICE_COOKIE]) {
     res.cookie(DEVICE_COOKIE, randomId(12), {
-      httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', signed: true, maxAge: DEVICE_COOKIE_MS
+      httpOnly: true, sameSite: 'lax', secure: cookieIsSecure(req), signed: true, maxAge: DEVICE_COOKIE_MS
     });
   }
   const email = normalizeEmail(req.portalUser?.email);

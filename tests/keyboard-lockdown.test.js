@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isDevToolsKey, typingAllowed } from '../client/src/lib/useAwayMonitor.js';
+import { typingAllowed } from '../client/src/lib/useAwayMonitor.js';
 
 const box = { tagName: 'TEXTAREA', readOnly: false };
 const paper = { tagName: 'BUTTON' };
@@ -28,10 +28,11 @@ test('a phone keyboard typing into the answer box is never blocked', () => {
   assert.equal(typingAllowed(key('Unidentified', { tagName: 'TEXTAREA', readOnly: true }, { keyCode: 229 })), false, 'a final answer');
 });
 
-test('developer-tools shortcuts are recognised for the report', () => {
-  assert.equal(isDevToolsKey(key('F12', paper)), true);
-  assert.equal(isDevToolsKey(key('I', paper, { ctrlKey: true, shiftKey: true })), true);
-  assert.equal(isDevToolsKey(key('u', paper, { ctrlKey: true })), true);
-  assert.equal(isDevToolsKey(key('i', paper, { metaKey: true, altKey: true })), true);
-  assert.equal(isDevToolsKey(key('a', paper)), false);
+test('developer-tools shortcuts are swallowed like any other key, in the answer box too', () => {
+  for (const target of [paper, box]) {
+    assert.equal(typingAllowed(key('F12', target)), false, 'F12');
+    assert.equal(typingAllowed(key('I', target, { ctrlKey: true, shiftKey: true })), false, 'Ctrl+Shift+I');
+    assert.equal(typingAllowed(key('u', target, { ctrlKey: true })), false, 'Ctrl+U');
+    assert.equal(typingAllowed(key('i', target, { metaKey: true, altKey: true })), false, 'Cmd+Alt+I');
+  }
 });

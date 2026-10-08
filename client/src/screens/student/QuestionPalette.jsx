@@ -1,19 +1,27 @@
 import { useEffect, useRef } from 'react';
 
 /**
- * The paper as a row of numbered circles: filled once answered, ringed for
- * the one on screen. Any question can be opened at any time. The row keeps
- * the current question in view as the student moves through a long paper.
+ * Keep the active number in the middle of the strip, whichever way it scrolls:
+ * along a single row (phone), down the desktop rail, or down a few wrapped rows (tablet).
  */
+export function centerCurrentQuestion(strip) {
+  const button = strip?.querySelector('.q-dot.is-current');
+  if (!strip || !button) return;
+  const box = strip.getBoundingClientRect();
+  const at = button.getBoundingClientRect();
+  strip.scrollTo({
+    top: strip.scrollTop + at.top - box.top - (strip.clientHeight - at.height) / 2,
+    left: strip.scrollLeft + at.left - box.left - (strip.clientWidth - at.width) / 2,
+    behavior: 'smooth'
+  });
+}
+
+/** The paper's numbered strip (a vertical rail on desktop). */
 export function QuestionPalette({ questions, currentIndex, onSelect }) {
   const row = useRef(null);
 
   useEffect(() => {
-    const strip = row.current;
-    const button = strip?.querySelector('[aria-current="true"]');
-    if (!strip || !button) return;
-    const left = button.offsetLeft - strip.clientWidth / 2 + button.clientWidth / 2;
-    strip.scrollTo({ left, behavior: 'smooth' });
+    centerCurrentQuestion(row.current);
   }, [currentIndex]);
 
   return (

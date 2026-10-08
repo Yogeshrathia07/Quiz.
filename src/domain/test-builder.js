@@ -11,8 +11,16 @@ import { imageField } from './question-image.js';
 
 export const RESULT_RELEASE_MODES = ['instant', 'after_quiz', 'admin'];
 
+// Control characters, and the direction overrides that make a name display
+// as something else (U+202A-U+202E, U+2066-U+2069). Joiners stay: Indian
+// scripts need them.
+const HIDDEN_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/g;
+
+/** One line of plain text: hidden characters removed, runs of spaces made one. */
+export const plainText = (value) => String(value ?? '').replace(HIDDEN_CHARACTERS, '').trim().replace(/\s+/g, ' ');
+
 export function cleanText(value, label, min, max) {
-  const text = String(value || '').trim().replace(/\s+/g, ' ');
+  const text = plainText(value || '');
   if (text.length < min || text.length > max) throw new PublicTestError(400, `${label} must be between ${min} and ${max} characters.`);
   return text;
 }

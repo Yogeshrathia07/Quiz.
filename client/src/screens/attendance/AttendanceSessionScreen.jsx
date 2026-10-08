@@ -12,6 +12,7 @@ import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { Skeleton } from '../../components/Skeleton.jsx';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
+import { PersonLink } from '../../components/PersonLink.jsx';
 import {
   ABSENT_FILTERS, MIN_SHARE, PHONE_FLAG_IDS, absentees, attendanceFilters, sortAbsent, sortMarks
 } from './attendance-filters.js';
@@ -104,7 +105,7 @@ function MarkRow({ mark, index, isNew, picked, onPick, showDistance, onAction })
         <span className="att-index">{index + 1}</span>
       </td>
       <td className="att-who">
-        <span className="att-name">{mark.name}</span>
+        <PersonLink className="att-name" email={mark.email} guest={mark.isGuest}>{mark.name}</PersonLink>
         <span className="att-sub">
           {mark.sapId || 'No SAP ID'}
           {mark.isGuest && ' · Guest'}
@@ -145,7 +146,7 @@ function AbsentRow({ person, index, sessionCount, picked, onPick, busy, onMarkPr
         <span className="att-index">{index + 1}</span>
       </td>
       <td className="att-who">
-        <span className="att-name">{person.name}</span>
+        <PersonLink className="att-name" email={person.email} guest={person.isGuest}>{person.name}</PersonLink>
         <span className="att-sub">{person.sapId || 'No SAP ID'}{person.isGuest && ' · Guest'}</span>
       </td>
       <td className="att-share-cell" title={`Present in ${person.seen} of the class's other ${plural(sessionCount, 'session')}`}>

@@ -36,8 +36,10 @@ import {
   reopenAttendance, searchPeople, setMarkStatus, setMarkStatuses
 } from '../services/attendance-service.js';
 import { homeSummary } from '../services/home-service.js';
+import { testMatrix, testOverview } from '../services/overview-service.js';
 import { MAX_IMAGE_BYTES, questionImage, saveQuestionImage } from '../services/question-image-service.js';
 import { checkAnyDevice, checkTestDevice } from '../services/device-service.js';
+import { limitPerAddress } from '../lib/security.js';
 
 /** Forwards any thrown PublicTestError to the central error handler. */
 const route = (handler) => async (req, res, next) => {
@@ -126,8 +128,10 @@ export function createApiRouter() {
   router.get('/auth/microsoft', route(beginMicrosoftLogin));
   router.get('/auth/microsoft/callback', route(finishMicrosoftLogin));
   // Scoped to one test on purpose: a guest session exists only for a test whose
-  // admin allowed guests, never as a general-purpose account.
-  router.post('/api/auth/guest', route(async (req, res) => {
+  // admin allowed guests, never as a general-purpose account. Each is a new
+  // session, so one network may start only so many.
+  const guestLimit = limitPerAddress({ windowMs: 10 * 60_000, max: 300, message: 'Too many guest sign-ins from this network.' });
+  router.post('/api/auth/guest', guestLimit, route(async (req, res) => {
     const body = req.body || {};
     res.status(201).json(await (body.attendanceCode ? beginAttendanceGuest(res, body) : beginGuestSession(res, body)));
   }));
@@ -174,7 +178,9 @@ export function createApiRouter() {
   }));
   router.get('/api/tests/:code', route(async (req, res) => res.json(await getTest(req, req.params.code))));
   router.get('/api/tests/:code/qr.svg', route(async (req, res) => {
-    res.type('image/svg+xml').send(await testQrSvg(req.params.code, joinUrl(req, req.params.code)));
+    // An SVG opened on its own is a page of this site: it may run nothing and load nothing.
+    res.type('image/svg+xml').set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; img-src data:")
+      .send(await testQrSvg(req.params.code, joinUrl(req, req.params.code)));
   }));
   router.post('/api/tests/:code/register', requireTestTaker, route(async (req, res) => {
     const response = await registerForTest(req, res, req.params.code, req.body || {});
@@ -283,6 +289,10 @@ export function createApiRouter() {
     } : null;
     res.json(await adminDashboard(req, req.params.code, paged));
   }));
+  // The Test tab's overview: the whole class at a glance (services/overview-service.js).
+  router.get('/api/admin/tests/:code/overview', requireAdmin, route(async (req, res) => res.json(await testOverview(req, req.params.code))));
+  // The Analysis tab: every submitted paper against every question (overview-service matrixOf).
+  router.get('/api/admin/tests/:code/matrix', requireAdmin, route(async (req, res) => res.json(await testMatrix(req, req.params.code))));
   router.get('/api/admin/tests/:code/export.csv', requireAdmin, route(async (req, res) => {
     const dashboard = await adminDashboard(req, req.params.code);
     res.type('text/csv').attachment(`${req.params.code}-registrations.csv`).send(csvForAdmin(dashboard));
@@ -447,7 +457,7 @@ export function createApiRouter() {
     res.json(response);
   }));
   // The Excel export's Marks sheet, typed into and sent back as the file itself (services/marks-import.js).
-  router.post('/api/admin/tests/:code/marks.xlsx', requireAdmin, express.raw({ type: () => true, limit: '20mb' }), route(async (req, res) => {
+  router.post('/api/admin/tests/:code/marks.xlsx', requireAdmin, express.raw({ type: () => true, limit: '10mb' }), route(async (req, res) => {
     const result = await importMarks(req, req.params.code, req.body);
     if (result.marks) signalTest(req.params.code, 'marks_updated', {});
     res.json(result);

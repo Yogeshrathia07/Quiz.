@@ -4,6 +4,8 @@ import { LocationProblem, browserInfo, getBrowserLocation, imprecision, knownPro
 
 /** A reading this recent is used as it is; an older one is taken again. */
 const FRESH_MS = 60_000;
+/** Kept fresh (keepFresh), a reading is taken again this often - before the last one goes stale. */
+const REFRESH_MS = 45_000;
 
 /**
  * The venue check before a test or an attendance mark, done as its own step.
@@ -15,17 +17,23 @@ const FRESH_MS = 60_000;
  * allowed, the location is found straight away with nothing to answer;
  * blocked, or inside another app, the way out is on screen from the start.
  * Coming back from Settings looks again.
+ *
+ * `keepFresh` (waiting for a test to start): once allowed, the location is
+ * found again every so often, quietly, so that whenever Begin is pressed a
+ * fresh one is ready and Begin waits for nothing.
  */
-export function useLocationCheck(enabled) {
+export function useLocationCheck(enabled, { keepFresh = false } = {}) {
   const [phase, setPhase] = useState('idle'); // idle | asking | found | problem
   const [reading, setReading] = useState(null);
   const [problem, setProblem] = useState(null);
   const readAt = useRef(0);
   const inflight = useRef(null);
 
-  const request = useCallback(() => {
+  // `quiet`: a reading taken again behind one already shown - the panel stays
+  // as it is meanwhile, and one that fails leaves the last reading to go stale.
+  const request = useCallback(({ quiet = false } = {}) => {
     if (inflight.current) return inflight.current;
-    setPhase('asking');
+    if (!quiet) setPhase('asking');
     const run = getBrowserLocation().then((point) => {
       readAt.current = Date.now();
       setReading(point);
@@ -33,8 +41,10 @@ export function useLocationCheck(enabled) {
       setPhase('found');
       return point;
     }, (error) => {
-      setProblem(error);
-      setPhase('problem');
+      if (!quiet) {
+        setProblem(error);
+        setPhase('problem');
+      }
       throw error;
     }).finally(() => { inflight.current = null; });
     inflight.current = run;
@@ -63,6 +73,16 @@ export function useLocationCheck(enabled) {
     document.addEventListener('visibilitychange', onVisible);
     return () => { alive = false; document.removeEventListener('visibilitychange', onVisible); };
   }, [enabled, request]);
+
+  useEffect(() => {
+    if (!enabled || !keepFresh) return undefined;
+    const timer = window.setInterval(async () => {
+      // Only behind a reading already found, and only where nothing is asked.
+      if (document.hidden || inflight.current || !readAt.current) return;
+      if (await locationPermission() === 'granted') request({ quiet: true }).catch(() => {});
+    }, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [enabled, keepFresh, request]);
 
   return { phase, reading, problem, request, fresh };
 }

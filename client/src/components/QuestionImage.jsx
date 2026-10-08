@@ -5,7 +5,7 @@ import { Expand, Maximize, Minimize, RotateCw, X, ZoomIn, ZoomOut } from 'lucide
 
 /**
  * Every picture loads once: the paper fetches all of its pictures as it
- * opens (preloadImages), and each one shown on a question waits on the same
+ * opens (useImagesSettled), and each one shown on a question waits on the same
  * load rather than starting another. Resolves true when loaded, false when
  * it could not be.
  */
@@ -26,6 +26,13 @@ export function loadImage(url) {
 }
 
 /**
+ * The paper's pictures come down this many at a time, in the paper's order,
+ * so the first question's is not held up behind the last one's. A picture on
+ * the question open now (QuestionImage) does not wait its turn.
+ */
+const LOADS_AT_ONCE = 3;
+
+/**
  * Which of these pictures have finished arriving (loaded, or given up on):
  * a Set of their addresses, growing as each one lands. The paper waits on it
  * before telling the server a question is on screen, so a question's clock
@@ -36,9 +43,17 @@ export function useImagesSettled(urls) {
   const [settled, setSettled] = useState(() => new Set());
   useEffect(() => {
     let alive = true;
-    for (const url of key ? key.split('\n') : []) {
-      loadImage(url).then(() => { if (alive) setSettled((current) => (current.has(url) ? current : new Set(current).add(url))); });
-    }
+    const queue = key ? key.split('\n') : [];
+    const next = () => {
+      const url = alive ? queue.shift() : null;
+      if (!url) return;
+      loadImage(url).then(() => {
+        if (!alive) return;
+        setSettled((current) => (current.has(url) ? current : new Set(current).add(url)));
+        next();
+      });
+    };
+    for (let slot = 0; slot < LOADS_AT_ONCE; slot += 1) next();
     return () => { alive = false; };
   }, [key]);
   return settled;

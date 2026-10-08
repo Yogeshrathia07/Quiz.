@@ -9,6 +9,7 @@ import { QuestionImage } from '../../components/QuestionImage.jsx';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
 import { applyFilters } from '../../lib/filters.js';
 import { Skeleton } from '../../components/Skeleton.jsx';
+import { ClassComparison } from './ClassComparison.jsx';
 
 /**
  * The Excel of their answers, as a round green button. Offered once the test
@@ -123,25 +124,6 @@ export function useMyResponses(code, enabled = true) {
   return { data: data || null, failed: data ? '' : error?.message || '' };
 }
 
-/** The score as a ring filled to its percentage, the marks inside. */
-export function ScoreRing({ score, total }) {
-  const percent = total ? Math.max(0, Math.min(100, (score / total) * 100)) : 0;
-  const radius = 44;
-  const length = 2 * Math.PI * radius;
-  return (
-    <div className="score-ring" role="img" aria-label={`${score} out of ${total}, ${Math.round(percent)}%`}>
-      <svg viewBox="0 0 100 100" aria-hidden="true">
-        <circle className="score-ring-track" cx="50" cy="50" r={radius}/>
-        <circle className="score-ring-fill" cx="50" cy="50" r={radius} strokeDasharray={`${(percent / 100) * length} ${length}`}/>
-      </svg>
-      <span className="score-ring-text" aria-hidden="true">
-        <strong>{score}<small>/{total}</small></strong>
-        <span>{Math.round(percent)}%</span>
-      </span>
-    </div>
-  );
-}
-
 /**
  * The answer filter - the same Filter button as the rest of the portal: how it
  * went (anything short of full marks is Wrong) and, when a paper mixes them,
@@ -219,6 +201,9 @@ export function AnswerReview({ code, review }) {
               </div>
               <RichText className="result-prompt" text={answer.prompt}/>
               {answer.image && <QuestionImage image={answer.image} label={`Picture for question ${answer.questionNumber}`} compact/>}
+              {answer.classPercentRight !== null && answer.classPercentRight !== undefined && (
+                <p className="result-class">{answer.classPercentRight}% of the class got this right</p>
+              )}
               <dl className="result-lines">
                 <div className="is-yours">
                   <dt>Your answer</dt>
@@ -233,6 +218,18 @@ export function AnswerReview({ code, review }) {
         })}
       </ol>
     </section>
+  );
+}
+
+/** Once the answers are out: each kind of question, and how the paper stands against the class. */
+function ResultInsights({ code }) {
+  const { data } = useMyResponses(code);
+  if (!data) return null;
+  return (
+    <div className="result-insights">
+      <TypeBreakdown answers={data.answers}/>
+      <ClassComparison comparison={data.comparison} answers={data.answers}/>
+    </div>
   );
 }
 
@@ -284,6 +281,7 @@ export function ResultScreen({ result }) {
         )}
         <p className="help">Answered {result.answered} of {result.totalQuestions} · submitted {dateTime(result.submittedAt)}</p>
         <IntegrityLine result={result}/>
+        {result.canDownload && <ResultInsights code={result.code}/>}
       </div>
       {result.canDownload && <AnswerReview code={result.code}/>}
     </section>

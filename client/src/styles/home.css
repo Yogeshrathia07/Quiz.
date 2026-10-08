@@ -151,3 +151,14 @@
   .stat-tile-icon{padding:7px;border-radius:9px}
   .stat-tile strong{font-size:1.15rem}
 }
+
+/* Narrow phones: the two buttons one under the other, full width - side by
+   side they had too little room for an icon and a word each. The greeting a
+   little smaller, so it is two lines, not three. */
+@media (max-width:380px){
+  .home-hero{padding:18px 16px}
+  .home-hero h1{font-size:1.5rem}
+  .home-hero-line{font-size:.9rem}
+  .home-hero-actions{grid-template-columns:minmax(0,1fr)}
+  .home-hero-actions .button{width:100%;padding:0 14px}
+}

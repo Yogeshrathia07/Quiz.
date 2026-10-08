@@ -133,14 +133,10 @@
 .tab-count{min-width:22px;padding:2px 7px;border-radius:100px;background:rgba(14,15,17,0.1);color:#F7FAFC;font-size:.72rem;font-variant-numeric:tabular-nums}
 .dashboard-tabs button[aria-selected="true"] .tab-count{background:rgba(255,255,255,.22);color:#F7FAFC}
 .overview-facts div{display:grid;align-content:center;gap:4px;min-height:60px;padding:10px 13px;border:1px solid var(--line);border-radius:11px;background:var(--wash)}
-.qr-panel p{margin:0;color:var(--muted);font-size:.83rem;line-height:1.45}
 .students-card{padding:22px 20px}
 .students-card .live-table{font-size:.88rem}
 .students-card .table-actions{justify-content:flex-end;flex-wrap:nowrap}
 .students-card .pill{margin-top:6px}
-@media (max-width:1100px){
-  .overview-grid{grid-template-columns:1fr}
-}
 @media (max-width:680px){
   .dashboard-head{padding:18px 18px 0}
   .dashboard-tabs{width:100%}
@@ -169,7 +165,6 @@
 .dashboard-head-copy .pill{margin-top:7px}
 .dashboard-tabs{display:flex;gap:4px;padding:4px;border:1px solid #474C52;border-radius:13px;background:#33373B}
 .dashboard-tabs button{display:flex;align-items:center;gap:8px;min-height:36px;padding:7px 16px;border:0;border-radius:9px;background:transparent;color:#AAB6BC;font:inherit;font-size:.82rem;font-weight:700;letter-spacing:-.01em;cursor:pointer;white-space:nowrap}
-.overview-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(300px,380px);gap:16px;align-items:stretch}
 .overview-panel{display:grid;grid-template-rows:auto auto 1fr;gap:15px;padding:20px 24px;align-content:start}
 .overview-panel h2{margin:0;font-size:1rem;letter-spacing:-.02em}
 .overview-panel .help{margin:6px 0 0;line-height:1.45}
@@ -177,15 +172,10 @@
 .overview-facts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-content:center;gap:10px;padding:16px 0 0;border-top:1px solid var(--line)}
 .overview-facts span{color:var(--muted);font-size:.67rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
 .overview-facts strong{font-size:.95rem;letter-spacing:-.02em;line-height:1.25;overflow-wrap:anywhere}
-.qr-panel{display:grid;justify-items:center;gap:9px;padding:18px;text-align:center;align-content:center}
-.qr-panel h2{margin:0;font-size:.95rem}
-.qr-panel .qr{width:min(100%,190px);margin:0;cursor:zoom-in;padding:9px;border-radius:12px}
-.qr-panel .test-code-display{margin:0;font-size:.92rem}
 
 /* Short viewports get the scroll back rather than an unreadable squeeze. */
 @media (min-height:760px){
   .overview-panel{padding:22px 26px}
-  .qr-panel .qr{width:min(100%,215px)}
 }
 
 /* ------------------------------------------------------ end-time editing --- */
@@ -811,15 +801,21 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 @supports (overflow:clip){.shell.is-exam{overflow:clip}}
 
 /* Typing on a phone: the keyboard takes about half the screen, and the page is
-   resized to what is left (interactive-widget in index.html). Keep the timer
-   and the question; the title, the line under the timer, the question dots and
-   the Next / Submit bar come back as soon as the keyboard closes. */
+   resized to what is left (interactive-widget in index.html). Keep the timer,
+   the question and the Next / Submit bar (smaller); the title, the line under
+   the timer and the question dots come back as soon as the keyboard closes.
+   The bar is never hidden: a phone held sideways is this short with no
+   keyboard at all, and Android's back button closes the keyboard without
+   leaving the answer box - with the bar gone, a short answer last on the
+   paper left no way to Submit. */
 @media (max-height:560px){
   .exam-screen:has(.q-text:focus){gap:8px}
   .exam-screen:has(.q-text:focus) .exam-head-top,
   .exam-screen:has(.q-text:focus) .exam-sub,
-  .exam-screen:has(.q-text:focus) .q-dots,
-  .exam-screen:has(.q-text:focus) .exam-foot{display:none}
+  .exam-screen:has(.q-text:focus) .q-dots{display:none}
+  .exam-screen:has(.q-text:focus) .exam-foot{gap:8px}
+  .exam-screen:has(.q-text:focus) .exam-submit{height:40px;min-height:40px}
+  .exam-screen:has(.q-text:focus) .exam-arrow{width:40px;height:40px;flex-basis:40px}
 }
 
 /* ============ Notch / camera cut-out:keep everything in the safe area ============
@@ -947,7 +943,7 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 .main:has(.join-card) .join-stack>.join-card{width:100%;max-height:none;overflow:visible}
 
 /* Dashboard tabs:one fixed size, whatever the numbers do */
-.dashboard-tabs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:min(100%,520px);gap:4px}
+.dashboard-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));width:min(100%,640px);gap:4px}
 .dashboard-tabs button{justify-content:center;gap:7px;padding:7px 10px;overflow:hidden}
 .tab-label{overflow:hidden;text-overflow:ellipsis}
 .tab-count{position:relative;display:inline-grid;place-items:center;min-width:26px;height:22px;padding:0 7px;font-weight:700;line-height:1}
@@ -961,18 +957,14 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
 
 /* Dashboard:QR column lines up with the tabs above it, and the test's
    phase is a dot beside the title instead of a pill. */
-.dashboard-tabs{width:min(100%,380px)}
-.overview-grid{grid-template-columns:minmax(0,1fr) 380px}
+.dashboard-tabs{width:min(100%,520px)}
 .overview-panel{grid-template-rows:auto 1fr}
 .dashboard-head-copy h1{display:flex;align-items:center;gap:10px}
 .status-dot{flex:0 0 12px;width:12px;height:12px;border-radius:50%;background:#474C52}
 .status-dot.is-live{background:#27B66F;box-shadow:0 0 0 4px rgba(39,182,111,0.25)}
 .status-dot.is-done{background:#1598D1;box-shadow:0 0 0 4px rgba(21,152,209,0.2)}
 .status-dot.is-idle{background:#474C52;box-shadow:0 0 0 4px rgba(169,166,201,.18)}
-.qr-panel{gap:12px;padding:20px}
-.qr-panel .qr{width:min(100%,230px)}
 @media (max-width:900px){
-  .overview-grid{grid-template-columns:minmax(0,1fr)}
   .dashboard-tabs{width:100%}
 }
 .overview-panel{grid-template-rows:auto auto;align-content:start;gap:16px}
@@ -996,7 +988,6 @@ html:has(.exam-screen.is-list),body:has(.exam-screen.is-list){overflow:auto;heig
   .overview-facts{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .overview-facts div{padding:10px 12px}
   .overview-panel{padding:16px}
-  .qr-panel{padding:16px}
   .students-card{padding:14px 12px}
   .students-toolbar{padding:0 0 12px;gap:10px}
   .students-toolbar h2{font-size:1.05rem}

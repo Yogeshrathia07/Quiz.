@@ -10,16 +10,16 @@ import { invalidateTestCache, testDocByCode } from '../src/data/test-repository.
 import { compensateForOutage } from '../src/services/outage.js';
 import { PublicTestError } from '../src/lib/errors.js';
 import { createTest, updateTestSettings } from '../src/services/test-service.js';
-import { beginGuestSession, getTest, myResults, registerForTest, studentProfile } from '../src/services/registration-service.js';
+import { beginGuestSession, getTest, myResponseView, myResults, registerForTest, studentProfile } from '../src/services/registration-service.js';
 import { homeSummary } from '../src/services/home-service.js';
 import {
-  attemptResult, getAttempt, nextQuestion, recordFullscreenEvent, saveAnswer, startAttempt, submitAttemptForStudent
+  attemptResult, buildAttempt, getAttempt, nextQuestion, recordFullscreenEvent, saveAnswer, startAttempt, submitAttemptForStudent
 } from '../src/services/attempt-service.js';
 import { STRICT_GRACE_MS } from '../src/domain/strict-timing.js';
 import { activityLog } from '../src/domain/activity.js';
 import {
   adminDashboard, adminExportData, adminTests, archiveTest, bulkDecision, closeTest, decideRegistration, duplicateTest, gradeManualAnswer, releaseResults, deleteTest, reviewData, setAnswerMarks, setResultsFrozen, setUnmarkedRelease,
-  continueAttempt, pauseAttempt, reopenStudentPaper, reopenTest, setDeviceOverride, resetTest, restartAllAttempts, submitStudentPaper, restartAttempt, restartQuiz, resumeAttempt, setLocationOverride, setTestEndTime,
+  bulkAttemptAction, continueAttempt, pauseAttempt, reopenStudentPaper, reopenTest, setDeviceOverride, resetTest, restartAllAttempts, submitStudentPaper, restartAttempt, restartQuiz, resumeAttempt, setLocationOverride, setTestEndTime,
   startTest, updateStudentSapId, csvForAdmin, paginateDashboard
 } from '../src/services/admin-service.js';
 import { buildStudentResponseSpreadsheet, buildTestSpreadsheet } from '../src/export/spreadsheet.js';
@@ -30,6 +30,8 @@ import { config } from '../src/config.js';
 import { END_GRACE_MS } from '../src/domain/attempt-rules.js';
 import { runScheduleOnce } from '../src/services/scheduler.js';
 import { checkTestDevice } from '../src/services/device-service.js';
+import { answerState, testMatrix, testOverview } from '../src/services/overview-service.js';
+import { compute } from '../client/src/screens/admin/analysis-compute.js';
 
 // These checks cover the lock rules, which are off by default (LOCK_ON_EXIT).
 config.lockOnExit = true;
@@ -1008,6 +1010,26 @@ try {
   assert.equal(afterContinue.paused, false);
   assert.equal(afterContinue.answeredQuestionCount, 1, 'the answer saved before the pause is there');
   assert.ok(Math.abs(Date.parse(afterContinue.deadlineAt) - Date.parse(continued.ownDeadlineAt)) < 1_000, 'the student sees their own end');
+  // Resume all under the Paused filter selects on the server, while search
+  // narrows exactly who receives their time.
+  await pauseAttempt(adminReq, pauseCode, heldSeat.registration.id);
+  await pauseAttempt(adminReq, pauseCode, handedSeat.registration.id);
+  await registrations().updateMany({ testCode: pauseCode, 'attempt.pausedAt': { $ne: null } },
+    { $set: { 'attempt.pausedAt': new Date(Date.now() - 2 * 60_000) } });
+  await registrations().updateOne({ testCode: pauseCode, id: handedSeat.registration.id }, { $set: { 'attempt.extraMs': null } });
+  const oneContinued = await bulkAttemptAction(adminReq, pauseCode, 'continue',
+    { scope: 'matching', search: 'Other Student', filters: ['paper:paused'] });
+  assert.equal(oneContinued.affectedCount, 1, 'search resumes only the matching paused student');
+  assert.equal(rowOf(oneContinued, studentEmail).isPaused, true);
+  assert.equal(rowOf(oneContinued, otherEmail).isPaused, false);
+  assert.ok(rowOf(oneContinued, otherEmail).extraMs >= 2 * 60_000, 'bulk resume restores the paused time');
+  const restContinued = await bulkAttemptAction(adminReq, pauseCode, 'continue',
+    { scope: 'matching', filters: ['paper:paused'] });
+  assert.equal(restContinued.affectedCount, 1, 'the Paused filter continues everyone still paused');
+  assert.equal(rowOf(restContinued, studentEmail).isPaused, false);
+  assert.equal(rowOf(restContinued, otherEmail).isPaused, false);
+  assert.equal((await bulkAttemptAction(adminReq, pauseCode, 'continue',
+    { scope: 'matching', filters: ['paper:paused'] })).affectedCount, 0, 'repeating the action gives no time twice');
   // Rejected mid-test: told plainly, and approving again lets them carry on.
   await decideRegistration(adminReq, pauseCode, heldSeat.registration.id, 'reject');
   await assert.rejects(() => getAttempt(heldSeat.studentRequest, pauseCode), (error) => error.code === 'REJECTED' && /rejected your registration/.test(error.message));
@@ -1319,6 +1341,48 @@ try {
   const afterReset = await testDocByCode(drawTest.test.code);
   assert.equal(afterReset.paperSlots, 0);
   assert.equal(afterReset.registrations.every((entry) => entry.paperSlot === null), true);
+
+  // Papers made while students wait for Start: the waiting page's poll makes
+  // each one, taking its place in the draw, and Begin hands out that very paper.
+  const drawCode = drawTest.test.code;
+  const drawRow = (entry) => registrations().findOne({ testCode: drawCode, id: entry.registration.id });
+  for (const entry of drawPapers) await getTest(entry.studentRequest, drawCode);
+  const waitingRows = await Promise.all(drawPapers.map(drawRow));
+  assert.ok(waitingRows.every((row) => row.preparedPaper?.questions.length === 2 && row.preparedBasis), 'each waiting student has a paper made');
+  assert.deepEqual(waitingRows.map((row) => row.paperSlot), [0, 1, 2], 'with their place in the draw, in the order they waited');
+  const drawTestNow = await testDocByCode(drawCode);
+  assert.deepEqual(waitingRows[1].preparedPaper.questions, buildAttempt(null, drawTestNow, waitingRows[1]).questions,
+    'the very paper Begin would make');
+  assert.ok(drawTestNow.registrations.every((row) => row.preparedPaper === undefined), 'never read with the rest of a registration');
+  assert.equal(JSON.stringify(await getTest(drawPapers[0].studentRequest, drawCode)).includes('prepared'), false, 'nor sent to the page');
+  assert.equal(String((await drawRow(drawPapers[0])).preparedPaper.preparedAt), String(waitingRows[0].preparedPaper.preparedAt), 'polling again makes nothing new');
+  assert.equal((await testDocByCode(drawCode)).paperSlots, 3, 'and takes no second place');
+  // The paper changed before Start: made again on the next poll, in the same place.
+  await updateTestSettings(adminReq, drawCode, { shuffleQuestions: false });
+  await getTest(drawPapers[0].studentRequest, drawCode);
+  const remade = await drawRow(drawPapers[0]);
+  assert.notEqual(remade.preparedBasis, waitingRows[0].preparedBasis, 'a changed paper is made again');
+  assert.equal(remade.paperSlot, 0);
+  await updateTestSettings(adminReq, drawCode, { shuffleQuestions: true });
+  await getTest(drawPapers[0].studentRequest, drawCode);
+  // One student's paper made from what has since changed: Begin makes a fresh one instead.
+  await registrations().updateOne({ testCode: drawCode, id: drawPapers[2].registration.id }, { $set: { preparedBasis: 'stale', 'preparedPaper.questions': [] } });
+  await startTest(adminReq, drawCode);
+  const begunRows = [];
+  for (const entry of drawPapers) {
+    const before = await drawRow(entry);
+    const paper = await startAttempt(entry.studentRequest, drawCode);
+    const row = await drawRow(entry);
+    assert.equal(paper.questions.length, 2);
+    if (before.preparedBasis !== 'stale') assert.deepEqual(row.attempt.questions, before.preparedPaper.questions, 'Begin hands out the paper made while waiting');
+    assert.equal(row.preparedPaper, undefined, 'and the paper made ahead goes');
+    assert.equal(row.preparedBasis, undefined);
+    assert.equal(row.device.stage, 'begin', 'what they began on is kept by the same write');
+    begunRows.push(row);
+  }
+  assert.deepEqual(begunRows.map((row) => row.paperSlot), [0, 1, 2]);
+  assert.equal(new Set(begunRows.flatMap((row) => row.attempt.questions.map((question) => question.questionId))).size, 6, 'the draw still spreads the whole bank');
+  assert.equal((await testDocByCode(drawCode)).paperSlots, 3, 'Begin took no new place');
 
   // A late starter is bound by the same end time as everyone else.
   const lateTest = await createTest(adminReq, objectivePayload(`Late start ${identifier}`));
@@ -1722,6 +1786,82 @@ try {
   assert.equal(missedRow.testClosed, true, 'results know the test has ended');
   assert.equal(missedRow.attemptStatus, null, 'with no paper begun');
 
+  /* --------------------------------------------- the Test tab's overview */
+  // Three let in: one right, one wrong, one who never begins - every figure exact.
+  const overviewTest = await createTest(adminReq, { ...objectivePayload(`Overview ${identifier}`), resultReleaseMode: 'admin' });
+  const overviewCode = overviewTest.test.code;
+  createdCodes.push(overviewCode);
+  const overviewSeats = [];
+  for (const [index, label] of ['right', 'wrong', 'absent'].entries()) {
+    const email = `regression-${identifier}-overview-${label}@stu.upes.ac.in`;
+    profileEmails.push(email);
+    overviewSeats.push(await seatStudent(overviewCode, { portalUser: { email, displayName: `Overview ${label}`, role: 'student' } },
+      String(100_000_000 + ((Date.now() + (index + 1) * 13_337) % 890_000_000))));
+  }
+  const notYet = await testOverview(adminReq, overviewCode);
+  assert.deepEqual([notYet.people.registered, notYet.people.approved, notYet.people.notBegun, notYet.marks.papers], [3, 3, 3, 0]);
+  assert.equal(notYet.paper.fullMarks, 1, 'before any paper: the mix at each type\'s worth');
+  await startTest(adminReq, overviewCode);
+  const overviewBank = new Map((await testDocByCode(overviewCode)).questions.map((question) => [question.id, question]));
+  for (const [index, seat] of overviewSeats.slice(0, 2).entries()) {
+    const paper = await startAttempt(seat.studentRequest, overviewCode);
+    const question = overviewBank.get(paper.questions[0].id);
+    const wrong = String((Number(question.correctOptions[0]) + 1) % question.options.length);
+    await saveAnswer(seat.studentRequest, paper.id, { questionId: question.id, selectedOptions: index === 0 ? question.correctOptions : [wrong] });
+    if (index === 1) await recordFullscreenEvent(seat.studentRequest, paper.id, { type: 'exit', detail: 'tab_switch' });
+    if (index === 1) await recordFullscreenEvent(seat.studentRequest, paper.id, { type: 'return', durationMs: 4_000, detail: 'tab_switch' });
+    await submitAttemptForStudent(seat.studentRequest, paper.id);
+  }
+  await closeTest(adminReq, overviewCode);
+  const overview = await testOverview(adminReq, overviewCode);
+  assert.deepEqual(
+    [overview.people.registered, overview.people.began, overview.people.submitted, overview.people.notBegun, overview.finish.student],
+    [3, 2, 2, 1, 2], 'who took part, and how papers were handed in'
+  );
+  assert.deepEqual(
+    [overview.marks.papers, overview.marks.fullMarks, overview.marks.average, overview.marks.highest, overview.marks.lowest, overview.marks.averagePercent],
+    [2, 1, 0.5, 1, 0, 50], 'the marks'
+  );
+  assert.equal(overview.marks.bands[0], 1, 'one paper in 0-9%');
+  assert.equal(overview.marks.bands[9], 1, 'one in 90-100%');
+  assert.equal(overview.marks.bands.reduce((total, count) => total + count, 0), 2);
+  const overviewTotals = overview.questions.reduce((sum, question) => {
+    assert.equal(question.right + question.partial + question.wrong + question.pending + question.blank, question.papers, `Q${question.number} adds up`);
+    return { right: sum.right + question.right, wrong: sum.wrong + question.wrong };
+  }, { right: 0, wrong: 0 });
+  assert.deepEqual(overviewTotals, { right: 1, wrong: 1 }, 'question by question: one right, one wrong');
+  assert.ok(overview.questions.every((question) => !question.commonWrong || question.commonWrong.count === 1));
+  assert.deepEqual([overview.conduct.began, overview.conduct.left, overview.conduct.leaves], [2, 1, 1], 'who left the page');
+  assert.equal(JSON.stringify(overview).includes('@'), false, 'no one is named in it');
+
+  // The Analysis tab: every handed-in paper against every question it had, each answer's state - and no email in it.
+  const matrix = await testMatrix(adminReq, overviewCode);
+  assert.deepEqual([matrix.people.began, matrix.people.absent, matrix.people.submitted, matrix.students.length], [2, 1, 2, 2], 'who took part');
+  assert.ok(matrix.questions.length >= 1 && matrix.questions.every((question) => question.type === 'mcq' && question.worth === 1), 'a column per question used, at its worth');
+  const byName = new Map(matrix.students.map((student) => [student.name, student]));
+  const answered = (student) => student.st.replaceAll('.', '');
+  assert.deepEqual([answered(byName.get('Overview right')), answered(byName.get('Overview wrong'))], ['O', 'W'], 'one answer each: right, wrong');
+  assert.ok(matrix.students.every((student) => student.st.length === matrix.questions.length), 'a state for every column');
+  assert.deepEqual([byName.get('Overview right').flags.left, byName.get('Overview wrong').flags.left], [0, 1], 'who left the page');
+  const classView = compute(matrix, { selected: new Set(matrix.questions.map((_question, column) => column)) });
+  assert.deepEqual(classView.shown.map((row) => [row.student.name, row.rank]), [['Overview right', 1], ['Overview wrong', null]], 'ranked; the paper on 0 marks listed after it, with no rank');
+  assert.deepEqual([classView.stats.average, classView.stats.pendingPapers, classView.bands.find((band) => band.id === '90').count], [50, 0, 1]);
+  assert.equal(JSON.stringify(matrix).includes('@'), false, 'no email in it');
+  assert.equal(answerState(null, true, 2), 'Q', 'an answer not marked yet is pending, never 0');
+  assert.deepEqual([answerState(0, false, 2), answerState(2, true, 2), answerState(1, true, 2), answerState(0, true, 2)], ['B', 'O', 'P', 'W']);
+
+  // A student's own result: the class beside their paper - only once the marks are out.
+  const rightStudent = { portalUser: overviewSeats[0].studentRequest.portalUser };
+  await expectPublicError(() => myResponseView(rightStudent, overviewCode), 403);
+  await releaseResults(adminReq, overviewCode);
+  const ownView = await myResponseView(rightStudent, overviewCode);
+  assert.deepEqual([ownView.comparison.rank, ownView.comparison.papers, ownView.comparison.betterThanPercent, ownView.comparison.you.percent],
+    [1, 2, 100, 100], 'first of two, better than the other');
+  assert.deepEqual([ownView.comparison.class.averagePercent, ownView.comparison.class.highestPercent], [50, 100]);
+  const classRight = new Map(overview.questions.map((question) => [question.number, question.percentRight]));
+  assert.ok(ownView.answers.every((answer) => answer.classPercentRight === 50 || classRight.size > 1), 'each answer says how many of the class got it right');
+  assert.equal(JSON.stringify(ownView).includes('Overview wrong'), false, 'never another student\'s name');
+
   console.log([
     'Regression check passed:',
     'registration (student domain, plus guests only where the admin allowed them), SAP profile, approval and bulk approval,',
@@ -1729,8 +1869,8 @@ try {
     'free navigation across the paper, the shared end time for late starters, time up (grace, lock, extension)',
     'and automatic submission by the scheduler, scheduled starts, durations from the real start,',
     'strict per-question timing (forward only, server-side timeouts, auto-submit on the last question),',
-    'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), handing in one paper, reopening one handed-in paper (with minutes for that student alone), phones-only and laptops-only tests (Begin refused, the paper covered, exceptions, what the teacher sees), rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
-    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results as a paper they sat; text all at once and extensions seen no longer recorded.'
+    'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), resuming paused students in bulk by search and filter, handing in one paper, reopening one handed-in paper (with minutes for that student alone), phones-only and laptops-only tests (Begin refused, the paper covered, exceptions, what the teacher sees), rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, papers made while students wait for Start (Begin handing out that very paper, made again when the paper changes), strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
+    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results as a paper they sat, the overview on the Test tab (who took part, the marks and their spread, question by question, leaving the page - every figure exact), the Analysis tab (each answer right, part, wrong, blank or still to mark; ranked) and students comparing their own paper with the class (only once marks are out, never another name); text all at once and extensions seen no longer recorded.'
   ].join(' '));
 } finally {
   if (createdCodes.length) {

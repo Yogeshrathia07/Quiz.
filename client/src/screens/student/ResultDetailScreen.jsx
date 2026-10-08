@@ -3,26 +3,46 @@ import { ArrowLeft } from 'lucide-react';
 import { useCached } from '../../lib/cache.js';
 import { dateTime, durationLabel } from '../../lib/format.js';
 import { Skeleton } from '../../components/Skeleton.jsx';
-import { AnswerReview, DownloadResponses, ScoreRing, TypeBreakdown, useMyResponses } from './ResultScreen.jsx';
+import { AnswerReview, DownloadResponses, TypeBreakdown, useMyResponses } from './ResultScreen.jsx';
+import { MarksGauge } from '../../components/MarksGauge.jsx';
+import { ClassComparison } from './ClassComparison.jsx';
 
-/** Right, wrong and the rest, as a few numbers under the score - only those that are not zero, past the first two. */
-function Tally({ summary }) {
+const roundMarks = (value) => Math.round(value * 100) / 100;
+const questionsWord = (count) => `${count} question${count === 1 ? '' : 's'}`;
+const marksWord = (value) => `${value} mark${value === 1 ? '' : 's'}`;
+
+/**
+ * How the questions went, in the gauge's three colours and its order: Right
+ * (blue), still to mark (yellow), Wrong - with part marks and blanks, as the
+ * answer filter counts them (red). A pointer resting on one gives its marks.
+ * Beside the gauge (`stacked`), one under the other and all three always, one
+ * for each of its parts; elsewhere still to mark only while there are some.
+ */
+function Tally({ summary, answers, stacked = false }) {
+  const marked = (answers || []).filter((answer) => answer.marks !== null);
+  const sum = (list, value) => roundMarks(list.reduce((total, answer) => total + (Number(value(answer)) || 0), 0));
+  const right = marked.filter((answer) => answer.isCorrect === true);
+  const wrong = marked.filter((answer) => answer.isCorrect !== true);
+  const waiting = (answers || []).filter((answer) => answer.marks === null);
+  const wrongCount = summary.incorrect + summary.partial + summary.unanswered;
   const items = [
-    ['right', 'Right', summary.correct, true],
-    ['wrong', 'Wrong', summary.incorrect, true],
-    ['part', 'Part', summary.partial],
-    ['blank', 'Blank', summary.unanswered],
-    ['pending', 'Unmarked', summary.ungraded]
-  ].filter(([, , value, always]) => always || value > 0);
+    ['right', 'Right', summary.correct, answers && `${questionsWord(summary.correct)} right: ${marksWord(sum(right, (answer) => answer.marks))} earned`],
+    (summary.ungraded > 0 || stacked) && ['pending', 'Unmarked', summary.ungraded, answers && (summary.ungraded > 0
+      ? `${questionsWord(summary.ungraded)} to be marked, worth ${marksWord(sum(waiting, (answer) => answer.maxMarks))}`
+      : 'Nothing left to mark')],
+    ['wrong', 'Wrong', wrongCount, answers && `${questionsWord(wrongCount)} wrong, part-marked or blank: ${marksWord(sum(wrong, (answer) => answer.maxMarks - answer.marks))} lost`]
+  ].filter(Boolean);
   return (
-    <dl className="result-tally">
-      {items.map(([id, label, value]) => <div key={id} className={`is-${id}`}><dt>{label}</dt><dd>{value || 0}</dd></div>)}
+    <dl className={`result-tally${stacked ? ' is-stack' : ''}`}>
+      {items.map(([id, label, value, tip]) => (
+        <div key={id} className={`is-${id}`} data-tip={tip || undefined}><dt>{label}</dt><dd>{value || 0}</dd></div>
+      ))}
     </dl>
   );
 }
 
 /**
- * One handed-in test, opened from My results (or a teacher's Taken by me):
+ * One handed-in test, opened from My results (or a teacher's Taken, under Tests):
  * the score as a ring, how many right and wrong, the Excel as a round green
  * button, and every answer with the right one and its marks - read on the
  * page, no download needed. Beside the answers on a laptop, above them on a
@@ -42,7 +62,7 @@ export function ResultDetailScreen({ code, go, showToast, isStudent = true }) {
   }, [list.error, list.data, showToast]);
   const review = useMyResponses(code, row === undefined || Boolean(row?.canDownload));
   const back = isStudent ? '/' : '/?admin=tests&view=taken';
-  const backLabel = `Back to ${isStudent ? 'My results' : 'Taken by me'}`;
+  const backLabel = `Back to ${isStudent ? 'My results' : 'Taken'}`;
   // A round arrow inside the card, not a link above it.
   const backButton = (
     <button className="result-back" type="button" onClick={() => go(back)} aria-label={backLabel} title={backLabel}>
@@ -51,6 +71,10 @@ export function ResultDetailScreen({ code, go, showToast, isStudent = true }) {
   );
   const total = row ? row.totalMarks ?? row.totalQuestions : 0;
   const summary = review.data?.summary;
+  const answers = review.data?.answers;
+  // The marks still to be marked: from the list (pendingMarks), else counted from the answers.
+  const pendingMarks = row?.pendingMarks
+    || roundMarks((answers || []).filter((answer) => answer.marks === null).reduce((sum, answer) => sum + (Number(answer.maxMarks) || 0), 0));
 
   return (
     <section className="result-page">
@@ -77,17 +101,19 @@ export function ResultDetailScreen({ code, go, showToast, isStudent = true }) {
               </p>
             </div>
             {row.released ? (
-              <div className="result-score-block">
-                <ScoreRing score={row.score} total={total}/>
-                {summary && <Tally summary={summary}/>}
+              <div className="result-gauge-card">
+                <MarksGauge score={row.score} total={total} pending={pendingMarks}
+                  caption={row.pendingManual > 0 ? <><b>{row.pendingManual}</b> to mark</> : 'all marked'}/>
+                {summary && <Tally summary={summary} answers={answers} stacked/>}
               </div>
             ) : (
               <>
                 <p className="result-pending">{row.message || 'Your marks are not available yet.'}</p>
-                {summary && <Tally summary={summary}/>}
+                {summary && <Tally summary={summary} answers={answers}/>}
               </>
             )}
             {review.data && <TypeBreakdown answers={review.data.answers}/>}
+            {review.data?.comparison && <ClassComparison comparison={review.data.comparison} answers={review.data.answers}/>}
             {/* Pending, the message above already says so; released, it qualifies the score. */}
             {row.released && row.pendingManual > 0 && (
               <p className="notice">

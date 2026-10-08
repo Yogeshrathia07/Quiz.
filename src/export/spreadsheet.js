@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import ExcelJS from 'exceljs';
 import { integrityCells, integrityHeaders } from '../domain/integrity.js';
 import { oneLine, plainText } from '../domain/rich-text.js';
@@ -73,6 +74,43 @@ const clip = (text, length) => (String(text || '').length > length ? `${String(t
 const thin = { style: 'thin', color: { argb: LINE } };
 const box = { top: thin, left: thin, bottom: thin, right: thin };
 
+/*
+ * Styles are shared, never made afresh for each cell: a class of 5,000 on a
+ * 60-question paper is millions of cells, and an object or three apiece ran
+ * the export out of memory. One object per look, reused (never changed after).
+ */
+const shared = (make) => {
+  const cache = new Map();
+  return (...key) => {
+    const id = key.join('|');
+    if (!cache.has(id)) cache.set(id, make(...key));
+    return cache.get(id);
+  };
+};
+const fillOf = shared((argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } }));
+const bodyFont = shared((bold, argb) => ({ name: 'Aptos', size: 10, color: { argb }, ...(bold ? { bold: true } : {}) }));
+const bodyAlignment = shared((horizontal) => ({ vertical: 'middle', wrapText: true, ...(horizontal ? { horizontal } : {}) }));
+/*
+ * A cell's whole style, shared by every cell that looks alike. The library
+ * remembers the style it worked out for each style object, so a shared one is
+ * worked out once - not again for each of millions of cells, which took a
+ * minute on a 5,000-student test. Never changed after it is given to a cell.
+ */
+const bodyStyle = shared((bold, argb, horizontal, fillArgb, numFmt) => ({
+  font: bodyFont(bold, argb), alignment: bodyAlignment(horizontal), border: box,
+  ...(fillArgb ? { fill: fillOf(fillArgb) } : {}), ...(numFmt ? { numFmt } : {})
+}));
+
+// The big sheets are written a row at a time as they are made (buildTestSpreadsheet),
+// handing over to the compressor now and then rather than holding them whole.
+const ROWS_PER_BREATH = 2_000;
+const breathe = () => new Promise((resolve) => { setImmediate(resolve); });
+/** A finished row: styled, written out of memory, and every so often a moment for the writer to catch up. */
+async function done(row, count) {
+  row.commit();
+  if (count % ROWS_PER_BREATH === ROWS_PER_BREATH - 1) await breathe();
+}
+
 function styleHeader(row) {
   row.height = 30;
   row.eachCell((cell) => {
@@ -83,20 +121,27 @@ function styleHeader(row) {
   });
 }
 
-/** Body rows: thin borders, and every other row softly striped (a cell already coloured keeps its colour). */
+/** A body row: thin borders, and - every other row - a soft stripe (a cell already coloured keeps its colour). */
+/**
+ * `share`: the cell takes the one shared style itself - only where nothing
+ * changes the cell afterwards (the rows written as they go). Elsewhere a
+ * sheet may still set a column's date format over its cells, which would
+ * change every cell sharing that style, so each cell gets its own copy.
+ */
+function styleDataRow(row, striped, share = false) {
+  row.eachCell({ includeEmpty: true }, (cell) => {
+    const own = cell.style || {};
+    const colour = own.font?.color?.argb && own.font.color.argb !== INK ? own.font.color.argb : INK;
+    const solid = own.fill && own.fill.pattern === 'solid' ? own.fill.fgColor?.argb || '' : '';
+    const style = bodyStyle(Boolean(own.font?.bold), colour, own.alignment?.horizontal || '', solid || (striped ? ZEBRA : ''), own.numFmt || '');
+    cell.style = share ? style : { ...style };
+  });
+}
 function styleDataRows(sheet, firstRow, rowCount) {
-  for (let rowNumber = firstRow; rowNumber < firstRow + rowCount; rowNumber += 1) {
-    const striped = (rowNumber - firstRow) % 2 === 1;
-    sheet.getRow(rowNumber).eachCell({ includeEmpty: true }, (cell) => {
-      cell.font = { name: 'Aptos', size: 10, color: { argb: INK }, ...(cell.font?.bold ? { bold: true } : {}), ...(cell.font?.color && cell.font.color.argb !== INK ? { color: cell.font.color } : {}) };
-      cell.alignment = { vertical: 'middle', wrapText: true, ...(cell.alignment?.horizontal ? { horizontal: cell.alignment.horizontal } : {}) };
-      cell.border = box;
-      if (striped && !(cell.fill && cell.fill.pattern === 'solid')) paint(cell, ZEBRA);
-    });
-  }
+  for (let rowNumber = firstRow; rowNumber < firstRow + rowCount; rowNumber += 1) styleDataRow(sheet.getRow(rowNumber), (rowNumber - firstRow) % 2 === 1);
 }
 
-const paint = (cell, argb) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }; };
+const paint = (cell, argb) => { cell.fill = fillOf(argb); };
 
 const exportedAt = () => new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' });
 
@@ -115,14 +160,24 @@ function banner(sheet, title, subtitle, width) {
   sheet.getRow(1).height = 34;
   sheet.getRow(2).height = 22;
   sheet.properties.tabColor = { argb: BRAND };
-  sheet.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
+  sheet.pageSetup = { ...PAGE_SETUP };
 }
+const PAGE_SETUP = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 } };
 
-/** Title, test code and export time above every sheet's table. */
-function sheetTitle(workbook, name, title, test, width = 8) {
-  const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 4, showGridLines: false }] });
+/**
+ * Title, test code and export time above every sheet's table. Its frozen
+ * panes, tab colour and printing are given as it is made: a sheet written as
+ * it goes has already put them down by the time anything is changed later.
+ */
+function sheetTitle(workbook, name, title, test, width = 8, views = [{ state: 'frozen', ySplit: 4, showGridLines: false }]) {
+  const sheet = workbook.addWorksheet(name, { views, properties: { tabColor: { argb: BRAND } }, pageSetup: { ...PAGE_SETUP } });
   banner(sheet, title, `Test code: ${test.code}  ·  Exported: ${exportedAt()}`, width);
   return sheet;
+}
+/** Column widths (and date formats), set before the first row is written. */
+function columns(sheet, widths, dates = {}) {
+  widths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+  Object.entries(dates).forEach(([column, format]) => { sheet.getColumn(Number(column)).numFmt = format; });
 }
 
 function emptyNote(sheet, text) {
@@ -151,8 +206,18 @@ const statusFill = (response) => {
 
 /** Standard competition ranking (1, 2, 2, 4) over submitted scores, best first. */
 function ranks(registrations) {
-  const scores = registrations.filter((entry) => entry.attemptStatus === 'submitted').map((entry) => Number(entry.score) || 0);
-  return (score) => (score === null || score === undefined ? '' : 1 + scores.filter((other) => other > score).length);
+  // Sorted once, highest first: a score's rank is one more than how many beat it.
+  const scores = registrations.filter((entry) => entry.attemptStatus === 'submitted').map((entry) => Number(entry.score) || 0).sort((a, b) => b - a);
+  const beaten = (score) => {
+    let low = 0;
+    let high = scores.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (scores[middle] > score) low = middle + 1; else high = middle;
+    }
+    return low;
+  };
+  return (score) => (score === null || score === undefined ? '' : 1 + beaten(Number(score)));
 }
 
 /* ---------------------------------------------------------------- sheets */
@@ -192,20 +257,21 @@ function overviewSheet(workbook, dashboard) {
       : test.endsAt ? `Ends ${new Date(test.endsAt).toLocaleString()}` : `${test.durationMinutes} minutes from the start`],
     ['How it ended', !test.isClosed ? 'Still open' : test.closedAutomatically ? 'Automatically at the end time' : 'Closed by the administrator']
   ];
+  columns(sheet, [42, 44]);
   const headerRow = sheet.getRow(4);
   headerRow.values = ['Measure', 'Value'];
   styleHeader(headerRow);
   rows.forEach((row) => sheet.addRow(row));
   styleDataRows(sheet, 5, rows.length);
-  sheet.getColumn(1).width = 42;
-  sheet.getColumn(2).width = 44;
+  sheet.commit?.();
 }
 
-function resultsSheet(workbook, dashboard) {
+async function resultsSheet(workbook, dashboard) {
   const { test, registrations } = dashboard;
   const sheet = sheetTitle(workbook, 'Results', test.title, test);
+  columns(sheet, columnWidths, { 5: 'yyyy-mm-dd hh:mm', 7: 'yyyy-mm-dd hh:mm', 8: 'yyyy-mm-dd hh:mm' });
   const rankOf = ranks(registrations);
-  const rows = registrations.map((registration) => [
+  const rowOf = (registration) => [
     registration.name,
     registration.email,
     registration.sapId,
@@ -226,18 +292,17 @@ function resultsSheet(workbook, dashboard) {
     registration.score === null || registration.score === undefined ? '' : percent(registration.score, registration.totalMarks),
     minutesBetween(registration.startedAt, registration.submittedAt),
     registration.attemptStatus === 'submitted' ? rankOf(registration.score) : ''
-  ]);
+  ];
   const headerRow = sheet.getRow(4);
   headerRow.values = headers;
   styleHeader(headerRow);
-  if (rows.length) {
-    rows.forEach((row) => sheet.addRow(row));
-    styleDataRows(sheet, 5, rows.length);
-  } else {
-    emptyNote(sheet, 'No registrations were recorded for this test.');
+  if (!registrations.length) emptyNote(sheet, 'No registrations were recorded for this test.');
+  for (const [index, registration] of registrations.entries()) {
+    const row = sheet.addRow(rowOf(registration));
+    styleDataRow(row, index % 2 === 1, true);
+    await done(row, index);
   }
-  columnWidths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
-  [5, 7, 8].forEach((column) => { sheet.getColumn(column).numFmt = 'yyyy-mm-dd hh:mm'; });
+  sheet.commit?.();
 }
 
 /**
@@ -245,13 +310,18 @@ function resultsSheet(workbook, dashboard) {
  * bank, so a question they were not given is left white; otherwise the cell
  * holds their answer, coloured by its mark.
  */
-function answerGridSheet(workbook, dashboard) {
+const GRID_FONT = { name: 'Aptos', size: 10, color: { argb: INK } };
+const GRID_ALIGNMENT = { vertical: 'top', wrapText: true };
+const GRID_BORDER = { bottom: { style: 'thin', color: { argb: 'FFE7E7EB' } }, right: { style: 'thin', color: { argb: 'FFE7E7EB' } } };
+const gridStyle = shared((fillArgb) => ({ font: GRID_FONT, alignment: GRID_ALIGNMENT, border: GRID_BORDER, ...(fillArgb ? { fill: fillOf(fillArgb) } : {}) }));
+
+async function answerGridSheet(workbook, dashboard) {
   const { test, registrations } = dashboard;
   const bank = dashboard.questionBank || [];
-  const sheet = sheetTitle(workbook, 'Answer grid', `${test.title} — every answer, side by side`, test);
+  const sheet = sheetTitle(workbook, 'Answer grid', `${test.title} — every answer, side by side`, test, 8, [{ state: 'frozen', xSplit: 3, ySplit: 4, showGridLines: false }]);
+  columns(sheet, [24, 13, 10, ...bank.map(() => 26)]);
   sheet.getCell('A3').value = 'Green: full marks · Light green: part marks · Red: no marks · Yellow: awaiting manual mark · Grey: left blank · White: not on this student’s paper';
   sheet.getCell('A3').font = { name: 'Aptos', size: 9, italic: true, color: { argb: MUTED } };
-  sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: 4, showGridLines: false }];
 
   const byStudent = new Map();
   for (const response of dashboard.responses || []) {
@@ -272,7 +342,8 @@ function answerGridSheet(workbook, dashboard) {
   });
 
   const students = registrations.filter((registration) => registration.attemptStatus);
-  students.forEach((registration) => {
+  if (!students.length) emptyNote(sheet, 'Nobody has started this test yet.');
+  for (const [index, registration] of students.entries()) {
     const answers = byStudent.get(registration.id) || byStudent.get(registration.email) || new Map();
     const row = sheet.addRow([
       registration.name,
@@ -286,17 +357,11 @@ function answerGridSheet(workbook, dashboard) {
       })
     ]);
     row.eachCell({ includeEmpty: true }, (cell, column) => {
-      cell.font = { name: 'Aptos', size: 10, color: { argb: INK } };
-      cell.alignment = { vertical: 'top', wrapText: true };
-      cell.border = { bottom: { style: 'thin', color: { argb: 'FFE7E7EB' } }, right: { style: 'thin', color: { argb: 'FFE7E7EB' } } };
-      if (column > 3) paint(cell, statusFill(answers.get(bank[column - 4]?.id)));
+      cell.style = gridStyle(column > 3 ? statusFill(answers.get(bank[column - 4]?.id)) : '');
     });
-  });
-  if (!students.length) emptyNote(sheet, 'Nobody has started this test yet.');
-  sheet.getColumn(1).width = 24;
-  sheet.getColumn(2).width = 13;
-  sheet.getColumn(3).width = 10;
-  bank.forEach((_question, index) => { sheet.getColumn(index + 4).width = 26; });
+    await done(row, index);
+  }
+  sheet.commit?.();
 }
 
 /** Per question: who saw it, who got it right, and the favourite wrong answer. */
@@ -304,6 +369,7 @@ function questionAnalysisSheet(workbook, dashboard) {
   const { test } = dashboard;
   const bank = dashboard.questionBank || [];
   const sheet = sheetTitle(workbook, 'Question analysis', `${test.title} — question by question`, test);
+  columns(sheet, [7, 8, 46, 34, 14, 11, 11, 10, 11, 11, 12, 16, 34, 10]);
   const headerRow = sheet.getRow(4);
   headerRow.values = [
     'Q no.', 'Type', 'Question', 'Correct answer', 'On how many papers', 'Answered', 'Left blank',
@@ -311,9 +377,11 @@ function questionAnalysisSheet(workbook, dashboard) {
   ];
   styleHeader(headerRow);
 
-  const responses = dashboard.responses || [];
+  // Each question's answers gathered once, not looked for through every answer of the class per question.
+  const byQuestion = new Map(bank.map((question) => [question.id, []]));
+  for (const response of dashboard.responses || []) byQuestion.get(response.questionId)?.push(response);
   bank.forEach((question) => {
-    const forQuestion = responses.filter((response) => response.questionId === question.id);
+    const forQuestion = byQuestion.get(question.id);
     const answered = forQuestion.filter((response) => response.answered);
     const correct = answered.filter((response) => response.isCorrect === true).length;
     // Part marks (a short answer marked so) are neither right nor wrong.
@@ -344,18 +412,25 @@ function questionAnalysisSheet(workbook, dashboard) {
   });
   if (bank.length) styleDataRows(sheet, 5, bank.length);
   else emptyNote(sheet, 'This test has no questions.');
-  [7, 8, 46, 34, 14, 11, 11, 10, 11, 11, 12, 16, 34, 10].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
+  sheet.commit?.();
 }
 
-function responsesSheet(workbook, dashboard) {
+async function responsesSheet(workbook, dashboard) {
   const { test } = dashboard;
   const sheet = sheetTitle(workbook, 'Responses', `${test.title} — answer details`, test);
+  columns(sheet, responseColumnWidths, { 5: 'yyyy-mm-dd hh:mm', 14: 'yyyy-mm-dd hh:mm' });
   const responses = dashboard.responses || [];
   const headerRow = sheet.getRow(4);
   headerRow.values = responseHeaders;
   styleHeader(headerRow);
+  // The question's words once per question, not worked out again for each of thousands of answers.
+  const prompts = new Map();
+  const promptOf = (response) => {
+    if (!prompts.has(response.prompt)) prompts.set(response.prompt, plainText(response.prompt));
+    return prompts.get(response.prompt);
+  };
   if (responses.length) {
-    responses.forEach((response) => {
+    for (const [index, response] of responses.entries()) {
       const mark = response.marks ?? '';
       const row = sheet.addRow([
         response.studentName,
@@ -365,7 +440,7 @@ function responsesSheet(workbook, dashboard) {
         asDate(response.submittedAt),
         response.questionNumber,
         String(response.type || '').toUpperCase(),
-        plainText(response.prompt),
+        promptOf(response),
         response.selectedAnswer,
         response.manualGrading ? 'Manual review' : response.correctAnswer,
         mark,
@@ -380,26 +455,27 @@ function responsesSheet(workbook, dashboard) {
       ]);
       if (response.timedOut) paint(row.getCell(18), FILL.wrong);
       paint(row.getCell(13), statusFill(response));
-    });
-    styleDataRows(sheet, 5, responses.length);
+      styleDataRow(row, index % 2 === 1, true);
+      await done(row, index);
+    }
   } else {
     emptyNote(sheet, 'No attempt responses were recorded for this test.');
   }
-  responseColumnWidths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
-  sheet.getColumn(5).numFmt = 'yyyy-mm-dd hh:mm';
-  sheet.getColumn(14).numFmt = 'yyyy-mm-dd hh:mm';
+  sheet.commit?.();
 }
 
 /** Every departure, return, flag and lock, in order - the evidence behind the counts. */
-function integrityLogSheet(workbook, dashboard) {
+async function integrityLogSheet(workbook, dashboard) {
   const { test } = dashboard;
   const sheet = sheetTitle(workbook, 'Integrity log', `${test.title} — integrity log`, test);
+  columns(sheet, logColumnWidths, { 4: 'yyyy-mm-dd hh:mm:ss' });
   const log = dashboard.integrityLog || [];
   const headerRow = sheet.getRow(4);
   headerRow.values = logHeaders;
   styleHeader(headerRow);
-  if (log.length) {
-    log.forEach((entry) => sheet.addRow([
+  if (!log.length) emptyNote(sheet, 'Nobody left the test.');
+  for (const [index, entry] of log.entries()) {
+    const row = sheet.addRow([
       entry.studentName,
       entry.email,
       entry.sapId,
@@ -407,25 +483,26 @@ function integrityLogSheet(workbook, dashboard) {
       entry.label,
       entry.durationMs === null || entry.durationMs === undefined ? '' : Math.round(entry.durationMs / 1000),
       entry.detail || ''
-    ]));
-    styleDataRows(sheet, 5, log.length);
-  } else {
-    emptyNote(sheet, 'Nobody left the test.');
+    ]);
+    styleDataRow(row, index % 2 === 1, true);
+    await done(row, index);
   }
-  logColumnWidths.forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
-  sheet.getColumn(4).numFmt = 'yyyy-mm-dd hh:mm:ss';
+  sheet.commit?.();
 }
 
 /** Every student's test, minute by minute: joining, each answer and change, each exit and return, submitting. */
-function activitySheet(workbook, dashboard) {
+async function activitySheet(workbook, dashboard) {
   const { test } = dashboard;
   const sheet = sheetTitle(workbook, 'Activity log', `${test.title} — every student, minute by minute`, test);
+  columns(sheet, [26, 32, 14, 20, 34, 44, 14], { 4: 'yyyy-mm-dd hh:mm:ss' });
+  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 7 } };
   const rows = dashboard.activity || [];
   const headerRow = sheet.getRow(4);
   headerRow.values = ['Student', 'College email', 'SAP ID', 'Time', 'What happened', 'Details', 'Away (seconds)'];
   styleHeader(headerRow);
-  if (rows.length) {
-    rows.forEach((entry) => sheet.addRow([
+  if (!rows.length) emptyNote(sheet, 'No activity was recorded for this test.');
+  for (const [index, entry] of rows.entries()) {
+    const row = sheet.addRow([
       entry.studentName,
       entry.email,
       entry.sapId,
@@ -433,14 +510,11 @@ function activitySheet(workbook, dashboard) {
       entry.label,
       entry.detail || '',
       entry.durationMs === null || entry.durationMs === undefined ? '' : Math.round(entry.durationMs / 1000)
-    ]));
-    styleDataRows(sheet, 5, rows.length);
-  } else {
-    emptyNote(sheet, 'No activity was recorded for this test.');
+    ]);
+    styleDataRow(row, index % 2 === 1, true);
+    await done(row, index);
   }
-  [26, 32, 14, 20, 34, 44, 14].forEach((width, index) => { sheet.getColumn(index + 1).width = width; });
-  sheet.getColumn(4).numFmt = 'yyyy-mm-dd hh:mm:ss';
-  sheet.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: 7 } };
+  sheet.commit?.();
 }
 
 /* ------------------------------------------ the Marks sheet: marking in Excel */
@@ -465,15 +539,24 @@ const MARKS_EDITABLE = 'FFFFFBEA';
  * given in the app since is not undone by an older file. Total adds the row up
  * as marks are typed.
  */
-function marksSheet(workbook, dashboard) {
+const MARKS_FONT = bodyFont(false, INK);
+const MARKS_TOTAL_FONT = bodyFont(true, INK);
+const MARKS_TEXT = { vertical: 'middle' };
+const MARKS_NUMBER = { vertical: 'middle', horizontal: 'center' };
+const marksStyle = shared((total, number, fillArgb) => ({
+  font: total ? MARKS_TOTAL_FONT : MARKS_FONT, alignment: number ? MARKS_NUMBER : MARKS_TEXT, border: box, ...(fillArgb ? { fill: fillOf(fillArgb) } : {})
+}));
+
+async function marksSheet(workbook, dashboard) {
   const { test } = dashboard;
   const bank = dashboard.questionBank || [];
   const lastQuestion = MARKS_FIRST_QUESTION - 1 + bank.length;
   const idColumn = lastQuestion + 1;
-  const sheet = sheetTitle(workbook, MARKS_SHEET, `${test.title} — marks`, test, Math.max(8, lastQuestion));
+  const sheet = sheetTitle(workbook, MARKS_SHEET, `${test.title} — marks`, test, Math.max(8, lastQuestion), [{ state: 'frozen', xSplit: 3, ySplit: MARKS_KEY_ROW, showGridLines: false }]);
+  columns(sheet, [26, 13, 30, 9, 9, ...bank.map(() => 14)]);
+  sheet.getColumn(idColumn).hidden = true;
   sheet.getCell('A3').value = 'Change any mark - yellow cells are short answers still to mark - then upload this file on the test’s Results tab. A choice question’s mark you change becomes your own; type its automatic mark to go back to that.';
   sheet.getCell('A3').font = { name: 'Aptos', size: 9, italic: true, color: { argb: MUTED } };
-  sheet.views = [{ state: 'frozen', xSplit: 3, ySplit: MARKS_KEY_ROW, showGridLines: false }];
 
   const headerRow = sheet.getRow(4);
   headerRow.values = ['Student', 'SAP ID', 'College email', 'Total', 'Out of', ...bank.map((question) => (
@@ -497,7 +580,23 @@ function marksSheet(workbook, dashboard) {
     return [registration.name, registration.sapId || '', registration.email, null, registration.totalMarks ?? '',
       ...bank.map((question) => answers.get(question.id)?.marks ?? null), registration.id];
   };
-  papers.forEach((registration, index) => {
+  if (!papers.length) {
+    sheet.getCell('A6').value = 'Nobody has handed in a paper yet.';
+    sheet.getCell('A6').font = { name: 'Aptos', size: 10, italic: true, color: { argb: MUTED } };
+  }
+  // Each question's column takes a mark from 0 to what it is worth: one rule for the column, not one per cell.
+  if (papers.length) {
+    const first = MARKS_KEY_ROW + 1;
+    const last = MARKS_KEY_ROW + papers.length;
+    bank.forEach((question, position) => {
+      const letter = sheet.getColumn(MARKS_FIRST_QUESTION + position).letter;
+      sheet.dataValidations.add(`${letter}${first}:${letter}${last}`, {
+        type: 'decimal', operator: 'between', allowBlank: true, formulae: [0, question.maxMarks],
+        showErrorMessage: true, errorTitle: 'Marks', error: `From 0 to ${question.maxMarks}.`
+      });
+    });
+  }
+  for (const [index, registration] of papers.entries()) {
     const answers = byStudent.get(registration.id) || new Map();
     const row = sheet.getRow(MARKS_KEY_ROW + 1 + index);
     row.values = rowValues(registration);
@@ -505,51 +604,52 @@ function marksSheet(workbook, dashboard) {
     row.getCell(4).value = bank.length
       ? { formula: `SUM(${row.getCell(MARKS_FIRST_QUESTION).address}:${row.getCell(lastQuestion).address})`, result: registration.score ?? 0 }
       : 0;
-    row.eachCell({ includeEmpty: true }, (cell, column) => {
-      cell.font = { name: 'Aptos', size: 10, color: { argb: INK }, ...(column === 4 ? { bold: true } : {}) };
-      cell.alignment = { vertical: 'middle', ...(column >= 4 ? { horizontal: 'center' } : {}) };
-      cell.border = box;
-    });
-    bank.forEach((question, position) => {
-      const cell = row.getCell(MARKS_FIRST_QUESTION + position);
+    // A question's cell: grey when not on this student's paper; a short answer still to mark stands out.
+    const shade = (column) => {
+      const question = bank[column - MARKS_FIRST_QUESTION];
+      if (!question) return '';
       const response = answers.get(question.id);
-      // Not on this student's paper.
-      if (!response) { paint(cell, FILL.blank); return; }
-      // A short answer still to mark stands out; any mark can be changed.
-      if (question.manualGrading) paint(cell, response.marks === null ? FILL.pending : MARKS_EDITABLE);
-      cell.dataValidation = {
-        type: 'decimal', operator: 'between', allowBlank: true, formulae: [0, question.maxMarks],
-        showErrorMessage: true, errorTitle: 'Marks', error: `From 0 to ${question.maxMarks}.`
-      };
+      if (!response) return FILL.blank;
+      return question.manualGrading ? (response.marks === null ? FILL.pending : MARKS_EDITABLE) : '';
+    };
+    row.eachCell({ includeEmpty: true }, (cell, column) => {
+      cell.style = marksStyle(column === 4, column >= 4, shade(column));
     });
-  });
-  if (!papers.length) {
-    sheet.getCell('A6').value = 'Nobody has handed in a paper yet.';
-    sheet.getCell('A6').font = { name: 'Aptos', size: 10, italic: true, color: { argb: MUTED } };
+    await done(row, index);
   }
-  [26, 13, 30, 9, 9].forEach((columnWidth, index) => { sheet.getColumn(index + 1).width = columnWidth; });
-  bank.forEach((_question, index) => { sheet.getColumn(MARKS_FIRST_QUESTION + index).width = 14; });
-  sheet.getColumn(idColumn).hidden = true;
+  sheet.commit?.();
 
-  // The marks as exported, out of sight.
+  // The marks as exported, out of sight (written once the Marks sheet is finished: sheets go out one after another).
   const base = workbook.addWorksheet(MARKS_BASE_SHEET, { state: 'veryHidden' });
-  base.addRow(keys);
-  papers.forEach((registration) => base.addRow(rowValues(registration)));
+  base.addRow(keys).commit();
+  for (const [index, registration] of papers.entries()) await done(base.addRow(rowValues(registration)), index);
+  base.commit?.();
 }
 
+/**
+ * The whole test as one workbook, written as it is made - row by row, sheet by
+ * sheet, compressed on the way - so memory stays small however big the class:
+ * a 5,000-student, 60-question test is millions of cells.
+ */
 export async function buildTestSpreadsheet(dashboard) {
-  const workbook = new ExcelJS.Workbook();
+  const output = new PassThrough();
+  const chunks = [];
+  output.on('data', (chunk) => chunks.push(chunk));
+  const finished = new Promise((resolve, reject) => { output.once('end', resolve); output.once('error', reject); });
+  const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: output, useStyles: true, useSharedStrings: true });
   workbook.creator = 'Quiz';
   workbook.created = new Date();
   overviewSheet(workbook, dashboard);
-  resultsSheet(workbook, dashboard);
-  marksSheet(workbook, dashboard);
-  answerGridSheet(workbook, dashboard);
+  await resultsSheet(workbook, dashboard);
+  await marksSheet(workbook, dashboard);
+  await answerGridSheet(workbook, dashboard);
   questionAnalysisSheet(workbook, dashboard);
-  responsesSheet(workbook, dashboard);
-  integrityLogSheet(workbook, dashboard);
-  activitySheet(workbook, dashboard);
-  return Buffer.from(await workbook.xlsx.writeBuffer());
+  await responsesSheet(workbook, dashboard);
+  await integrityLogSheet(workbook, dashboard);
+  await activitySheet(workbook, dashboard);
+  await workbook.commit();
+  await finished;
+  return Buffer.concat(chunks);
 }
 
 /* ------------------------------------------------ one student's own paper */
@@ -734,8 +834,7 @@ export async function buildStudentResponseSpreadsheet(data, { audit = false } = 
       ...(audit ? [
         ['Longest time away', lasted((integrity.longestAwayMs || 0) / 1000)],
         ['Copy, cut, paste or drag attempts', (integrity.flags?.copy || 0) + (integrity.flags?.cut || 0) + (integrity.flags?.paste || 0) + (integrity.flags?.drop || 0)],
-        ['Keyboard opened another app while typing (not counted as leaving)', integrity.flags?.keyboard_app || 0],
-        ['Screenshot, print or developer-tools attempts', (integrity.flags?.screenshot || 0) + (integrity.flags?.print || 0) + (integrity.flags?.devtools || 0)],
+        ['Print attempts', integrity.flags?.print || 0],
         ['Attempt locked now', attempt.locked ? 'Yes' : 'No'],
         ['Lock reason', attempt.lockReason || '—']
       ] : [])

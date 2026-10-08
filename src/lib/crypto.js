@@ -4,6 +4,13 @@ export const randomId = (bytes = 32) => crypto.randomBytes(bytes).toString('base
 export const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 export const hmac = (value, secret) => crypto.createHmac('sha256', secret).update(value).digest('hex');
 
+/** Whether two secrets (signatures, keys) are equal, taking the same time however much of them matches. */
+export function safeEqual(a, b) {
+  const left = Buffer.from(String(a ?? ''));
+  const right = Buffer.from(String(b ?? ''));
+  return left.length === right.length && crypto.timingSafeEqual(left, right);
+}
+
 /**
  * Deterministic shuffle: the same seed always produces the same order, so a
  * student who reloads mid-test sees their questions and options unchanged.
