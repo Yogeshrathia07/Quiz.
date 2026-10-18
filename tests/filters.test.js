@@ -311,8 +311,8 @@ test('sessions: when, by the calendar week and month', () => {
   assert.equal(whenOf({ createdAt: new Date(2026, 9, 3).toISOString() }, new Date(2026, 9, 12, 10)), 'month');
 });
 
-test('sessions: a Class group only once there are two classes; sorting newest first, by class, by turnout', () => {
-  assert.equal(sessionFilters([{ title: 'DBMS' }], NOW).some((group) => group.id === 'class'), false);
+test('sessions: status only (no Class, When or Phone check); sorting by date, name and turnout', () => {
+  assert.deepEqual(sessionFilters(SESSIONS, NOW).map((group) => group.id), ['state']);
   const sessions = [
     { title: 'Networks', createdAt: '2026-09-02T04:00:00Z', presentCount: 30 },
     { title: 'DBMS', createdAt: '2026-09-03T04:00:00Z', presentCount: 12 }

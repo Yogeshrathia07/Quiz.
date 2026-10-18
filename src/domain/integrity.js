@@ -189,7 +189,11 @@ const eventLabel = (event) => {
   if (event.type === 'integrity_flag') return FLAG_REASONS[event.detail] || 'Flagged';
   if (event.type === 'attempt_locked') return 'Attempt locked';
   if (event.type === 'attempt_warned') return 'Went past the limit';
-  if (event.type === 'attempt_resumed') return event.detail === 'automatic' ? 'Unlocked automatically' : 'Revived by the administrator';
+  if (event.type === 'attempt_resumed') {
+    const how = event.detail === 'automatic' ? 'Unlocked automatically' : 'Revived by the administrator';
+    // A timer on each question: the time the lock took was given back (its length follows).
+    return event.durationMs ? `${how} (the time it was locked given back)` : how;
+  }
   if (event.type === 'attempt_restarted') return 'Restarted by the administrator';
   if (event.type === 'device_changed') return 'Continued in another browser or device';
   if (event.type === 'device_kind_changed') {

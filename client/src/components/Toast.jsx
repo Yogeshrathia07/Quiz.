@@ -14,7 +14,7 @@ export function Toast({ toast }) {
   const urgent = toast.tone === 'error' || toast.tone === 'warn';
   return (
     <div className={`toast is-${toast.tone}${toast.leaving ? ' is-leaving' : ''}`} role={urgent ? 'alert' : 'status'}>
-      <Icon className="toast-icon" size={18} aria-hidden="true"/>
+      <Icon className="toast-icon" size={20} aria-hidden="true"/>
       <span className="toast-body">
         {toast.title && <strong className="toast-title">{toast.title}</strong>}
         <span className="toast-text">{toast.text}</span>

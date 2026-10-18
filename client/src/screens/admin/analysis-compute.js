@@ -12,17 +12,11 @@
  * counted in the figures; one still to mark waits, unranked, in Pending.
  */
 
+import { BANDS, markBars } from '../../../../src/domain/analysis-bands.js';
+export { BANDS };
 export const STATE_NAMES = { O: 'right', P: 'part marks', W: 'wrong', B: 'blank', Q: 'not marked yet', '.': 'not on this paper' };
 
-/** Score bands, the top first: from (inclusive) and below `to`. */
-export const BANDS = [
-  { id: '90', label: '90–100%', from: 90, to: Infinity },
-  { id: '80', label: '80–90%', from: 80, to: 90 },
-  { id: '70', label: '70–80%', from: 70, to: 80 },
-  { id: '50', label: '50–70%', from: 50, to: 70 },
-  { id: '30', label: '30–50%', from: 30, to: 50 },
-  { id: '0', label: 'Below 30%', from: -Infinity, to: 30 }
-];
+/** Pending papers stay separate from the shared percentage bands. */
 export const PENDING_BAND = 'pending';
 export const bandOf = (percent) => BANDS.find((band) => percent >= band.from && percent < band.to)?.id ?? BANDS.at(-1).id;
 
@@ -165,22 +159,41 @@ const SORTS = {
   time: (a, b) => (a.student.seconds ?? Infinity) - (b.student.seconds ?? Infinity)
 };
 
+/** Whether a fully marked paper falls in a bar of the marks chart (in marks, or in %). */
+const valueIn = (row, unit) => (unit === 'marks' ? row.secured : row.percent);
+export const inBar = (row, bar) => {
+  if (!row.counted || !bar) return false;
+  const value = valueIn(row, bar.unit);
+  return value >= bar.from - EPSILON && (bar.last ? value <= bar.to + EPSILON : value < bar.to - EPSILON);
+};
+
 /**
  * Everything the tab shows.
  *  selected     - the ticked question columns (a Set of indexes)
  *  bins, lo, hi - the marks chart: how many bars over which range of %
+ *                 (bins null: as many as suit the paper)
+ *  byMarks      - the bars along whole marks when every paper is out of the
+ *                 same marks and the range is the whole 0-100 (markBars);
+ *                 otherwise, and by default, equal slices of %
+ *  maxBars      - no more bars than this (each wide enough to press), or null
  *  filters      - which students: { search, range: { from, to } (% of the
  *                 ticked questions' marks, both ends included, fully marked
  *                 papers only), marksRange: { from, to } (raw marks secured),
  *                 rankRange: { from, to }, average / median: ['above' |
  *                 'below'] (at or above, or below, the class's own figure),
  *                 marking: ['done' | 'pending'], flags: ['left' | 'locked' |
- *                 'copy' | 'none'], bin }. Within one list any one will do;
- *                 together they narrow.
+ *                 'copy' | 'none'], bin (a bar by its place), bar (a bar
+ *                 by its range: { unit, from, to, last }), bands (score band
+ *                 ids, 'pending' among them) }. Within one list any one will
+ *                 do; together they narrow.
  *                 Every figure is then for that group; ranks stay the class's.
+ *                 The score bands and the bars are the exception, each for its
+ *                 own pick: the bands leave out only the band picked, the bars
+ *                 only the bar picked - so a picked band or bar is shown among
+ *                 the rest, not alone.
  *  sort         - { key: 'rank' | 'name' | 'total' | 'time' | column index, dir: 'asc' | 'desc' }
  */
-export function compute(matrix, { selected, bins = 10, lo = 0, hi = 100, filters = {}, sort = { key: 'rank', dir: 'asc' } } = {}) {
+export function compute(matrix, { selected, bins = 10, lo = 0, hi = 100, byMarks = false, maxBars = null, filters = {}, sort = { key: 'rank', dir: 'asc' } } = {}) {
   const { questions, students } = matrix;
   const columns = [...selected].filter((column) => column >= 0 && column < questions.length).sort((a, b) => a - b);
   const rows = students.map((student) => ({ student, ...scorePaper(student, questions, columns), rank: null }));
@@ -201,13 +214,17 @@ export function compute(matrix, { selected, bins = 10, lo = 0, hi = 100, filters
     maxMarks: ranked.reduce((most, row) => Math.max(most, row.max), 0)
   };
 
-  // The marks chart's bars, fixed by its range whatever is filtered.
+  // The marks chart's bars, fixed by the class's papers and the range whatever is filtered.
   const low = Math.max(0, Math.min(100, Number(lo) || 0));
   const high = Math.max(low + 1, Math.min(100, Number.isFinite(Number(hi)) ? Number(hi) : 100));
-  const width = (high - low) / bins;
-  const histogram = Array.from({ length: bins }, (_unused, index) => ({ index, from: low + index * width, to: low + (index + 1) * width, count: 0 }));
-  const inBin = (row, bin) => row.counted && row.percent >= bin.from - EPSILON
-    && (bin.index === bins - 1 ? row.percent <= bin.to + EPSILON : row.percent < bin.to - EPSILON);
+  const maxes = new Set(ranked.map((row) => row.max));
+  const fullMarks = maxes.size === 1 ? [...maxes][0] : null;
+  const marksScale = byMarks && fullMarks > 0 && low === 0 && high === 100 ? markBars(fullMarks, bins, maxBars) : null;
+  const count = Math.min(bins ?? 10, maxBars || Infinity);
+  const width = (high - low) / count;
+  const histogram = marksScale ? marksScale.bars : Array.from({ length: count }, (_unused, index) => ({
+    index, unit: 'percent', from: low + index * width, to: low + (index + 1) * width, last: index === count - 1, weight: 1, count: 0
+  }));
 
   // The group every figure describes.
   const search = String(filters.search || '').trim().toLowerCase();
@@ -220,16 +237,27 @@ export function compute(matrix, { selected, bins = 10, lo = 0, hi = 100, filters
   const byMedian = new Set(filters.median || []);
   const compared = (row, set, value) => !set.size || (row.counted && value !== null
     && ((set.has('above') && row.percent >= value - EPSILON) || (set.has('below') && row.percent < value - EPSILON)));
-  const bin = Number.isInteger(filters.bin) ? histogram[filters.bin] : null;
-  const group = rows.filter((row) => (!search || row.student.name.toLowerCase().includes(search) || String(row.student.sapId || '').includes(search))
+  const bar = filters.bar || (Number.isInteger(filters.bin) ? histogram[filters.bin] : null);
+  const bands = new Set(filters.bands || []);
+  const inBand = (row) => !bands.size || bands.has(row.band);
+  const fitsBar = (row) => !bar || inBar(row, bar);
+  // Answer filters narrow every figure without changing class ranks or the
+  // class average/median used by the comparison filters. An empty Set means
+  // a genuinely empty cohort; null/undefined means no answer restriction.
+  const studentIds = filters.studentIds == null ? null : new Set([...filters.studentIds].map(String));
+  const others = rows.filter((row) => (!studentIds || studentIds.has(String(row.student.id)))
+    && (!search || row.student.name.toLowerCase().includes(search) || String(row.student.sapId || '').includes(search))
     && (!range || inRange(row, range))
     && (!marksSpan || (row.counted && row.secured >= marksSpan.from - EPSILON && row.secured <= marksSpan.to + EPSILON))
     && (!rankSpan || (row.rank !== null && row.rank >= rankSpan.from && row.rank <= rankSpan.to))
     && compared(row, byAverage, classFigures.average)
     && compared(row, byMedian, classFigures.median)
     && (!marking.size || (marking.has('done') && row.counted) || (marking.has('pending') && row.band === PENDING_BAND))
-    && (!flags.size || row.flags.some((flag) => flags.has(flag)))
-    && (!bin || inBin(row, bin)));
+    && (!flags.size || row.flags.some((flag) => flags.has(flag))));
+  const group = others.filter((row) => inBand(row) && fitsBar(row));
+  // What the score bands and the bars show: everyone else picked, their own pick aside.
+  const forBands = others.filter(fitsBar);
+  const forBars = others.filter(inBand);
 
   const counted = group.filter((row) => row.counted);
   const percents = counted.map((row) => row.percent).sort((a, b) => a - b);
@@ -252,15 +280,21 @@ export function compute(matrix, { selected, bins = 10, lo = 0, hi = 100, filters
     highestMarks: sameMax === null ? null : marks.at(-1) ?? null, lowestMarks: sameMax === null ? null : marks[0] ?? null
   };
 
-  const pendingCount = group.filter((row) => row.band === PENDING_BAND).length;
-  const inBands = counted.length + pendingCount;
-  const bandList = [...BANDS.map((band) => ({ ...band, count: counted.filter((row) => row.band === band.id).length })), { id: PENDING_BAND, label: 'Still to mark', count: pendingCount }]
+  const bandRows = forBands.filter((row) => row.counted);
+  const pendingCount = forBands.filter((row) => row.band === PENDING_BAND).length;
+  const inBands = bandRows.length + pendingCount;
+  const bandList = [...BANDS.map((band) => ({ ...band, count: bandRows.filter((row) => row.band === band.id).length })), { id: PENDING_BAND, label: 'Still to mark', count: pendingCount }]
     .map((band) => ({ ...band, share: inBands ? Math.round((band.count / inBands) * 100) : 0 }));
 
   let outside = 0;
-  for (const percent of percents) {
-    if (percent < low - EPSILON || percent > high + EPSILON) { outside += 1; continue; }
-    histogram[Math.min(bins - 1, Math.max(0, Math.floor((percent - low) / width)))].count += 1;
+  const barRows = forBars.filter((row) => row.counted);
+  for (const row of barRows) {
+    if (marksScale) {
+      histogram[Math.min(histogram.length - 1, Math.max(0, Math.floor((row.secured + EPSILON) / marksScale.step)))].count += 1;
+      continue;
+    }
+    if (row.percent < low - EPSILON || row.percent > high + EPSILON) { outside += 1; continue; }
+    histogram[Math.min(count - 1, Math.max(0, Math.floor((row.percent - low) / width)))].count += 1;
   }
 
   const figures = questionFigures(questions, group.map((row) => row.student), separationOf(matrix, ranked));
@@ -283,5 +317,13 @@ export function compute(matrix, { selected, bins = 10, lo = 0, hi = 100, filters
     });
   }
 
-  return { columns, rows, shown, stats, classFigures, bands: bandList, histogram: { bins: histogram, outside, lo: low, hi: high }, questions: figures };
+  const histogramOf = {
+    bins: histogram, outside, lo: low, hi: high,
+    unit: marksScale ? 'marks' : 'percent', step: marksScale?.step ?? width, top: marksScale?.top ?? null, fullMarks: marksScale ? fullMarks : null,
+    // Fewer bars than asked for, so each is wide enough to press.
+    capped: marksScale ? marksScale.capped : count < (bins ?? 10),
+    // Part marks: a bar of one mark then holds, say, 7.5 too.
+    fractions: barRows.some((row) => Math.abs(row.secured - Math.round(row.secured)) > EPSILON)
+  };
+  return { columns, rows, shown, stats, classFigures, bands: bandList, histogram: histogramOf, questions: figures };
 }

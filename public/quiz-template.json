@@ -39,8 +39,7 @@
       ],
       "correctOptions": [
         "1"
-      ],
-      "timeSeconds": 45
+      ]
     },
     {
       "prompt": "A binary search repeats these steps on a **sorted** list:\n- Compare the middle item with the target\n- Throw away the half that cannot hold it\n- Search the half that is left\nHow long does it take on a list of n items?",

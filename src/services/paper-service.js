@@ -4,13 +4,14 @@ import { stableSort } from '../lib/crypto.js';
 import { buildTest } from '../domain/test-builder.js';
 import { publicTest } from '../domain/presenters.js';
 import { activeQuestions, questionType } from '../domain/question-bank.js';
+import { allowsNext } from '../domain/strict-timing.js';
 import { endModeOf, startModeOf } from '../domain/attempt-rules.js';
 import { invalidateTestCache, registrationsOf, requireOwnedTest, serializePaperWrite, serializeTestWrite, testDocByCode } from '../data/test-repository.js';
 import { gradeAnswers } from './attempt-service.js';
 import { earnedMarks, questionMarks, roundMarks } from '../domain/marks.js';
 import { refuseIfFrozen } from '../domain/freeze.js';
 import { adminDashboard } from './admin-service.js';
-import { refusePastTimes } from './test-service.js';
+import { navigationProblem, refusePastTimes } from './test-service.js';
 import { requireImages } from './question-image-service.js';
 import { imageView } from '../domain/question-image.js';
 
@@ -182,9 +183,13 @@ function migratePaper(nextTest, attempt, changed, removedIds, rescaled = new Map
   const next = { ...attempt, questions, answers };
   if (attempt.strict) {
     const openId = order[attempt.strict.index]?.questionId;
+    // How many of the first `count` places keep their question.
+    const keptOf = (count) => order.slice(0, count).filter((assigned) => !removedIds.has(assigned.questionId)).length;
     next.strict = {
       ...attempt.strict,
-      index: order.slice(0, attempt.strict.index).filter((assigned) => !removedIds.has(assigned.questionId)).length,
+      index: keptOf(attempt.strict.index),
+      // How far the student has come, where they went back (strict-timing.js reachedOf).
+      ...(attempt.strict.reached !== undefined ? { reached: keptOf(attempt.strict.reached) } : {}),
       // The open question was deleted: the next one's clock starts when shown.
       shownAt: openId !== undefined && removedIds.has(openId) ? null : attempt.strict.shownAt,
       log: (attempt.strict.log || []).filter((entry) => !removedIds.has(entry.questionId))
@@ -247,10 +252,15 @@ export async function saveTestPaper(req, code, raw = {}) {
     allowGuests: raw.allowGuests ?? test.allowGuests,
     requirePrivateWindow: raw.requirePrivateWindow ?? test.requirePrivateWindow ?? false,
     devices: raw.devices ?? test.devices,
-    questionLayout: pick('questionLayout', test.questionLayout),
+    // All on one page or one at a time can change while the test runs: the
+    // same questions, as free as before. (A paper on the clock is always one
+    // at a time - test-builder.js.)
+    questionLayout: raw.questionLayout ?? test.questionLayout,
     strictTiming: pick('strictTiming', test.strictTiming === true),
-    // A one-way paper's clock is fixed once it is under way, as in Edit test setup (LOCKED_ONCE_STARTED).
-    strictNext: pick('strictNext', test.strictNext !== false),
+    // A one-way paper's clock is fixed once it is under way (LOCKED_ONCE_STARTED),
+    // but not Next, nor going back - turned on, never off (navigationProblem).
+    strictNext: raw.strictNext ?? test.strictNext !== false,
+    strictPrevious: raw.strictPrevious ?? test.strictPrevious === true,
     typeSeconds: pick('typeSeconds', test.typeSeconds),
     // What questions are worth can change at any time: papers are re-marked.
     typeMarks: raw.typeMarks ?? test.typeMarks,
@@ -266,9 +276,15 @@ export async function saveTestPaper(req, code, raw = {}) {
       timeSeconds: question?.timeSeconds, marks: question?.marks, image: question?.image
     }))
   };
-  const input = buildTest(source);
+  const navigation = navigationProblem(test, { previous: raw.strictPrevious });
+  if (navigation) throw new PublicTestError(409, navigation);
+  // Going back already on in a running test stays on, whatever the paper's timers.
+  const input = buildTest(source, { keepPrevious: started && test.strictPrevious === true });
   if (!started) refusePastTimes(input, raw);
   await requireImages(input.questions);
+  // Changed while papers are open, and felt on them at once: how students move between questions.
+  const liveChanged = started && (input.strictNext !== allowsNext(test) || input.strictPrevious !== (test.strictPrevious === true)
+    || input.questionLayout !== (test.questionLayout === 'all' ? 'all' : 'one'));
 
   let summary = null;
   await serializeTestWrite(test.code, async () => {
@@ -314,7 +330,9 @@ export async function saveTestPaper(req, code, raw = {}) {
       allowGuests: input.allowGuests,
       requirePrivateWindow: input.requirePrivateWindow,
       devices: input.devices,
+      questionLayout: input.questionLayout,
       strictNext: input.strictNext,
+      strictPrevious: input.strictPrevious,
       typeSeconds: input.typeSeconds,
       typeMarks: input.typeMarks,
       locationRequired: input.locationRequired,
@@ -328,7 +346,7 @@ export async function saveTestPaper(req, code, raw = {}) {
       Object.assign(set, {
         startMode: input.startMode, opensAt: input.opensAt, endMode: input.endMode, untimed: input.untimed,
         endsAt: input.endsAt, durationMinutes: input.durationMinutes, windowSeconds: input.windowSeconds,
-        shuffleQuestions: input.shuffleQuestions, questionLayout: input.questionLayout,
+        shuffleQuestions: input.shuffleQuestions,
         strictTiming: input.strictTiming, questionDraw: input.questionDraw
       });
     }
@@ -342,5 +360,5 @@ export async function saveTestPaper(req, code, raw = {}) {
       edited: plan.edited, added: plan.added, removed: plan.removedCount, papersUpdated: migrations.length
     };
   });
-  return { ...(await adminDashboard(req, code)), paperSummary: summary };
+  return { ...(await adminDashboard(req, code)), paperSummary: summary, liveChanged };
 }

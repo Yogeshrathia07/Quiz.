@@ -22,7 +22,12 @@ import { LiveQr } from './LiveQr.jsx';
 import { AddStudentDialog } from './AddStudentDialog.jsx';
 
 function BackLink({ go }) {
-  return <a className="min-back" href={LIST_URL} onClick={(event) => { event.preventDefault(); go(LIST_URL); }}><ArrowLeft size={16} aria-hidden="true"/>Attendance</a>;
+  return (
+    <a className="att-back" href={LIST_URL} aria-label="Back to Attendance" title="Back to Attendance"
+      onClick={(event) => { event.preventDefault(); go(LIST_URL); }}>
+      <ArrowLeft size={18} aria-hidden="true"/>
+    </a>
+  );
 }
 
 /** Each filter option's icon, coloured by what it means (filters.css). */
@@ -328,9 +333,9 @@ export function AttendanceSessionScreen({ code, go, showToast }) {
 
   return (
     <section className={`min-page att-page att-session${editing ? ' is-editing' : ''}`}>
-      <BackLink go={go}/>
-      <header className="min-head">
-        <div>
+      <header className="min-head att-session-head">
+        <div className="att-session-title">
+          <BackLink go={go}/>
           <h1>{session.title}</h1>
           <p>{facts.join(' · ')}</p>
         </div>

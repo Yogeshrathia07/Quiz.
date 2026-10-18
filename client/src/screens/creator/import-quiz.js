@@ -1,7 +1,8 @@
-import { DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, QUESTION_TYPES, newQuestion } from '../../lib/quiz.js';
+import { DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, MAX_OPTIONS, MIN_OPTIONS, QUESTION_TYPES, newQuestion } from '../../lib/quiz.js';
 import { localDateTime, numberInRange } from '../../lib/format.js';
 
 const text = (value) => String(value ?? '').trim();
+
 
 /** Marks from the file: more than 0 and at most 100, to two places - else none. */
 function marksIn(value) {
@@ -26,7 +27,8 @@ function importedQuestion(question, index) {
   if (type === 'short') return { ...newQuestion(), prompt, type, options: [], correctOptions: [], timeSeconds, marks };
 
   const options = importedOptions(question);
-  if (options.length < 2 || options.some((option) => !option)) throw new Error(`Question ${index + 1} needs at least two options.`);
+  if (options.length < MIN_OPTIONS || options.some((option) => !option)) throw new Error(`Question ${index + 1} needs at least ${MIN_OPTIONS} options.`);
+  if (options.length > MAX_OPTIONS) throw new Error(`Question ${index + 1} has ${options.length} options; ${MAX_OPTIONS} at most.`);
 
   const rawCorrect = question.correctOptions ?? question.correctOption ?? question.correctAnswer ?? question.answer ?? question.correct;
   const values = Array.isArray(rawCorrect) ? rawCorrect : rawCorrect === undefined ? [] : [rawCorrect];
@@ -111,6 +113,7 @@ export function normalizeImport(raw, defaults) {
       resultReleaseMode: ['instant', 'after_quiz', 'admin'].includes(releaseMode) ? releaseMode : 'instant',
       strictTiming: source.strictTiming === true || source.strict_timing === true,
       strictNext: (source.strictNext ?? source.strict_next) !== false,
+      strictPrevious: source.strictPrevious === true || source.strict_previous === true,
       questionDraw: ['spread', 'random'].includes(source.questionDraw ?? source.question_draw) ? (source.questionDraw ?? source.question_draw) : defaults.questionDraw,
       typeSeconds,
       typeMarks

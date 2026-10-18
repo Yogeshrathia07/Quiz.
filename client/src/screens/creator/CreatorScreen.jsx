@@ -1,27 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Copy, Download } from 'lucide-react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, ClipboardPaste, Copy, Download, Eraser, FileUp, Plus } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
 import { dropCached } from '../../lib/cache.js';
-import { copyText, localDateTime } from '../../lib/format.js';
+import { firstInvalidField } from '../../lib/form-validation.js';
+import { copyText, durationLabel, localDateTime, shortDateTime } from '../../lib/format.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import { ApplyChoiceModal } from './ApplyChoiceModal.jsx';
 import {
-  DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, clampMix, estimateSeconds, followTypeDefault, mixTotal, mixWithAdded, newQuestion, poolCounts, strictEstimateSeconds, timerCoverage,
-  hasQuestionTimers, NO_TYPE_SECONDS
+  DEFAULT_TYPE_MARKS, DEFAULT_TYPE_SECONDS, clampMix, estimateSeconds, followTypeDefault, mixTotal, mixWithAdded, newQuestion, poolCounts,
+  sameForEveryType, strictEstimateSeconds, timerCoverage, hasQuestionTimers, NO_TYPE_SECONDS
 } from '../../lib/quiz.js';
 import { QuestionMarksFields } from '../../components/QuestionMarksFields.jsx';
-import { QuestionTimingFields } from '../../components/QuestionTimingFields.jsx';
+import { QuestionFlowFields } from '../../components/QuestionFlowFields.jsx';
 import { QuestionDrawField } from '../../components/QuestionDrawField.jsx';
 import { QuestionMixPicker } from '../../components/QuestionMixPicker.jsx';
-import { TestWindowFields, estimateMinutes, scheduleProblem, suggestedEndsAt } from '../../components/TestWindowFields.jsx';
+import { TestWindowFields, estimateMinutes, scheduleProblem, scheduleSummary, suggestedEndsAt } from '../../components/TestWindowFields.jsx';
 import { nowValue } from '../../components/DateTimeField.jsx';
-import { QuestionEditor } from './QuestionEditor.jsx';
 import { VenueFields } from '../../components/VenueFields.jsx';
 import { InfoTip } from '../../components/InfoTip.jsx';
-import {
-  ChoiceCards, DEVICE_OPTIONS, FormGroupTitle, IntegrityFields, LAYOUT_OPTIONS, MARKS_OPTIONS, SwitchRow
-} from '../../components/FormControls.jsx';
+import { ConfirmDialog } from '../../components/ConfirmDialog.jsx';
+import { ChoiceCards, DEVICE_OPTIONS, IntegrityFields, MARKS_OPTIONS, SwitchRow } from '../../components/FormControls.jsx';
 import { normalizeImport } from './import-quiz.js';
+import { PasteJsonModal } from './PasteJsonModal.jsx';
+import { CreatorGlance, CreatorPanel, CreatorSection, CreatorToggles } from './CreatorPanel.jsx';
+import { QuestionTable } from './QuestionTable.jsx';
+import { useCreatorDraft } from './useCreatorDraft.js';
 
 export function initialDetails() {
   return {
@@ -37,9 +40,13 @@ export function initialDetails() {
     questionLayout: 'one',
     strictTiming: false,
     strictNext: true,
+    // One at a time with going back (no question timers: a timed paper goes forward only).
+    strictPrevious: false,
     // Form only: whether a one-way paper has question timers. Off, it is sent
     // with no times at all; the times set stay here for turning it back on.
     questionTimers: false,
+    // Form only: one time for every question ('same'), or one per type ('type'); unset, read from the times.
+    timeEach: undefined,
     typeSeconds: { ...DEFAULT_TYPE_SECONDS },
     typeMarks: { ...DEFAULT_TYPE_MARKS },
     questionDraw: 'spread',
@@ -59,8 +66,11 @@ export function initialDetails() {
   };
 }
 
+/** The largest quiz JSON taken, from a file or pasted. */
+const MAX_JSON_BYTES = 2 * 1024 * 1024;
+
 /** The form's details as the test's settings: without what only the form uses. */
-const settingsOf = ({ questionTimers: _formOnly, ...settings }) => settings;
+const settingsOf = ({ questionTimers: _formOnly, timeEach: _alsoFormOnly, ...settings }) => settings;
 
 /** Everything below the questions that both this form and the edit modal share. */
 export function numericTestSettings(details) {
@@ -97,6 +107,7 @@ function detailsFromTest(test) {
     questionLayout: test.questionLayout || 'one',
     strictTiming: test.strictTiming === true,
     strictNext: test.strictNext !== false,
+    strictPrevious: test.strictPrevious === true,
     typeSeconds: test.typeSeconds || { ...DEFAULT_TYPE_SECONDS },
     typeMarks: { ...DEFAULT_TYPE_MARKS, ...(test.typeMarks || {}) },
     questionDraw: test.questionDraw || 'random',
@@ -116,9 +127,30 @@ function detailsFromTest(test) {
   };
 }
 
+const DEVICE_WORDS = { any: 'Any device', phone: 'Phones only', laptop: 'Laptops only' };
+const LEAVING_WORDS = { record: 'exits recorded', warn: 'warned on leaving', lock: 'locked on leaving', warn_lock: 'warned, then locked' };
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+/** When a test that has started runs, in one line: its start is history, and its end moves with Extend time. */
+function runningLine(test) {
+  if (test.isClosed) return 'This test has finished.';
+  const end = test.untimed ? 'ends when you close it'
+    : test.endMode === 'each' ? `each student has ${durationLabel((Number(test.durationMinutes) || 0) * 60)} from their own Begin`
+      : `ends ${shortDateTime(test.endsAt)}`;
+  return `Running · ${end}. Change the end time with Extend time on the dashboard.`;
+}
+
+/** Whether there is anything worth keeping as a draft: words, a question or a picture. */
+const hasContent = (details, questions) => Boolean(String(details.title ?? '').trim() || String(details.instructions ?? '').trim()
+  || questions.some((question) => String(question.prompt ?? '').trim() || (question.options || []).some((option) => String(option).trim()) || question.image));
+
 /**
  * Creates a test, or - with `editCode` - edits one: the same form, the whole
- * question paper. Once students have papers, saving asks who the changes
+ * question paper. Overview starts with the title and description; the left
+ * navigation opens one section on the right. Phones use a compact strip.
+ * Import and Create remain in reach. A new test is kept as a
+ * draft on the server while it is written (useCreatorDraft), so leaving the
+ * page loses nothing. Once students have papers, saving asks who the changes
  * reach (see paper-service.js on the server).
  */
 export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
@@ -129,27 +161,66 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
   // Editing: the test as loaded (null while loading), and the pending choice.
   const [editing, setEditing] = useState(null);
   const [choosing, setChoosing] = useState(false);
-  // Folded when editing: the bank is already there, and Save is what you came for.
-  const [questionsOpen, setQuestionsOpen] = useState(!editCode);
+  // Which part is open (one at a time), and which question's editor.
+  const [openPanel, setOpenPanel] = useState('overview');
+  const [openQuestion, setOpenQuestion] = useState(null);
+  // The sidebar becomes a sticky navigation strip on phones. A selected
+  // section starts at the top without losing any of its form values.
+  const bar = useRef(null);
+  const panels = useRef(null);
+  const pendingInvalid = useRef(null);
+  const reveal = useRef(false);
+  const showPart = (panel) => {
+    reveal.current = true;
+    setOpenPanel(panel);
+  };
+  useLayoutEffect(() => {
+    if (!reveal.current || !openPanel) return;
+    reveal.current = false;
+    // QuestionTable aligns the expanded row after its editor is laid out.
+    // A later panel reset would undo that on return or validation reveal.
+    if (openPanel === 'questions' && openQuestion !== null) return;
+    panels.current?.scrollTo({ top: 0, behavior: 'auto' });
+    const top = document.getElementById(`${openPanel}-body`)?.getBoundingClientRect().top;
+    const under = window.matchMedia('(max-width:700px)').matches
+      ? bar.current?.getBoundingClientRect().bottom ?? 0
+      : document.querySelector('.site-header')?.getBoundingClientRect().bottom ?? 0;
+    if (top === undefined || (top >= under && top < window.innerHeight * 0.6)) return;
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    window.scrollTo({ top: Math.max(0, window.scrollY + top - under - 12), behavior: smooth ? 'smooth' : 'auto' });
+  }, [openPanel, openQuestion]);
+  useLayoutEffect(() => {
+    const field = pendingInvalid.current;
+    if (!field || !field.isConnected || !field.getClientRects().length) return;
+    // The editor is visible and aligned now. No delayed callback may pull
+    // the admin back to this question after they have opened another part.
+    pendingInvalid.current = null;
+    field.reportValidity?.();
+  }, [openPanel, openQuestion]);
   const started = Boolean(editing && (editing.test.isStarted || editing.test.isClosed));
 
   const pool = useMemo(() => poolCounts(questions), [questions]);
   useEffect(() => { setMix((current) => clampMix(current, poolCounts(questions))); }, [questions]);
 
+  // A question's time is the test's, set in Question settings: its own time
+  // (from an older test) counts only once the test has started, when the
+  // times are fixed as they were.
+  const timedQuestions = useMemo(() => (started ? questions : questions.map((question) => ({ ...question, timeSeconds: null }))), [questions, started]);
   // Under strict timing the paper takes as long as its questions' timers allow
   // (0: none of them has a timer, so the usual estimate stands).
   const timed = details.strictTiming && details.questionTimers;
-  const timedSeconds = useMemo(() => (timed ? strictEstimateSeconds(questions, mix, details.typeSeconds) : 0),
-    [timed, details.typeSeconds, questions, mix]);
+  const timedSeconds = useMemo(() => (timed ? strictEstimateSeconds(timedQuestions, mix, details.typeSeconds) : 0),
+    [timed, details.typeSeconds, timedQuestions, mix]);
   const estimatedSeconds = timedSeconds || estimateSeconds(mix);
-  const timers = useMemo(() => (timed ? timerCoverage(questions, mix, details.typeSeconds) : 'none'),
-    [timed, details.typeSeconds, questions, mix]);
+  const timers = useMemo(() => (timed ? timerCoverage(timedQuestions, mix, details.typeSeconds) : 'none'),
+    [timed, details.typeSeconds, timedQuestions, mix]);
 
   const detail = (name, value) => setDetails((current) => ({ ...current, [name]: value }));
+  const changeDetails = (patch) => setDetails((current) => ({ ...current, ...patch }));
 
-  // A type's default time or marks changed: every question of that type that
-  // held the old default as its own follows the new one (followTypeDefault), so
-  // the default and the questions always agree. "The old default" is the one
+  // A type's default marks changed: every question of that type that held the
+  // old default as its own follows the new one (followTypeDefault), so the
+  // default and the questions always agree. "The old default" is the one
   // before this run of typing or clicking - typing 25 passes through 2, and a
   // question deliberately worth 2 must not be taken for one that followed it.
   // A pause ends the run; the default then becomes the one to compare with.
@@ -167,24 +238,13 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     detail(name, next);
   };
   useEffect(() => () => window.clearTimeout(defaultsSettle.current), []);
-  const timingField = (name, value) => {
-    if (name === 'typeSeconds') return typeDefault(name, value);
-    // Timers turned on with every type at 0 start from the usual times; a
-    // question's own "no limit" stays as it is.
-    if (name === 'questionTimers') {
-      return setDetails((current) => ({
-        ...current,
-        questionTimers: value,
-        typeSeconds: value && !hasQuestionTimers(current.typeSeconds) ? { ...DEFAULT_TYPE_SECONDS } : current.typeSeconds
-      }));
-    }
-    return detail(name, value);
-  };
 
   // The end time and the duration follow the estimate until the admin sets
   // one of their own, so the common case needs no thought and the unusual
   // case is one edit away.
   const [endTimeTouched, setEndTimeTouched] = useState(false);
+  // Also when a draft comes back without a duration (one saved before it held one): filled in again.
+  const durationMissing = details.durationMinutes === null || details.durationMinutes === undefined;
   useEffect(() => {
     if (endTimeTouched) return;
     setDetails((current) => ({
@@ -192,7 +252,7 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
       endsAt: suggestedEndsAt(current, estimatedSeconds),
       durationMinutes: estimateMinutes(estimatedSeconds)
     }));
-  }, [endTimeTouched, estimatedSeconds, details.opensAt, details.startMode]);
+  }, [endTimeTouched, estimatedSeconds, details.opensAt, details.startMode, durationMissing]);
   const windowField = (name, value) => {
     if (name === 'endsAt' || name === 'durationMinutes') setEndTimeTouched(true);
     detail(name, value);
@@ -201,7 +261,8 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     if (!editCode) return;
     api(`/api/admin/tests/${encodeURIComponent(editCode)}/paper`)
       .then((data) => {
-        setDetails({ ...detailsFromTest(data.test), questionTimers: hasQuestionTimers(data.test.typeSeconds, data.questions) });
+        const loaded = detailsFromTest(data.test);
+        setDetails({ ...loaded, questionTimers: hasQuestionTimers(data.test.typeSeconds, data.questions), timeEach: sameForEveryType(loaded.typeSeconds) ? 'same' : 'type' });
         setQuestions(data.questions);
         setMix(data.test.questionMix || { mcq: data.questions.length, msq: 0, short: 0 });
         setEndTimeTouched(true);
@@ -210,6 +271,56 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
       .catch((error) => showToast(error.message));
   }, [editCode, showToast]);
 
+  // A new test is kept as a draft on the server as it is written, and brought
+  // back here - from any device - until it is created or thrown away.
+  const draft = useCreatorDraft({
+    enabled: !editCode,
+    snapshot: hasContent(details, questions) ? { version: 1, details, questions, mix, endTimeTouched } : null,
+    onRestore: (saved) => {
+      const kept = Array.isArray(saved.questions) ? saved.questions.filter((question) => question && typeof question === 'object') : [];
+      const savedDetails = saved.details && typeof saved.details === 'object' ? saved.details : {};
+      setDetails({ ...initialDetails(), ...savedDetails, title: String(savedDetails.title ?? ''), instructions: String(savedDetails.instructions ?? '') });
+      setQuestions(kept.length ? kept.map((question) => ({
+        ...newQuestion(),
+        ...question,
+        prompt: String(question.prompt ?? ''),
+        options: Array.isArray(question.options) ? question.options.map(String) : [],
+        correctOptions: Array.isArray(question.correctOptions) ? question.correctOptions.map(String) : []
+      })) : [newQuestion()]);
+      if (saved.mix && typeof saved.mix === 'object') setMix(saved.mix);
+      setEndTimeTouched(saved.endTimeTouched === true);
+    }
+  });
+  // Clear: asked first ("Are you sure?"), then an empty form again and the kept draft thrown away.
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const clearDraft = async () => {
+    setConfirmingClear(false);
+    await draft.discard();
+    setDetails(initialDetails());
+    setQuestions([newQuestion()]);
+    setMix({ mcq: 1, msq: 0, short: 0 });
+    setEndTimeTouched(false);
+    showPart('overview');
+    setOpenQuestion(null);
+  };
+
+  // Only the phone navigation covers content; the desktop sidebar must not
+  // count as a tall header when scrolling to unfinished fields.
+  const shown = !(editCode && !editing) && draft.status !== 'loading';
+  useEffect(() => {
+    const node = bar.current;
+    if (!shown || !node || typeof ResizeObserver === 'undefined') return undefined;
+    const root = document.documentElement;
+    const measure = () => root.style.setProperty('--creator-stuck', `${(document.querySelector('.site-header')?.offsetHeight || 0) + (window.matchMedia('(max-width:700px)').matches ? node.offsetHeight + 8 : 0)}px`);
+    measure();
+    const watch = new ResizeObserver(measure);
+    watch.observe(node);
+    return () => {
+      watch.disconnect();
+      root.style.removeProperty('--creator-stuck');
+    };
+  }, [shown]);
+
   // A question that changes type, or a new one, counts towards its type's
   // questions per student (mixWithAdded); the type it left is trimmed by clampMix above.
   const updateQuestion = (index, value) => {
@@ -217,32 +328,68 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     if (before && value.type !== before.type) setMix((current) => mixWithAdded(current, pool, value.type));
     setQuestions((current) => current.map((question, i) => (i === index ? value : question)));
   };
-  const removeQuestion = (index) => setQuestions((current) => current.filter((_question, i) => i !== index));
+  const removeQuestion = (index) => {
+    setQuestions((current) => current.filter((_question, i) => i !== index));
+    setOpenQuestion(null);
+  };
+  const addQuestion = () => {
+    const added = newQuestion();
+    setMix((current) => mixWithAdded(current, pool, added.type));
+    setQuestions((current) => [...current, added]);
+    setOpenPanel('questions');
+    setOpenQuestion(questions.length);
+  };
 
+  // A quiz from JSON - a file's text, or pasted. Null once it is in, else what was wrong.
+  const applyImport = (text) => {
+    try {
+      if (new Blob([text]).size > MAX_JSON_BYTES) throw new Error('The JSON must be smaller than 2 MB.');
+      let parsed;
+      try { parsed = JSON.parse(text); }
+      catch (error) { throw new Error(`That is not valid JSON (${error.message}).`); }
+      const imported = normalizeImport(parsed, initialDetails());
+      const importedPool = poolCounts(imported.questions);
+      setQuestions(imported.questions);
+      setDetails({
+        ...imported.details,
+        questionTimers: hasQuestionTimers(imported.details.typeSeconds, imported.questions),
+        timeEach: sameForEveryType(imported.details.typeSeconds) ? 'same' : 'type'
+      });
+      if (imported.hasEndTime) setEndTimeTouched(true);
+      setMix(clampMix(imported.questionMix || { mcq: imported.questions.length, msq: 0, short: 0 }, importedPool));
+      // The list, to look over before creating.
+      setOpenPanel('questions');
+      setOpenQuestion(null);
+      showToast(`${imported.questions.length} questions imported. Review them before creating the test.`);
+      return null;
+    } catch (error) { return error.message; }
+  };
   const importJson = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
-    try {
-      if (file.size > 2 * 1024 * 1024) throw new Error('Choose a JSON file smaller than 2 MB.');
-      const imported = normalizeImport(JSON.parse(await file.text()), initialDetails());
-      const importedPool = poolCounts(imported.questions);
-      setQuestions(imported.questions);
-      setQuestionsOpen(false);
-      setDetails({ ...imported.details, questionTimers: hasQuestionTimers(imported.details.typeSeconds, imported.questions) });
-      if (imported.hasEndTime) setEndTimeTouched(true);
-      setMix(clampMix(imported.questionMix || { mcq: imported.questions.length, msq: 0, short: 0 }, importedPool));
-      showToast(`${imported.questions.length} questions imported. Review them before creating the test.`);
-    } catch (error) { showToast(`Could not import JSON: ${error.message}`); }
+    const problem = file.size > MAX_JSON_BYTES ? 'Choose a JSON file smaller than 2 MB.' : applyImport(await file.text());
+    if (problem) showToast(`Could not import JSON: ${problem}`);
     event.target.value = '';
   };
+  const jsonFile = useRef(null);
+  const [pastingJson, setPastingJson] = useState(false);
 
   const create = async (event) => {
     event.preventDefault();
-    if (!mixTotal(mix)) return showToast('Choose at least one question per student.');
-    const problem = scheduleProblem(details);
-    if (problem) return showToast(problem);
+    // Closed panels remain mounted. Reveal the first invalid field before
+    // asking the browser to focus it, including repeated submit attempts.
+    const invalid = firstInvalidField(event.currentTarget);
+    if (invalid) { revealInvalid(invalid); return; }
+    // What the browser does not check itself: said, with the part it is in opened.
+    const stop = (message, panel) => {
+      showPart(panel);
+      showToast(message);
+    };
+    if (!mixTotal(mix)) return stop('Choose at least one question per student.', 'settings');
+    const problem = started ? null : scheduleProblem(details);
+    if (problem) return stop(problem, 'schedule');
     if (details.locationRequired && (details.locationLatitude === '' || details.locationLongitude === '')) {
-      return showToast('Set the test venue location or turn off the location requirement.');
+      return stop('Set the test venue location or turn off the location requirement.', 'rules');
     }
     if (editing) {
       // Who a change reaches matters only for the questions: settings apply
@@ -252,13 +399,19 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
       return;
     }
     setCreating(true);
+    // The draft's last change lands first; the server throws the draft away once the test exists.
+    await draft.pause();
     try {
       const created = await post('/api/tests', payload());
       // The quiz lists and home no longer say what they held (lib/cache.js).
       dropCached('/api/admin/');
       onCreated(created);
       showToast('Test created.', 'success');
-    } catch (error) { showToast(error.message); setCreating(false); }
+    } catch (error) {
+      showToast(error.message);
+      setCreating(false);
+      draft.resume();
+    }
   };
 
   const questionKey = (list) => JSON.stringify(list.map((question) => [
@@ -267,7 +420,7 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     // A picture added, changed or taken off is a change to the question.
     question.image?.id ?? null
   ]));
-  const questionsChanged = () => questionKey(questions) !== questionKey(editing.questions);
+  const questionsChanged = () => questionKey(timedQuestions) !== questionKey(started ? editing.questions : editing.questions.map((question) => ({ ...question, timeSeconds: null })));
 
   // One way with no timers: no type has a time and no question one of its own.
   const untimed = details.strictTiming && !details.questionTimers;
@@ -275,8 +428,11 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     ...settingsOf(details),
     ...numericTestSettings(details),
     ...(untimed ? { typeSeconds: { ...NO_TYPE_SECONDS } } : {}),
+    // No going back with a timer on each question (QuestionFlowFields keeps what
+    // Previous was set to for when the timer goes off) - unless a running test has it.
+    strictPrevious: details.strictTiming === true && details.strictPrevious === true && (!details.questionTimers || started),
     questionMix: mix,
-    questions: questions.map(({ onPapers, ...question }) => ({
+    questions: timedQuestions.map(({ onPapers, ...question }) => ({
       ...question,
       correctOptions: question.correctOptions.map(String),
       timeSeconds: question.timeSeconds === '' || question.timeSeconds === undefined || (untimed && Number(question.timeSeconds) > 0) ? null : question.timeSeconds,
@@ -303,16 +459,21 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
     } catch (error) { showToast(error.message); setCreating(false); setChoosing(false); }
   };
 
-  // A required field inside folded-away questions cannot show its message:
-  // open the questions so the browser can point at it.
-  const revealInvalid = (event) => {
-    if (questionsOpen || !event.target.closest?.('.question-editors')) return;
-    setQuestionsOpen(true);
-    showToast('Some questions are not finished. They are shown below.');
+  // A required field in a closed part cannot show its message: open that part
+  // (and the question it is in), then let the browser point at it.
+  const revealInvalid = (field) => {
+    const panel = field.closest?.('[data-panel]')?.dataset.panel;
+    const row = field.closest?.('[data-question-index]');
+    const hidden = (panel && panel !== openPanel) || (row && Number(row.dataset.questionIndex) !== openQuestion);
+    if (!hidden) { field.reportValidity?.(); return; }
+    pendingInvalid.current = field;
+    if (panel) showPart(panel);
+    if (row) setOpenQuestion(Number(row.dataset.questionIndex));
+    showToast(row ? `Question ${Number(row.dataset.questionIndex) + 1} is not finished. It is open now.` : 'Something is not finished yet. It is open now.');
   };
 
   // The JSON template: saved as a file, or copied as text - to paste wherever
-  // the questions are written, then imported with Import JSON.
+  // the questions are written, then imported with Import questions.
   const downloadTemplate = () => {
     const link = document.createElement('a');
     link.href = '/quiz-template.json';
@@ -331,204 +492,201 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
   };
 
   if (editCode && !editing) return <div className="empty card">Loading the test…</div>;
+  if (draft.status === 'loading') return <div className="empty card">Loading…</div>;
+
+  // Each part says in one line what it holds, read before it is opened.
+  const oneAtATime = details.strictTiming || details.questionLayout !== 'all';
+  const unwritten = questions.filter((question) => !question.prompt?.trim()).length;
+  const scheduleIssue = started ? null : scheduleProblem(details);
+  const summaries = {
+    questions: [plural(questions.length, 'question'), unwritten && `${unwritten} not written yet`].filter(Boolean).join(' · '),
+    schedule: started ? runningLine(editing.test) : scheduleIssue || scheduleSummary(details),
+    settings: [
+      `${mixTotal(mix)} per student`,
+      oneAtATime ? 'one at a time' : 'all on one page',
+      timed && 'timed',
+      details.shuffleQuestions && 'shuffled'
+    ].filter(Boolean).join(' · '),
+    rules: [
+      DEVICE_WORDS[details.devices] || DEVICE_WORDS.any,
+      details.requirePrivateWindow && 'private window',
+      details.allowGuests ? 'guests allowed' : 'college accounts only',
+      details.locationRequired && 'at the venue',
+      LEAVING_WORDS[details.violationAction]
+    ].filter(Boolean).join(' · ')
+  };
+  const toggle = (panel) => { if (openPanel !== panel) showPart(panel); };
+  // The draft saves quietly; the bar speaks only when it could not, so nothing is lost unseen.
+  // A narrow phone gets the short words (theme.css): the buttons beside it keep their room.
+  const [draftNote, draftShort] = draft.status === 'error' ? ['Not saved - check the connection', 'Not saved']
+    : draft.status === 'too-big' ? ['Too big to keep as a draft', 'Too big to save'] : ['', ''];
+  const backLabel = editing ? 'Back to quiz dashboard' : 'Back to Quizzes';
 
   return (
     <>
-      <section className="creator-head creator-head-row">
-        <h1>{editing ? `Edit ${editing.test.title}` : 'Create a test'}</h1>
-        {editing ? (
-          <button className="button button-secondary button-small creator-back" type="button" onClick={() => go(`/?admin=${encodeURIComponent(editCode)}`)}>
-            Back to dashboard
-          </button>
-        ) : (
-        <div className="json-import-actions">
-          <label className="button button-secondary button-small" htmlFor="quiz-json">Import JSON</label>
-          <input id="quiz-json" className="sr-only" type="file" accept="application/json,.json" onChange={importJson}/>
-          <ActionMenu label="Template" align="right" items={[
-            { label: 'Download template', icon: Download, onSelect: downloadTemplate },
-            { label: 'Copy template', icon: Copy, onSelect: copyTemplate }
-          ]}/>
-        </div>
-        )}
-      </section>
-      {started && (
-        <p className="notice editing-note">
-          <span>This test has started — you choose who your changes reach when you save.</span>
-          <InfoTip label="What can still change">
-            Questions, answer keys, times and settings can still change. The start time, whether it goes one way only (no Previous)
-            with a timer on each question, how questions are picked and shuffling are fixed; change the end time with Extend time on the dashboard.
-          </InfoTip>
-        </p>
-      )}
-
-      <form className="creator-form" onSubmit={create} onInvalidCapture={revealInvalid}>
-        <section className="card form-section">
-          <div className="form-grid">
-            <div className="form-wide">
-              <label className="field-label">Test title</label>
-              <input
-                className="text-input" required maxLength="120" placeholder="e.g. Data Structures Quiz"
-                value={details.title} onChange={(event) => detail('title', event.target.value)}
-              />
-            </div>
-            <div className="form-wide">
-              <label className="field-label">Instructions (optional)</label>
-              <textarea className="text-area" maxLength="2000" value={details.instructions} onChange={(event) => detail('instructions', event.target.value)}/>
-            </div>
-
-            {!started && (
-              <>
-                <FormGroupTitle title="Timing"/>
-                <TestWindowFields
-                  values={details}
-                  estimatedSeconds={estimatedSeconds}
-                  onChange={windowField}
-                  idPrefix="create"
-                />
-              </>
+      <div className="creator-workspace">
+        <aside className="creator-bar" ref={bar} aria-label="Quiz builder">
+          <div className="creator-sidebar-heading">
+            <button className="creator-nav-back" type="button" aria-label={backLabel} title={backLabel}
+              onClick={() => go(editing ? `/?admin=${encodeURIComponent(editCode)}` : '/?admin=quizzes')}>
+              <ArrowLeft size={18} aria-hidden="true"/>
+            </button>
+            <h1 className="creator-sidebar-title">{editing ? 'Edit quiz' : 'Create quiz'}</h1>
+          </div>
+          <CreatorToggles open={openPanel} onToggle={toggle}/>
+          {started && (
+            <p className="notice editing-note">
+              <span>This test has started — you choose who your changes reach when you save.</span>
+              <InfoTip label="What can still change">
+                Questions, answer keys, marks and most settings can still change, and so can Next - and on a paper with no timer, going back can be turned on.
+                The start time, the timer on each question, how questions are picked and shuffling are fixed; change the end time with
+                Extend time on the dashboard.
+              </InfoTip>
+            </p>
+          )}
+          {draft.restoredAt && (
+            <p className="notice draft-note">
+              <span title={`Your unfinished test from ${shortDateTime(draft.restoredAt)} was restored.`}>
+                Draft restored<span className="draft-restored-date">{shortDateTime(draft.restoredAt)}</span>
+              </span>
+            </p>
+          )}
+          <div className="creator-bar-actions">
+            {draftNote && (
+              <span className="creator-bar-note is-problem" role="status">
+                <span className="creator-bar-note-long">{draftNote}</span>
+                <span className="creator-bar-note-short">{draftShort}</span>
+              </span>
             )}
-
-            <FormGroupTitle title="Questions"/>
-            <div className="form-wide">
-              <span className="field-label">Questions per student</span>
-              <QuestionMixPicker pool={pool} mix={mix} onChange={setMix} idPrefix="create-mix"/>
-              <p className="help">
-                {mixTotal(mix)} of {questions.length} question{questions.length === 1 ? '' : 's'} per student.
-                {started && ' Changes reach only papers started from now.'}
-              </p>
-            </div>
-            {!started && <QuestionDrawField value={details.questionDraw} onChange={(value) => detail('questionDraw', value)} pool={pool} mix={mix} idPrefix="create"/>}
-            <QuestionMarksFields values={details} onChange={typeDefault} idPrefix="create"/>
-            {!started && (
-              <div className="form-wide">
-                <ChoiceCards
-                  label="Question layout"
-                  idPrefix="create-layout"
-                  value={details.strictTiming ? 'one' : details.questionLayout}
-                  // All on one page has no Previous or Next to take away.
-                  onChange={(value) => setDetails((current) => ({ ...current, questionLayout: value, strictTiming: value === 'all' ? false : current.strictTiming }))}
-                  options={LAYOUT_OPTIONS}
-                />
+            {!editing && (
+              <div className="creator-secondary-actions">
+                <button className="button button-secondary button-small draft-clear" type="button" onClick={() => setConfirmingClear(true)}>
+                  <Eraser size={16} aria-hidden="true"/>Clear
+                </button>
+                {/* Import from a file or paste JSON. The full label can wrap on a narrow phone. */}
+                <ActionMenu label="Import questions" icon={FileUp} align="right" items={[
+                  { label: 'From a file', icon: FileUp, onSelect: () => jsonFile.current?.click() },
+                  { label: 'Paste JSON', icon: ClipboardPaste, onSelect: () => setPastingJson(true) },
+                  { label: 'Download template', icon: Download, onSelect: downloadTemplate },
+                  { label: 'Copy template', icon: Copy, onSelect: copyTemplate }
+                ]}/>
               </div>
             )}
-            {/* One at a time: the Previous and Next buttons, and the timers when it goes one way only. */}
-            {(started || details.strictTiming || details.questionLayout !== 'all') && (
-              <QuestionTimingFields values={details} onChange={timingField} idPrefix="create" estimatedSeconds={timedSeconds} timers={timers} locked={started}/>
-            )}
-            {!started && <div className="form-wide pill-switches">
-              <SwitchRow
-                checked={details.shuffleQuestions}
-                onChange={(value) => detail('shuffleQuestions', value)}
-                title="Shuffle question order"
-              />
-            </div>}
+            <button className="button button-create" form="creator-form" disabled={creating} type="submit">
+              {!editing && <Plus size={16} aria-hidden="true"/>}
+              {editing ? (creating ? 'Saving…' : 'Save changes') : (creating ? 'Creating…' : 'Create quiz')}
+            </button>
+          </div>
+          {!editing && <input ref={jsonFile} id="quiz-json" name="quiz-json-file" className="sr-only" type="file" accept="application/json,.json" tabIndex={-1} aria-hidden="true" onChange={importJson}/>}
+        </aside>
 
-            <FormGroupTitle title="Leaving the test"/>
-            <IntegrityFields values={details} onChange={detail} idPrefix="create"/>
-
-            <FormGroupTitle title="Who can join"/>
-            <div className="form-wide">
-              <SwitchRow
-                checked={details.allowGuests}
-                onChange={(value) => detail('allowGuests', value)}
-                title="Allow guest registrations"
-                description="People without a college account can join by name. Leave off for graded exams."
-              />
-            </div>
-            <div className="form-wide">
-              <SwitchRow
-                checked={details.requirePrivateWindow}
-                onChange={(value) => detail('requirePrivateWindow', value)}
-                title="Private (Incognito) window only"
-                description="Browser extensions are off there."
-              />
-            </div>
-            <div className="form-wide">
-              <ChoiceCards
-                label="Devices"
-                idPrefix="create-devices"
-                value={details.devices}
-                onChange={(value) => detail('devices', value)}
-                options={DEVICE_OPTIONS}
-                more={<>Try any phone or laptop on the <a href="/?page=window-check" target="_blank" rel="noreferrer">browser check page</a>: it shows what the check decides there, and why.</>}
-              />
-            </div>
-            <div className="form-wide">
-              <SwitchRow
-                checked={details.locationRequired}
-                onChange={(value) => detail('locationRequired', value)}
-                title="Require venue location"
-                description="Students must be at the venue to begin."
-              />
-            </div>
-
-            {details.locationRequired && (
-              <div className="form-wide">
-                <VenueFields values={details} onChange={detail} idPrefix="create" showToast={showToast}/>
+        <form id="creator-form" className="creator-form" ref={panels} aria-label="Quiz details and settings" noValidate onSubmit={create}>
+          <div className="creator-panels">
+            <CreatorPanel id="overview" summary="Give your quiz a name and review its setup." open={openPanel === 'overview'}>
+              <div className="creator-top-fields">
+                <div className="creator-field">
+                  <span className="field-label-row">
+                    <label className="field-label" htmlFor="test-title">Title</label>
+                    <InfoTip label="About creating a quiz">
+                      Open Questions, Schedule, Question settings or Rules to edit that part, then press {editing ? 'Save changes' : 'Create quiz'}.
+                      {!editing && ' Import questions accepts a file or pasted JSON; its menu includes a template.'}
+                    </InfoTip>
+                  </span>
+                  <input
+                    id="test-title" name="title" className="text-input" required maxLength="120" placeholder="e.g. Data Structures Quiz"
+                    value={details.title} onChange={(event) => detail('title', event.target.value)}
+                  />
+                </div>
+                <div className="creator-field">
+                  <label className="field-label" htmlFor="test-instructions">Description <span className="field-optional">optional</span></label>
+                  <textarea id="test-instructions" name="instructions" className="text-area" rows={3} maxLength="2000" placeholder="What students read before they begin"
+                    value={details.instructions} onChange={(event) => detail('instructions', event.target.value)}/>
+                </div>
               </div>
-            )}
+              <CreatorGlance summaries={summaries} onOpen={toggle}/>
+            </CreatorPanel>
 
-            <FormGroupTitle title="When students see their marks"/>
-            <div className="form-wide">
-              <ChoiceCards
-                label={null}
-                idPrefix="create-marks"
-                value={details.resultReleaseMode}
-                onChange={(value) => detail('resultReleaseMode', value)}
-                options={MARKS_OPTIONS}
-              />
-            </div>
+            <CreatorPanel id="questions" summary={summaries.questions} open={openPanel === 'questions'}>
+              <p className="help creator-panel-hint">Tap a question to write or change it. Write as many as you like: Question settings decides how many each student gets.</p>
+              <QuestionTable questions={questions} active={openPanel === 'questions'} openIndex={openQuestion} onOpen={setOpenQuestion} onChange={updateQuestion} onRemove={removeQuestion}
+                onAdd={addQuestion} typeMarks={details.typeMarks}/>
+            </CreatorPanel>
+
+            <CreatorPanel id="schedule" summary={summaries.schedule} open={openPanel === 'schedule'}>
+              {started ? <p className="creator-when-line">{runningLine(editing.test)}</p> : (
+                <div className="form-grid">
+                  <CreatorSection title="When it starts and ends" hint="Start it yourself or at a set time; it ends by itself, or when you close it. Every paper still open is handed in at the end."/>
+                  <TestWindowFields values={details} estimatedSeconds={estimatedSeconds} onChange={windowField} idPrefix="create"/>
+                </div>
+              )}
+            </CreatorPanel>
+
+            <CreatorPanel id="settings" summary={summaries.settings} open={openPanel === 'settings'}>
+              <div className="form-grid">
+                <CreatorSection title="Questions each student gets" hint="All of them, or a few each from a bigger bank - and in what order."/>
+                <div className="form-wide">
+                  <span className="field-label">Questions per student</span>
+                  <QuestionMixPicker pool={pool} mix={mix} onChange={setMix} idPrefix="create-mix"/>
+                  <p className="help">
+                    {mixTotal(mix)} of {plural(questions.length, 'question')} per student.
+                    {started && ' Changes reach only papers started from now.'}
+                  </p>
+                </div>
+                {!started && (
+                  <div className="form-wide switch-list">
+                    <SwitchRow checked={details.shuffleQuestions} onChange={(value) => detail('shuffleQuestions', value)}
+                      title="Shuffle question order" hint="Each student gets the questions in a different order."/>
+                  </div>
+                )}
+                {!started && <QuestionDrawField value={details.questionDraw} onChange={(value) => detail('questionDraw', value)} pool={pool} mix={mix} idPrefix="create"/>}
+
+                <CreatorSection title="Marks" hint="What a right answer earns, and when students see their marks."/>
+                <QuestionMarksFields values={details} onChange={typeDefault} idPrefix="create"/>
+                <div className="form-wide">
+                  <ChoiceCards label="Students see their marks" idPrefix="create-marks" value={details.resultReleaseMode}
+                    onChange={(value) => detail('resultReleaseMode', value)} options={MARKS_OPTIONS} hint/>
+                </div>
+
+                <CreatorSection title="Moving through the paper" hint="One page or one question at a time - and then going back, moving on early and a timer on each question."/>
+                <QuestionFlowFields values={details} onChange={changeDetails} idPrefix="create" estimatedSeconds={timedSeconds} timers={timers} started={started}/>
+              </div>
+            </CreatorPanel>
+
+            <CreatorPanel id="rules" summary={summaries.rules} open={openPanel === 'rules'}>
+              <div className="form-grid">
+                <CreatorSection title="Who can take it" hint="On which devices and in which window, who may join, and from where."/>
+                <div className="form-wide">
+                  <ChoiceCards
+                    label="Devices"
+                    idPrefix="create-devices"
+                    value={details.devices}
+                    onChange={(value) => detail('devices', value)}
+                    options={DEVICE_OPTIONS}
+                    more={<>Try any phone or laptop on the <a href="/?page=window-check" target="_blank" rel="noreferrer">browser check page</a>: it shows what the check decides there, and why.</>}
+                    hint
+                  />
+                </div>
+                <div className="form-wide switch-list">
+                  <SwitchRow checked={details.requirePrivateWindow} onChange={(value) => detail('requirePrivateWindow', value)}
+                    title="Private (Incognito) window only" hint="Students open the test in a private window, where browser extensions are off."/>
+                  <SwitchRow checked={details.allowGuests} onChange={(value) => detail('allowGuests', value)}
+                    title="Allow guests" hint="People without a college account can join with just their name. Leave off for graded exams."/>
+                  <SwitchRow checked={details.locationRequired} onChange={(value) => detail('locationRequired', value)}
+                    title="Venue" hint="Students must be at the venue, by their device's location, to begin - and to carry on."/>
+                </div>
+                {details.locationRequired && (
+                  <div className="form-wide dependent-fields">
+                    <VenueFields values={details} onChange={detail} idPrefix="create" showToast={showToast}/>
+                  </div>
+                )}
+
+                <CreatorSection title="Leaving the test" hint="Switching to another app or tab, or leaving fullscreen. Every exit is recorded, whatever you choose here."/>
+                <IntegrityFields values={details} onChange={detail} idPrefix="create"/>
+              </div>
+            </CreatorPanel>
           </div>
-        </section>
-
-        {/* The questions fold away, so the settings and Save stay close together. */}
-        <div className="questions-bar">
-          <div className="questions-bar-title">
-            <strong>Questions</strong>
-            <span>{questions.length}</span>
-          </div>
-          <button className="button button-secondary button-small" type="button" aria-expanded={questionsOpen} aria-controls="question-editors"
-            onClick={() => setQuestionsOpen((open) => !open)}>
-            <ChevronDown size={16} className={`questions-bar-caret${questionsOpen ? ' is-open' : ''}`} aria-hidden="true"/>
-            {questionsOpen ? 'Hide' : 'Show'}
-          </button>
-        </div>
-
-        <section className="question-editors" id="question-editors" hidden={!questionsOpen}>
-          {questions.map((question, index) => (
-            <QuestionEditor
-              key={index}
-              question={question}
-              index={index}
-              canRemove={questions.length > 1}
-              onChange={updateQuestion}
-              onRemove={removeQuestion}
-              strict={timed}
-              typeSeconds={details.typeSeconds}
-              typeMarks={details.typeMarks}
-              onPapers={question.onPapers || 0}
-            />
-          ))}
-        </section>
-
-        <div className="creator-actions">
-          <button
-            className="button button-secondary"
-            type="button"
-            onClick={() => {
-              setQuestionsOpen(true);
-              const added = newQuestion();
-              setMix((current) => mixWithAdded(current, pool, added.type));
-              setQuestions((current) => [...current, added]);
-            }}
-          >
-            + Add question
-          </button>
-          <button className="button button-primary" disabled={creating} type="submit">
-            {editing ? (creating ? 'Saving…' : 'Save changes') : (creating ? 'Creating…' : 'Create test & QR')}
-          </button>
-        </div>
-      </form>
+        </form>
+      </div>
       {choosing && (
         <ApplyChoiceModal
           papers={editing.papers}
@@ -537,6 +695,13 @@ export function CreatorScreen({ onCreated, showToast, editCode = null, go }) {
           onChoose={saveEdit}
           onClose={() => setChoosing(false)}
         />
+      )}
+      {pastingJson && <PasteJsonModal onImport={applyImport} onClose={() => setPastingJson(false)}/>}
+      {confirmingClear && (
+        <ConfirmDialog title="Are you sure?" confirmLabel="Clear" icon={Eraser} tone="danger"
+          onConfirm={clearDraft} onCancel={() => setConfirmingClear(false)}>
+          This clears the test you are writing - its title, questions and settings. It cannot be undone.
+        </ConfirmDialog>
       )}
     </>
   );

@@ -7,6 +7,7 @@ import { hmac } from '../lib/crypto.js';
 import { createLimiter, waitWords } from '../lib/security.js';
 import { now } from '../lib/time.js';
 import { sendMail } from '../lib/mailer.js';
+import { resultMailsToday } from '../data/mail-allowance.js';
 import { cleanText } from '../domain/test-builder.js';
 import { issueSession, normalizeEmail, revokeSessionsFor, roleForEmail } from './portal-auth.js';
 
@@ -100,11 +101,14 @@ async function enforceSendLimits(email, ip) {
     const waitSeconds = Math.ceil(config.otp.resendSeconds - (Date.now() - new Date(latest.sentAt).getTime()) / 1000);
     if (waitSeconds > 0) throw new PublicTestError(429, `A code was just sent. You can ask for another in ${waitSeconds} seconds.`);
   }
-  const [perEmail, perIp, total] = await Promise.all([
+  // The day's total counts results emails too: they share the day's allowance (data/mail-allowance.js).
+  const [perEmail, perIp, codes, results] = await Promise.all([
     otpSends().countDocuments({ email, createdAt: { $gt: hoursAgo(24) } }),
     otpSends().countDocuments({ ip, createdAt: { $gt: hoursAgo(1) } }),
-    otpSends().countDocuments({ createdAt: { $gt: hoursAgo(24) } })
+    otpSends().countDocuments({ createdAt: { $gt: hoursAgo(24) } }),
+    resultMailsToday()
   ]);
+  const total = codes + results;
   if (perEmail >= config.otp.perEmailPerDay) throw new PublicTestError(429, 'Too many codes were requested for this email today. Try again tomorrow.');
   if (perIp >= config.otp.perIpPerHour) throw new PublicTestError(429, 'Too many codes were requested from this network. Try again in a little while.');
   if (total >= config.otp.dailyLimit) throw new PublicTestError(503, 'The portal has reached its email limit for today. Ask your faculty for help.');

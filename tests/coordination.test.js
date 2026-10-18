@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { coordinationMode, onLiveEvent, publishLiveEvent, runAsLeader, serializeWrite } from '../src/coordination/index.js';
+import { cachedJson, coordinationMode, onLiveEvent, publishLiveEvent, runAsLeader, serializeWrite } from '../src/coordination/index.js';
+import { config } from '../src/config.js';
 
 const wait = (ms) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
@@ -75,4 +76,31 @@ test('cluster startup is refused when REDIS_URL is missing', () => {
   });
   assert.equal(child.status, 12);
   assert.match(child.stderr, /REDIS_URL is required/);
+});
+
+test('one stuck shared read never holds the requests after it: they give up on it, answer busy, and the next reads afresh', async () => {
+  const before = config.redis.cacheLoadTimeoutMs;
+  config.redis.cacheLoadTimeoutMs = 60;
+  try {
+    const stuck = () => new Promise(() => {});
+    // Two requests share the stuck read; both give up on it in time, as busy (retried by the device).
+    const results = await Promise.allSettled([cachedJson('stuck-read', stuck, 5_000), cachedJson('stuck-read', stuck, 5_000)]);
+    for (const result of results) {
+      assert.equal(result.status, 'rejected');
+      assert.equal(result.reason.status, 503);
+      assert.equal(result.reason.code, 'SERVER_BUSY');
+    }
+    // The next request is not tied to the stuck read: it reads afresh and gets the test.
+    assert.deepEqual(await cachedJson('stuck-read', async () => ({ code: 'TEST-ONE' }), 5_000), { code: 'TEST-ONE' });
+  } finally {
+    config.redis.cacheLoadTimeoutMs = before;
+  }
+});
+
+test('a shared read that comes back in time is still one read for everyone waiting', async () => {
+  let reads = 0;
+  const load = async () => { reads += 1; await wait(15); return { code: 'TEST-TWO' }; };
+  const all = await Promise.all([0, 1, 2].map(() => cachedJson('slow-read', load, 5_000)));
+  assert.equal(reads, 1);
+  assert.deepEqual(all, [{ code: 'TEST-TWO' }, { code: 'TEST-TWO' }, { code: 'TEST-TWO' }]);
 });

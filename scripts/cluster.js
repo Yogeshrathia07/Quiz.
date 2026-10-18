@@ -29,7 +29,16 @@ const env = {
   WEB_CONCURRENCY: process.env.WEB_CONCURRENCY || '6',
   REDIS_URL
 };
-const run = (program, args, { quiet = false } = {}) => spawnSync(program, args, { env, shell: true, stdio: quiet ? 'pipe' : 'inherit' });
+// On Windows npm and pm2 are .cmd scripts, which Node starts only through a shell; elsewhere there is
+// no shell at all. Every argument is one of this script's own constants - checked anyway, so nothing
+// could ever reach that shell as a command.
+const SAFE_ARGUMENT = /^(?:[\w.:@/=-]+|"")$/;
+const run = (program, args, { quiet = false } = {}) => {
+  const unsafe = [program, ...args].find((argument) => !SAFE_ARGUMENT.test(argument));
+  if (unsafe !== undefined) fail(`Refusing to run an unexpected argument: ${unsafe}`);
+  // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process, javascript.lang.security.audit.spawn-shell-true.spawn-shell-true
+  return spawnSync(program, args, { env, shell: process.platform === 'win32', stdio: quiet ? 'pipe' : 'inherit' });
+};
 const fail = (message) => { console.error(`\n  ${message}\n`); process.exit(1); };
 
 async function redisIsUp() {

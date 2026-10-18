@@ -10,16 +10,17 @@ export const WHOLE_CLASS = 200;
 const testPath = (code) => `/api/admin/tests/${encodeURIComponent(code)}`;
 
 /** One page of a list, narrowed on the server - for a class bigger than one reply. */
-export function dashboardPath(code, { section = 'test', page = 1, pageSize = 100, search = '', filters = '', sort = '' } = {}) {
+export function dashboardPath(code, { section = 'test', page = 1, pageSize = 100, search = '', filters = '', sort = '', af = '' } = {}) {
   const params = new URLSearchParams({ section, page: String(page), pageSize: String(pageSize) });
   if (search) params.set('search', search);
   if (filters) params.set('filters', filters);
   if (sort) params.set('sort', sort);
+  if (af) params.set('af', af);
   return `${testPath(code)}?${params}`;
 }
 
 /** The whole class at once (when it fits): every tab, search, filter and order is then worked out in the browser. */
-export const wholeClassPath = (code) => dashboardPath(code, { section: 'students', pageSize: WHOLE_CLASS });
+export const wholeClassPath = (code, af = '') => dashboardPath(code, { section: 'students', pageSize: WHOLE_CLASS, af });
 
 /** The Test tab's overview: the whole class at a glance (services/overview-service.js). */
 export const overviewPath = (code) => `${testPath(code)}/overview`;

@@ -1,0 +1,72 @@
+{
+  "ignoreFiles": [
+    "client/src/styles/tokens.css",
+    "client/dist/**",
+    "node_modules/**"
+  ],
+  "rules": {
+    "color-no-hex": [
+      true,
+      {
+        "message": "Use a colour token from tokens.css, e.g. var(--text)"
+      }
+    ],
+    "color-named": [
+      "never",
+      {
+        "message": "Use a colour token from tokens.css, e.g. var(--white)"
+      }
+    ],
+    "function-disallowed-list": [
+      [
+        "rgba",
+        "hsl",
+        "hsla",
+        "hwb",
+        "lab",
+        "lch",
+        "oklab",
+        "oklch"
+      ],
+      {
+        "message": "Build see-through colours from a channel token: rgb(var(--primary-rgb) / .12)"
+      }
+    ],
+    "declaration-property-value-disallowed-list": [
+      {
+        "/.*/": [
+          "/(^|[^\\w-])rgb\\(\\s*[\\d.]/"
+        ]
+      },
+      {
+        "message": "Build colours from a channel token: rgb(var(--primary-rgb) / .12)"
+      }
+    ],
+    "declaration-property-value-allowed-list": [
+      {
+        "font-size": [
+          "/^var\\(--text-[\\w-]+\\)$/",
+          "/^clamp\\(/",
+          "/^[\\d.]+em$/",
+          "/^[2-9](\\.\\d+)?rem$/",
+          "inherit",
+          "0",
+          "100%"
+        ],
+        "/^(margin|padding|gap|row-gap|column-gap)/": [
+          "/^(\\s*(var\\(--[\\w-]+\\)|0|auto|inherit|initial|unset|-?[\\d.]+%|-?[\\d.]+em|(calc|clamp|max|min|env)\\(.*\\)|(49|[5-9]\\d|\\d{3,})px))+\\s*(!important)?$/"
+        ],
+        "/radius$/": [
+          "/^(\\s*(var\\(--(radius-[\\w-]+|radius|r-sm|r-md|r-lg)\\)|0|inherit|50%))+\\s*(!important)?$/"
+        ],
+        "font": [
+          "inherit",
+          "/var\\(--text-[\\w-]+\\)/"
+        ]
+      },
+      {
+        "message": "Use the tokens: var(--text-*) for type (fluid headings may use clamp()), var(--space-*) for spacing, var(--radius-*) for corners"
+      }
+    ]
+  }
+}

@@ -24,6 +24,19 @@ export const isOffline = (error) => error instanceof ApiError && error.status ==
 export const isSignedOut = (error) => error instanceof ApiError && error.code === 'SIGNED_OUT';
 export const SESSION_ENDED_EVENT = 'portal-session-ended';
 
+/**
+ * The test server is out of reach although this device is online: what stands
+ * in front of it (the tunnel) answered instead - an error page, not a reply
+ * from the server. Every reply from the server carries its clock stamp, or is
+ * its JSON. Not this device's own connection (that is isOffline).
+ */
+export const isServerUnreachable = (error) => error instanceof ApiError && error.code === 'SERVER_UNREACHABLE';
+/** Told after every request: `detail.reached` - the server answered (true), or the tunnel answered for it (false). */
+export const SERVER_REACH_EVENT = 'portal-server-reach';
+const announceReach = (reached) => {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(SERVER_REACH_EVENT, { detail: { reached } }));
+};
+
 /** Worth asking again: no connection, too slow, or the server momentarily overloaded. */
 export const isRetryable = (error) => error instanceof ApiError
   && (error.status === 0 || error.status === 408 || error.status === 429 || error.status >= 500);
@@ -52,6 +65,12 @@ export async function api(url, options = {}) {
   // Every reply keeps the exam's timers on the server's clock (server-clock.js).
   const stamp = response.headers?.get?.('x-server-time');
   if (stamp) recordServerTime(Number(stamp), sentAt, Date.now());
+  const fromServer = Boolean(stamp) || /json/i.test(response.headers?.get?.('content-type') || '');
+  if (!fromServer && response.status >= 500) {
+    announceReach(false);
+    throw new ApiError('The test server cannot be reached right now.', response.status, 'SERVER_UNREACHABLE');
+  }
+  if (fromServer) announceReach(true);
   if (response.status === 204) return null;
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {

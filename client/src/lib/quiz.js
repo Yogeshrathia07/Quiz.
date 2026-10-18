@@ -7,8 +7,8 @@ export const QUESTION_TYPE_LABELS = {
 };
 
 export const QUESTION_LAYOUTS = [
-  ['one', 'One at a time', 'One question on screen, with Next - and Previous unless you turn it off.'],
-  ['all', 'All on one page', 'One scrolling page with a single Submit at the end.']
+  ['one', 'One at a time', 'One question on screen at a time. Below: can students go back, move on early, and is there a timer on each?'],
+  ['all', 'All on one page', 'Every question on one scrolling page, answered in any order, with one Submit at the end.']
 ];
 
 /**
@@ -156,6 +156,9 @@ export function timerCoverage(questions, mix, typeSeconds) {
   return !timed ? 'none' : timed === drawn.length ? 'all' : 'some';
 }
 
+/** One time for every question: each type has the same. */
+export const sameForEveryType = (typeSeconds) => new Set(QUESTION_TYPES.map((type) => Number(typeSeconds?.[type]) || 0)).size === 1;
+
 /* ------------------------------------------------------ question draw ---- */
 
 const TYPE_SHORT = { mcq: 'MCQs', msq: 'MSQs', short: 'short answers' };
@@ -182,4 +185,29 @@ export function drawSummary(pool, mix, draw) {
       return `two students share about ${shared} of their ${drawn} ${TYPE_SHORT[type]}`;
     });
   return parts.length ? `${parts.join('; ')}.` : null;
+}
+
+/* ---------------------------------------------------- answer options ---- */
+
+/** Mirrors the server (domain/test-builder.js): a choice question has 2 to 10 options. */
+export const MIN_OPTIONS = 2;
+export const MAX_OPTIONS = 10;
+
+/** The question with one more, empty, option - none past MAX_OPTIONS. */
+export const withOptionAdded = (question) => (question.options.length >= MAX_OPTIONS ? question : { ...question, options: [...question.options, ''] });
+
+/**
+ * The question without option `position` - none below MIN_OPTIONS. The correct
+ * answers after it move up a place with their options; if it was the only
+ * correct one, none is marked, and the editor asks for one.
+ */
+export function withOptionRemoved(question, position) {
+  if (question.options.length <= MIN_OPTIONS) return question;
+  return {
+    ...question,
+    options: question.options.filter((_option, index) => index !== position),
+    correctOptions: question.correctOptions.map(Number)
+      .filter((index) => index !== position)
+      .map((index) => String(index > position ? index - 1 : index))
+  };
 }

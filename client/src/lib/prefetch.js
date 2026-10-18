@@ -30,6 +30,9 @@ export function routeData(href, role, origin = window.location.origin) {
   let url;
   try { url = new URL(href, origin); } catch { return []; }
   if (url.origin !== origin || url.pathname !== '/') return [];
+  // No account known on this device (signed out, or never signed in here): every
+  // read would be refused - a results link from an email, say - so none is started.
+  if (!role) return [];
   const query = url.searchParams;
   if (query.get('test') || query.get('attend')) return [];
   const admin = query.get('admin');
@@ -40,11 +43,15 @@ export function routeData(href, role, origin = window.location.origin) {
   if (page) return [];
   if (!admin) return HOME[role] || [];
   if (admin === 'portal') return HOME.admin;
+  if (admin === 'quizzes') return ['/api/admin/tests'];
+  if (admin === 'results') return ['/api/admin/tests', '/api/me/results'];
+  // Kept for saved addresses from before Quizzes and Results were separated.
   if (admin === 'tests') return ['/api/admin/tests', '/api/me/results'];
   if (admin === 'attendance') return query.get('session') ? [] : ['/api/admin/attendance'];
   if (admin === 'users') return ['/api/admin/users'];
   if (admin === 'create' || admin === 'edit') return [];
-  return [wholeClassPath(admin.toUpperCase())];
+  const answerList = query.get('rview') !== 'analysis' && ['students', 'responses'].includes(query.get('tab'));
+  return [wholeClassPath(admin.toUpperCase(), answerList ? query.get('af') || '' : '')];
 }
 
 /** The code the page at `href` is drawn with. */
@@ -61,7 +68,8 @@ export function routeScreens(href, role, origin = window.location.origin) {
   const admin = query.get('admin');
   if (!admin) return role === 'admin' ? [screens.admin, screens.facultyHome] : [screens.home];
   const inside = {
-    portal: screens.facultyHome, tests: screens.testList, create: screens.creator, edit: screens.creator, users: screens.users,
+    portal: screens.facultyHome, quizzes: screens.testList, results: screens.testList, tests: screens.testList,
+    create: screens.creator, edit: screens.creator, users: screens.users,
     attendance: query.get('session') ? screens.attendanceSession : screens.attendanceList
   }[admin] || screens.dashboard;
   return [screens.admin, inside];

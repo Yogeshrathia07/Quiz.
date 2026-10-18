@@ -85,6 +85,60 @@ test('the marks chart: its bars over the chosen range, the rest counted outside'
   assert.equal(view.histogram.outside, 1, '0% is below the range');
 });
 
+test('the marks chart along whole marks: one bar per mark on a short paper, never a bar no score can land in', () => {
+  // Out of 10: 10, 8, 6 and 0 marks.
+  const papers = ['OOO', 'OWO', 'WWO', 'WWW'].map((st, index) => student(`S${index}`, st));
+  const perMark = compute(matrixOf(papers), { selected: all, bins: null, byMarks: true }).histogram;
+  assert.equal(perMark.unit, 'marks');
+  assert.equal(perMark.bins.length, 11, 'asked for nothing: one bar for each of 0..10');
+  assert.deepEqual(perMark.bins.filter((bin) => bin.count).map((bin) => [bin.from, bin.count]), [[0, 1], [6, 1], [8, 1], [10, 1]]);
+  assert.ok(perMark.bins.every((bin) => bin.weight === 1));
+  const many = compute(matrixOf(papers), { selected: all, bins: 20, byMarks: true }).histogram;
+  assert.equal(many.bins.length, 11, 'twenty asked for, but there are only eleven possible scores');
+  const five = compute(matrixOf(papers), { selected: all, bins: 5, byMarks: true }).histogram;
+  assert.deepEqual(five.bins.map((bin) => [bin.from, bin.to, bin.last, bin.weight, bin.count]),
+    [[0, 2, false, 2, 1], [2, 4, false, 2, 0], [4, 6, false, 2, 0], [6, 8, false, 2, 1], [8, 10, true, 3, 2]], 'two marks a bar; 10 alone joins 8-9');
+  const big = compute({ questions: [{ id: 1, number: 1, type: 'short', worth: 100 }], students: [student('A', 'O')] }, { selected: new Set([0]), bins: null, byMarks: true }).histogram;
+  assert.deepEqual([big.bins.length, big.step, big.bins.at(-1).from, big.bins.at(-1).to], [10, 10, 90, 100], 'out of 100: ten bars, 90-100 the last');
+  // Papers out of different marks (a question not on one of them): equal slices of % as before.
+  const mixed = compute(matrixOf([student('A', 'OOO'), student('B', 'O.O')]), { selected: all, bins: null, byMarks: true }).histogram;
+  assert.deepEqual([mixed.unit, mixed.bins.length], ['percent', 10]);
+  assert.equal(compute(matrixOf(papers), { selected: all, bins: 5 }).histogram.unit, 'percent', 'and by default');
+});
+
+test('never more bars than the chart has room to press: more marks to a bar instead', () => {
+  const papers = ['OOO', 'OWO', 'WWO', 'WWW'].map((st, index) => student(`S${index}`, st));
+  const narrow = compute(matrixOf(papers), { selected: all, bins: null, byMarks: true, maxBars: 8 }).histogram;
+  assert.ok(narrow.bins.length <= 8 && narrow.step === 2 && narrow.capped, `${narrow.bins.length} bars of ${narrow.step}`);
+  assert.equal(narrow.bins.reduce((total, bin) => total + bin.count, 0), 4, 'every paper still in a bar');
+  const roomy = compute(matrixOf(papers), { selected: all, bins: null, byMarks: true, maxBars: 40 }).histogram;
+  assert.deepEqual([roomy.bins.length, roomy.capped], [11, false]);
+  const slices = compute(matrixOf([student('A', 'OOO'), student('B', 'O.O')]), { selected: all, bins: 20, byMarks: true, maxBars: 12 }).histogram;
+  assert.deepEqual([slices.unit, slices.bins.length, slices.capped], ['percent', 12, true]);
+});
+
+test('picking a score band or a bar lists those students; each chart still shows the rest, its pick among them', () => {
+  const papers = [student('Asha', 'OOO'), student('Ben', 'OWO'), student('Cara', 'WWO'), student('Dev', 'WWW'), student('Esha', 'OOQ')];
+  const banded = compute(matrixOf(papers), { selected: all, bins: null, byMarks: true, filters: { bands: ['80'] } });
+  assert.deepEqual(banded.shown.map((row) => row.student.name), ['Ben'], '80% is in 80-90%');
+  assert.deepEqual(banded.bands.map((band) => band.count), [1, 1, 0, 1, 0, 1, 1], 'the bands are all still there');
+  assert.equal(banded.histogram.bins.reduce((total, bin) => total + bin.count, 0), 1, 'the bars show the band picked');
+  const pending = compute(matrixOf(papers), { selected: all, filters: { bands: ['pending'] } });
+  assert.deepEqual(pending.shown.map((row) => row.student.name), ['Esha']);
+  const bar = { unit: 'marks', from: 6, to: 8, last: false };
+  const barred = compute(matrixOf(papers), { selected: all, bins: 5, byMarks: true, filters: { bar } });
+  assert.deepEqual(barred.shown.map((row) => row.student.name), ['Cara'], '6 marks: in 6-7, not 8');
+  assert.equal(barred.histogram.bins.reduce((total, bin) => total + bin.count, 0), 4, 'the bars all still there');
+  assert.deepEqual(barred.bands.filter((band) => band.count).map((band) => band.id), ['50'], 'the bands show the bar picked');
+  assert.equal(barred.stats.average, 60, 'and every figure is the group\'s');
+});
+
+test('part marks are told apart, so a one-mark bar can say it holds them', () => {
+  const half = compute(matrixOf([student('A', 'OOP', { pm: { 2: 2.5 } }), student('B', 'OOO')]), { selected: all, bins: null, byMarks: true }).histogram;
+  assert.equal(half.fractions, true);
+  assert.equal(half.bins[6].count, 1, '6.5 marks sits in the bar from 6');
+});
+
 test('a marks range: both ends included, fully marked papers only; the whole 0-100 is no filter', () => {
   assert.equal(rangeOf({ from: 0, to: 100 }), null);
   assert.equal(rangeOf({ from: 70, to: 40 }), null, 'backwards makes no sense');
@@ -150,3 +204,73 @@ test('sorting: by a question, unmarked always last', () => {
 });
 
 function round(value) { return Math.round(value * 10) / 10; }
+
+test('answer cohorts narrow figures but preserve the full class ranks and comparison baseline', () => {
+  const papers = [student('Top', 'OOO'), student('Middle', 'WWO'), student('Zero', 'WWW'), student('Pending', 'OOQ')];
+  const matrix = matrixOf(papers);
+  const baseline = compute(matrix, { selected: all, bins: 5, byMarks: true });
+  const cohort = compute(matrix, { selected: all, bins: 5, byMarks: true, filters: { studentIds: new Set(['Middle', 'Pending']) } });
+  assert.deepEqual(cohort.shown.map((row) => [row.student.id, row.rank]), [['Middle', 2], ['Pending', null]]);
+  assert.deepEqual(cohort.classFigures, baseline.classFigures, 'class average, median, max and last rank stay the class baseline');
+  assert.deepEqual([cohort.stats.inGroup, cohort.stats.counted, cohort.stats.pendingPapers, cohort.stats.average, cohort.stats.averageMarks], [2, 1, 1, 60, 6]);
+  assert.equal(cohort.stats.papers, 4, 'the full submitted class remains known');
+  assert.equal(cohort.bands.reduce((sum, band) => sum + band.count, 0), 2);
+  assert.equal(cohort.histogram.bins.reduce((sum, bin) => sum + bin.count, 0), 1);
+  assert.deepEqual(cohort.questions.map((question) => [question.marked, question.pending, question.right]), [[2, 0, 1], [2, 0, 1], [1, 1, 1]]);
+  assert.deepEqual(cohort.rows.map((row) => row.student.id), baseline.rows.map((row) => row.student.id), 'filter menus can still describe the class');
+});
+
+test('an empty answer cohort stays genuinely empty, while null/undefined impose no restriction', () => {
+  const matrix = matrixOf([student('Top', 'OOO'), student('Middle', 'WWO'), student('Pending', 'OOQ')]);
+  const baseline = compute(matrix, { selected: all });
+  for (const studentIds of [[], new Set(), ['not-a-student']]) {
+    const cohort = compute(matrix, { selected: all, filters: { studentIds } });
+    assert.deepEqual(cohort.shown, []);
+    assert.deepEqual([cohort.stats.inGroup, cohort.stats.counted, cohort.stats.pendingPapers, cohort.stats.average], [0, 0, 0, null]);
+    assert.equal(cohort.bands.reduce((sum, band) => sum + band.count, 0), 0);
+    assert.equal(cohort.histogram.bins.reduce((sum, bin) => sum + bin.count, 0), 0);
+    assert.ok(cohort.questions.every((question) => question.marked === 0 && question.pending === 0));
+    assert.deepEqual(cohort.classFigures, baseline.classFigures);
+  }
+  for (const studentIds of [null, undefined]) {
+    assert.deepEqual(compute(matrix, { selected: all, filters: { studentIds } }).shown, baseline.shown);
+  }
+});
+
+test('answer cohorts intersect search, outcome and class comparisons without reranking the group', () => {
+  const matrix = matrixOf([student('Top', 'OOO'), student('Middle', 'WWO'), student('Zero', 'WWW'), student('Pending', 'OOQ')]);
+  const students = ['Middle', 'Zero', 'Pending'];
+  const names = (extra) => compute(matrix, { selected: all, filters: { studentIds: students, ...extra } }).shown.map((row) => row.student.id);
+  assert.deepEqual(names({ search: 'mid' }), ['Middle']);
+  assert.deepEqual(names({ marking: ['pending'] }), ['Pending']);
+  assert.deepEqual(names({ average: ['above'] }), ['Middle'], 'compared with full-class 53.3%, not subgroup 30%');
+  assert.deepEqual(names({ median: ['above'] }), ['Middle']);
+  assert.deepEqual(names({ rankRange: { from: 2, to: 2 } }), ['Middle']);
+  assert.deepEqual(names({ marksRange: { from: 0, to: 0 } }), ['Zero']);
+  assert.deepEqual(names({ bands: ['pending'] }), ['Pending']);
+});
+
+test('the answer cohort constrains both charts even when a band or bar has its own selected group', () => {
+  const matrix = matrixOf([student('Top', 'OOO'), student('Middle', 'WWO'), student('Zero', 'WWW'), student('Pending', 'OOQ')]);
+  const options = { selected: all, bins: 5, byMarks: true };
+  const banded = compute(matrix, { ...options, filters: { studentIds: ['Middle', 'Pending'], bands: ['50'] } });
+  assert.deepEqual(banded.shown.map((row) => row.student.id), ['Middle']);
+  assert.equal(banded.bands.reduce((sum, band) => sum + band.count, 0), 2, 'band pick is relaxed, but never the answer cohort');
+  assert.equal(banded.histogram.bins.reduce((sum, bin) => sum + bin.count, 0), 1);
+  const barred = compute(matrix, { ...options, filters: { studentIds: ['Middle', 'Zero'], bar: { unit: 'marks', from: 6, to: 8, last: false } } });
+  assert.deepEqual(barred.shown.map((row) => row.student.id), ['Middle']);
+  assert.equal(barred.bands.reduce((sum, band) => sum + band.count, 0), 1);
+  assert.equal(barred.histogram.bins.reduce((sum, bin) => sum + bin.count, 0), 2, 'bar pick is relaxed, but never the answer cohort');
+});
+
+test('answer cohort IDs normalize numeric legacy IDs and do not mutate the matrix or selections', () => {
+  const matrix = matrixOf([student('Top', 'OOO', { id: 1 }), student('Middle', 'WWO', { id: 2 })]);
+  const studentIds = new Set(['2', 2, 'missing']);
+  const before = JSON.stringify(matrix);
+  const selectedBefore = [...all];
+  const view = compute(matrix, { selected: all, filters: { studentIds } });
+  assert.deepEqual(view.shown.map((row) => [row.student.id, row.rank]), [[2, 2]]);
+  assert.equal(JSON.stringify(matrix), before);
+  assert.deepEqual([...studentIds], ['2', 2, 'missing']);
+  assert.deepEqual([...all], selectedBefore);
+});

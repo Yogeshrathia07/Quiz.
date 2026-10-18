@@ -60,7 +60,9 @@ export function securityHeaders(req, res, next) {
     'X-Permitted-Cross-Domain-Policies': 'none',
     'Referrer-Policy': 'same-origin',
     'X-Content-Type-Options': 'nosniff',
-    'X-Frame-Options': 'DENY'
+    'X-Frame-Options': 'DENY',
+    // A private campus portal: no page of it belongs in a search engine (robots.txt says so too).
+    'X-Robots-Tag': 'noindex, nofollow'
   });
   // Once a browser has reached the site over https, it never tries plain http again.
   if (req.secure) res.set('Strict-Transport-Security', 'max-age=31536000');

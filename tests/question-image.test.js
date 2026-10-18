@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTest } from '../src/domain/test-builder.js';
-import { imageField, imageView, shownGraceMs } from '../src/domain/question-image.js';
+import { imageField, imageIdOf, imageView, shownGraceMs } from '../src/domain/question-image.js';
 import { saveQuestionImage } from '../src/services/question-image-service.js';
 
 const picture = { id: 'AbCdEfGhIjKlMnOpQrStUv', width: 1600, height: 900 };
@@ -26,6 +26,19 @@ test('a picture that is not one the editor made is refused', () => {
 test('the paper gets where to fetch the picture and its size, never more', () => {
   assert.deepEqual(imageView(picture), { url: `/api/question-images/${picture.id}`, width: 1600, height: 900 });
   assert.equal(imageView(null), null);
+});
+
+test('a picture of a known kind has an address ending in it, so Cloudflare keeps a copy near the students', () => {
+  assert.equal(imageView({ ...picture, ext: 'webp' }).url, `/api/question-images/${picture.id}.webp`);
+  assert.equal(imageView({ ...picture, ext: 'jpg' }).url, `/api/question-images/${picture.id}.jpg`);
+  assert.equal(imageView({ ...picture, ext: 'exe' }).url, `/api/question-images/${picture.id}`);
+  // The editor's picture keeps its kind; anything else is dropped.
+  assert.deepEqual(imageField({ ...picture, ext: 'png' }, 'Question 1'), { ...picture, ext: 'png' });
+  assert.deepEqual(imageField({ ...picture, ext: 'svg' }, 'Question 1'), picture);
+  // Either address finds the same picture; nothing else is a picture's address.
+  assert.equal(imageIdOf(picture.id), picture.id);
+  assert.equal(imageIdOf(`${picture.id}.webp`), picture.id);
+  for (const file of [`${picture.id}.exe`, `${picture.id}.webp.png`, '../etc/passwd', 'short.webp', '', null]) assert.equal(imageIdOf(file), null, String(file));
 });
 
 test('a question with a picture waits longer for "on screen" than one without', () => {

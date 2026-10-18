@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ListFilter, X } from 'lucide-react';
 import { useFloatingPanel } from '../lib/useFloatingPanel.js';
 import { allOptionIds, applyFilters, optionCounts, packColumns } from '../lib/filters.js';
+import { useAutoHideScrollbar } from '../lib/useAutoHideScrollbar.js';
 
 /**
  * Columns for the panel's groups at this window width: one on a phone (the
@@ -29,14 +30,18 @@ const columnCount = (width) => (width <= 560 ? 1 : width >= 1180 ? 4 : width >= 
  * `extra` is a control of the list's own drawn above the groups (the
  * Analysis tab's marks range); `extraActive` says how many filters it holds,
  * `extraLabel` names it when it is the only one, and Reset calls `onReset`.
+ * `sections`: custom { id, title, content, weight } blocks within the scrolling
+ * columns (attendance's calendar). Weight estimates their height for packing.
+ * `autoHideScrollbar`: opt in to the slim, activity-only blue scrollbar.
  */
 export function FilterMenu({
   groups, rows, selected, onChange, icons = {}, title = 'Filter', allLabel = 'Everyone',
   counts: suppliedCounts = null, total = null, shown: suppliedShown = null,
   sorts = null, sort = null, onSort = () => {}, sortHint = null,
-  extra = null, extraActive = 0, extraLabel = null, onReset = null
+  extra = null, extraActive = 0, extraLabel = null, onReset = null, sections = [], autoHideScrollbar = false
 }) {
   const [open, setOpen] = useState(false);
+  const scrollActivity = useAutoHideScrollbar();
   const { holder, panel, style, isDialog, reposition } = useFloatingPanel(open, setOpen, 'right', { dialog: true });
   const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
@@ -72,15 +77,17 @@ export function FilterMenu({
   const described = `${title}: ${summary}${sorted ? `, ${field.label} ${way.label}` : ''}`;
 
   // Its fields, its heading and the direction switch under them.
-  const blocks = sorts ? [{ id: 'sort', title: 'Sort by', options: sorts, isSort: true, weight: sorts.length + (sortHint ? 4 : 2) }, ...listed] : listed;
+  // Optional custom controls share the scrollable area, so even a short phone can reach Done.
+  const blocks = [...(sorts ? [{ id: 'sort', title: 'Sort by', options: sorts, isSort: true, weight: sorts.length + (sortHint ? 4 : 2) }, ...listed] : listed), ...sections];
   const columns = packColumns(blocks, columnCount(width));
-  // A new number of columns changes the panel's size: place it again.
-  useLayoutEffect(() => { if (open) reposition(); }, [open, columns.length, reposition]);
+  const layoutKey = sections.map((section) => `${section.id}:${section.weight}`).join(',');
+  // Columns or a custom control's height changing can move the panel.
+  useLayoutEffect(() => { if (open) reposition(); }, [open, columns.length, layoutKey, reposition]);
 
   const block = (group) => (
     <fieldset key={group.id} className={`filter-group${group.isSort ? ' filter-sort' : ''}`}>
       <legend>{group.title}</legend>
-      {group.isSort ? <>
+      {group.content ? group.content : group.isSort ? <>
         {group.options.map((option) => {
           const on = field.id === option.id;
           return (
@@ -150,7 +157,7 @@ export function FilterMenu({
             </button>
           </div>
           {extra && <div className="filter-extra">{extra}</div>}
-          <div className="filter-groups">
+          <div className={`filter-groups${autoHideScrollbar ? ' auto-hide-scrollbar' : ''}`} {...(autoHideScrollbar ? scrollActivity : {})}>
             {columns.map((column) => <div key={column[0].id} className="filter-col">{column.map(block)}</div>)}
           </div>
           <div className="filter-panel-foot">

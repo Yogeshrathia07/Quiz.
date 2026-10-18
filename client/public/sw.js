@@ -14,6 +14,11 @@
  *    are fetched fresh when possible - a paper should always run the newest
  *    version - and served from the cache when the network is gone, so
  *    reloading mid-test still opens the test.
+ *  - When the server is off, what stands in front of it (the tunnel) answers
+ *    with its own error page. That is not this app: the saved page is served
+ *    instead, and opens on the app's Server offline page (or the paper held on
+ *    the device, on a test link) until the server is back. The picture on that
+ *    page is kept when this worker installs, so it shows while the server is away.
  *
  * The API is never cached. An answer, a deadline or a registration must always
  * come from the server, and a stale one would be worse than an error. Unsent
@@ -21,11 +26,33 @@
  */
 // Bump this whenever the client shell changes. This makes an installed copy of
 // the app discard the prior shell instead of leaving people on old CSS.
-const CACHE = 'quiz-shell-v3';
+const CACHE = 'quiz-shell-v5';
 const SHELL = '/';
+const OFFLINE_PICTURE = '/server-offline.webp';
+
+/**
+ * The page and the files it opens with (its script and styles, named in it),
+ * kept together - so a device that takes a new version just before the server
+ * goes away can still open it (on the Server offline page) with nothing else.
+ */
+const keepShellWithFiles = (cache) => fetch(SHELL, { cache: 'no-store' }).then((response) => {
+  if (!response.ok) return undefined;
+  return response.clone().text().then((html) => {
+    const named = (text) => [...new Set(text.match(/\/assets\/[^"'\s)]+/g) || [])];
+    // A stylesheet names its own files too: its fonts (the Latin ones - the others are for other alphabets).
+    const keep = (file) => cache.add(file).then(() => (file.endsWith('.css')
+      ? cache.match(file).then((hit) => hit.text()).then((css) => Promise.all(named(css).filter((font) => /latin/.test(font))
+        .map((font) => cache.add(font).catch(() => undefined))))
+      : undefined)).catch(() => undefined);
+    return Promise.all(named(html).map(keep)).then(() => cache.put(SHELL, response));
+  });
+}).catch(() => undefined);
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.add(SHELL)).catch(() => undefined));
+  event.waitUntil(caches.open(CACHE).then((cache) => Promise.all([
+    keepShellWithFiles(cache),
+    cache.add(OFFLINE_PICTURE).catch(() => undefined)
+  ])).catch(() => undefined));
   self.skipWaiting();
 });
 
@@ -37,14 +64,20 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-const isAsset = (url) => url.pathname.startsWith('/assets/');
+const isAsset = (url) => url.pathname.startsWith('/assets/') || url.pathname === OFFLINE_PICTURE;
 
-/** The page from the network, kept for next time when it came. */
+/**
+ * The page from the network, kept for next time when it came. An error page
+ * from what stands in front of the server (5xx: the server off, or the tunnel
+ * down) is not the app: the saved page instead, when there is one.
+ */
 const freshShell = (request) => fetch(request).then((response) => {
   if (response.ok) {
     const copy = response.clone();
     caches.open(CACHE).then((cache) => cache.put(SHELL, copy)).catch(() => undefined);
+    return response;
   }
+  if (response.status >= 500) return caches.match(SHELL).then((hit) => hit || response);
   return response;
 });
 

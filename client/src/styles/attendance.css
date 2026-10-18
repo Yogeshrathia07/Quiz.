@@ -3,43 +3,52 @@
  * page background, content in cards, the primary button for the one
  * main action on each screen.
  */
-.min-page{--faint:#AAB6BC;display:grid;gap:16px}
-.min-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;color:#F7FAFC}
-.min-head h1{margin:0;color:#F7FAFC;font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em;line-height:1.2}
-.min-head p{margin:6px 0 0;color:#AAB6BC;font-size:.92rem}
-.min-back{justify-self:start;margin-bottom:-6px;color:#AAB6BC;font-size:.85rem;font-weight:600;text-decoration:none}
-.min-back:hover{color:#1598D1}
-.min-card{padding:22px}
-.min-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.min-page{--faint:var(--text-muted);display:grid;gap:var(--space-4)}
+.min-head{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-4);color:var(--text)}
+.min-head h1{margin:0;color:var(--text);font-size:clamp(1.6rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em;line-height:1.2}
+.min-head p{margin:var(--space-1-5) 0 0;color:var(--text-muted);font-size:var(--text-base)}
+.min-back{justify-self:start;margin-bottom:calc(var(--space-1-5) * -1);color:var(--text-muted);font-size:var(--text-base);font-weight:600;text-decoration:none}
+.min-back:hover{color:var(--primary-text)}
+.min-card{padding:var(--space-5)}
+.min-actions{display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-4)}
 
-.min-list{margin:0;padding:0;list-style:none;border-radius:16px;background:#2A2D31;color:var(--ink);overflow:hidden}
+.min-list{margin:0;padding:0;list-style:none;border-radius:var(--radius-lg);background:var(--bg-card);color:var(--ink);overflow:hidden}
 .min-list li+li{border-top:1px solid var(--line)}
-.min-list a{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:15px 20px;color:inherit;text-decoration:none}
+.min-list a{display:flex;align-items:center;justify-content:space-between;gap:var(--space-4);padding:var(--space-3-5) var(--space-5);color:inherit;text-decoration:none}
 .min-list a:hover{background:var(--wash)}
-.min-list-main{display:grid;gap:3px;min-width:0}
+.min-list-main{display:grid;gap:var(--space-0-5);min-width:0}
 .min-list-main strong{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.min-list-main small,.min-list-side{color:var(--muted);font-size:.82rem}
-.min-list-side{display:flex;align-items:center;gap:14px;white-space:nowrap}
-.min-state{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:700}
-.min-state::before{content:"";width:8px;height:8px;border-radius:50%;background:#3A3E43}
+.min-list-main small,.min-list-side{color:var(--muted);font-size:var(--text-sm)}
+.min-list-side{display:flex;align-items:center;gap:var(--space-3-5);white-space:nowrap}
+.min-state{display:inline-flex;align-items:center;gap:var(--space-1-5);color:var(--muted);font-weight:700}
+.min-state::before{content:"";width:8px;height:8px;border-radius:var(--radius-pill);background:var(--bg-input)}
 .min-state.is-open{color:var(--success)}
-.min-state.is-open::before{background:#27B66F}
+.min-state.is-open::before{background:var(--ok)}
 
 /* Create */
-.att-create{background:#2A2D31;color:var(--ink)}
-.att-create .text-input{margin-bottom:6px}
-.att-create-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:4px 24px;margin-top:10px}
-.att-create .location-settings{margin-top:10px;padding-top:12px;border-top:1px solid var(--line)}
+.att-create{background:var(--bg-card);color:var(--ink)}
+.att-create .text-input{margin-bottom:var(--space-1-5)}
+.att-create-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:var(--space-1) var(--space-6);margin-top:var(--space-2-5)}
+.att-create .location-settings{margin-top:var(--space-2-5);padding-top:var(--space-3);border-top:1px solid var(--line)}
+.att-list-head .att-create-heading{gap:var(--space-3)}
+.att-create-heading h1{text-box-trim:trim-both;text-box-edge:cap alphabetic}
 
 /* Live session */
+.att-session-title{display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:var(--space-1-5) var(--space-3);flex:1;min-width:0}
+.att-session-title h1{overflow-wrap:anywhere;text-box-trim:trim-both;text-box-edge:cap alphabetic}
+.att-session-title p{grid-column:2;margin:0;overflow-wrap:anywhere}
+.att-session-head>.action-menu{flex:none}
+.att-back{display:grid;place-items:center;flex:none;align-self:center;width:44px;height:44px;box-sizing:border-box;padding:0;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-raised);color:var(--text-soft);text-decoration:none;cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.att-back:hover,.att-back:focus-visible{background:var(--primary-text);border-color:var(--primary-text);color:var(--on-accent)}
+.att-back:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
 /* The list on the left, the QR and the count on the right */
-.att-board{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,440px);gap:16px;align-items:start}
-.att-board-side{display:flex;flex-direction:column;gap:16px;min-width:0}
-.att-qr{display:grid;justify-items:center;align-content:center;gap:10px;padding:24px;border-radius:16px;background:#2A2D31;color:var(--ink);text-align:center}
+.att-board{display:grid;grid-template-columns:minmax(0,1fr) clamp(300px,32vw,440px);gap:var(--space-4);align-items:start}
+.att-board-side{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.att-qr{display:grid;justify-items:center;align-content:center;gap:var(--space-2-5);padding:var(--space-6);border-radius:var(--radius-lg);background:var(--bg-card);color:var(--ink);text-align:center}
 .att-qr-button{padding:0;border:0;background:none;cursor:zoom-in;line-height:0}
 .att-qr-button:disabled{cursor:default}
-.att-qr-code{display:block;width:min(100%,340px);height:auto;border-radius:10px}
-.att-qr-wait{display:grid;place-items:center;width:min(100%,340px);aspect-ratio:1;padding:16px;border-radius:12px;background:var(--bg-raised);color:var(--muted);font-size:.9rem;line-height:1.4}
+.att-qr-code{display:block;width:min(100%,340px);height:auto;border-radius:var(--radius-sm)}
+.att-qr-wait{display:grid;place-items:center;width:min(100%,340px);aspect-ratio:1;padding:var(--space-4);border-radius:var(--radius-md);background:var(--bg-raised);color:var(--muted);font-size:var(--text-base);line-height:1.4}
 /* Each new code fades in over the last: squares dark in both stay solid, the
    rest cross over on one gentle curve, old and new in step - and the code is
    crisp for most of each change (LiveQr.jsx: FADE_MS). The fill fades, not
@@ -50,150 +59,164 @@
 @keyframes att-qr-enter{from{fill-opacity:0}to{fill-opacity:1}}
 @keyframes att-qr-leave{from{fill-opacity:1}to{fill-opacity:0}}
 @media (prefers-reduced-motion:reduce){.att-qr-enter{animation:none}.att-qr-leave{display:none}}
-.att-qr p{margin:0;color:var(--muted);font-size:.85rem}
+.att-qr p{margin:0;color:var(--muted);font-size:var(--text-base)}
 .att-qr-closed{min-height:260px}
-.att-qr-closed strong{font-size:1.1rem}
+.att-qr-closed strong{font-size:var(--text-md)}
 .att-qr-closed p{max-width:340px;line-height:1.5}
 /* Full screen: the page stays behind, blurred - the same scrim as the test's QR preview. */
-.att-qr-full{position:fixed;inset:0;z-index:300;display:grid;place-content:center;justify-items:center;gap:10px;padding:24px;background:rgba(14,15,17,.5);backdrop-filter:blur(10px) saturate(115%);color:#F7FAFC;text-align:center;cursor:zoom-out;animation:modal-fade-in .16s ease-out}
+.att-qr-full{position:fixed;inset:0;z-index:300;display:grid;place-content:center;justify-items:center;gap:var(--space-2-5);padding:var(--space-6);background:rgb(var(--ink-rgb) / .5);backdrop-filter:blur(10px) saturate(115%);color:var(--text);text-align:center;cursor:zoom-out;animation:modal-fade-in .16s ease-out}
 /* The build adds the -webkit- copy Safari needs; writing both by hand made it keep only that one. */
-@supports not (backdrop-filter:blur(1px)){.att-qr-full{background:rgba(14,15,17,.92)}}
+@supports not (backdrop-filter:blur(1px)){.att-qr-full{background:rgb(var(--ink-rgb) / .92)}}
 .att-qr-full h1{margin:0;font-size:clamp(1.3rem,3vw,2.2rem);font-weight:700;letter-spacing:-.04em}
-.att-qr-full-code{width:min(90vw,76vh);margin-top:14px;line-height:0}
-.att-qr-full .att-qr-code,.att-qr-full .att-qr-wait{width:100%;border-radius:14px}
-.att-qr-full p{margin:0;color:#AAB6BC;font-size:clamp(.95rem,1.6vw,1.2rem)}
+.att-qr-full-code{width:min(90vw,76vh);margin-top:var(--space-3-5);line-height:0}
+.att-qr-full .att-qr-code,.att-qr-full .att-qr-wait{width:100%;border-radius:var(--radius-md)}
+.att-qr-full p{margin:0;color:var(--text-muted);font-size:clamp(.95rem,1.6vw,1.2rem)}
 /* Over the list: search, filter, Excel, Add student */
-.att-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:67px;padding:12px 16px 14px;border-bottom:1px solid #474C52}
-.att-toolbar .button{display:inline-flex;align-items:center;gap:6px;flex:none}
+.att-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-2);min-height:67px;padding:var(--space-3) var(--space-4) var(--space-3-5);border-bottom:1px solid var(--border)}
+.att-toolbar .button{display:inline-flex;align-items:center;gap:var(--space-1-5);flex:none}
 /* Marked / Absent: quiet tabs over the toolbar, underlined like the dashboard's */
-.att-tabs{display:flex;gap:4px;padding:6px 12px 0;border-bottom:1px solid #474C52}
-.att-tabs button{position:relative;display:inline-flex;align-items:center;gap:7px;min-height:40px;padding:0 10px;border:0;background:none;color:var(--text-2);font:inherit;font-size:.86rem;font-weight:700;cursor:pointer}
+.att-tabs{display:flex;gap:var(--space-1);padding:var(--space-1-5) var(--space-3) 0;border-bottom:1px solid var(--border)}
+.att-tabs button{position:relative;display:inline-flex;align-items:center;gap:var(--space-1-5);min-height:40px;padding:0 var(--space-2-5);border:0;background:none;color:var(--text-2);font:inherit;font-size:var(--text-base);font-weight:700;cursor:pointer}
 .att-tabs button:hover{color:var(--text)}
 .att-tabs button.is-on{color:var(--text)}
-.att-tabs button.is-on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:2px;background:var(--primary)}
-.att-tabs button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px;border-radius:8px}
-.att-tab-count{min-width:22px;padding:1px 7px;border-radius:999px;background:var(--bg-raised);color:var(--text-2);font-size:.72rem;font-variant-numeric:tabular-nums;text-align:center}
-.att-tabs button.is-on .att-tab-count{background:rgba(21,152,209,.2);color:var(--text)}
-[data-area] .att-toolbar>.att-selection{display:flex;flex:1 1 auto;flex-wrap:wrap;align-items:center;gap:8px}
-.att-selection strong{margin-right:4px;font-size:.9rem;font-variant-numeric:tabular-nums}
+.att-tabs button.is-on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;border-radius:var(--radius-sm);background:var(--primary)}
+.att-tabs button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px;border-radius:var(--radius-sm)}
+.att-tab-count{min-width:22px;padding:var(--space-0-5) var(--space-1-5);border-radius:var(--radius-pill);background:var(--bg-raised);color:var(--text-2);font-size:var(--text-xs);font-variant-numeric:tabular-nums;text-align:center}
+.att-tabs button.is-on .att-tab-count{background:rgb(var(--primary-rgb) / .2);color:var(--text)}
+[data-area] .att-toolbar>.att-selection{display:flex;flex:1 1 auto;flex-wrap:wrap;align-items:center;gap:var(--space-2)}
+.att-selection strong{margin-right:var(--space-1);font-size:var(--text-base);font-variant-numeric:tabular-nums}
 .att-selection .att-selection-clear{margin-left:auto}
 
 /* Add a student: registered user or guest */
 .student-analysis-sheet.att-add-dialog{position:relative;width:min(100%,520px)}
-.att-add-dialog h1{margin:0 48px 4px 0;font-size:1.4rem;font-weight:700;letter-spacing:-.03em}
-.att-add-dialog .segmented{margin-bottom:16px}
+.att-add-dialog h1{margin:0 var(--space-12) var(--space-1) 0;font-size:var(--text-xl);font-weight:700;letter-spacing:-.03em}
+.att-add-dialog .segmented{margin-bottom:var(--space-4)}
 .att-add-body{height:min(300px,52vh)}
-.att-add-registered{display:grid;grid-template-rows:auto minmax(0,1fr);align-content:start;gap:10px;height:100%}
+.att-add-registered{display:grid;grid-template-rows:auto minmax(0,1fr);align-content:start;gap:var(--space-2-5);height:100%}
 .att-add-registered .help{margin:0}
-.att-search-error{color:var(--danger,#EF5B5F)}
-.att-people{display:grid;align-self:start;max-height:100%;margin:0;padding:0;overflow:auto;list-style:none;border:1px solid #474C52;border-radius:12px}
-.att-people li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px}
-.att-people li+li{border-top:1px solid #474C52}
-.att-person{display:grid;gap:2px;min-width:0}
+.att-search-error{color:var(--danger)}
+.att-people{display:grid;align-self:start;max-height:100%;margin:0;padding:0;overflow:auto;list-style:none;border:1px solid var(--border);border-radius:var(--radius-md)}
+.att-people li{display:flex;align-items:center;justify-content:space-between;gap:var(--space-3);padding:var(--space-2-5) var(--space-3-5)}
+.att-people li+li{border-top:1px solid var(--border)}
+.att-person{display:grid;gap:var(--space-0-5);min-width:0}
 .att-person strong,.att-person small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.att-person small{color:var(--muted);font-size:.8rem}
-.att-person-done{display:inline-flex;align-items:center;gap:4px;color:#1BA566;font-size:.82rem;font-weight:700;white-space:nowrap}
-.att-add-guest{display:grid;gap:6px}
-.att-add-guest .button{margin-top:10px}
-.att-add-dialog .min-actions{margin-top:18px}
+.att-person small{color:var(--muted);font-size:var(--text-sm)}
+.att-person-done{display:inline-flex;align-items:center;gap:var(--space-1);color:var(--ok-text);font-size:var(--text-sm);font-weight:700;white-space:nowrap}
+.att-add-guest{display:grid;gap:var(--space-1-5)}
+.att-add-guest .button{margin-top:var(--space-2-5)}
+.att-add-dialog .min-actions{margin-top:var(--space-4)}
 
-.att-side{display:flex;flex-direction:column;gap:12px;padding:24px;border-radius:16px;background:#2A2D31;color:var(--ink)}
-.att-count{display:flex;align-items:baseline;gap:8px}
+.att-side{display:flex;flex-direction:column;gap:var(--space-3);padding:var(--space-6);border-radius:var(--radius-lg);background:var(--bg-card);color:var(--ink)}
+.att-count{display:flex;align-items:baseline;gap:var(--space-2)}
 .att-count strong{font-size:3rem;font-weight:700;letter-spacing:-.05em;line-height:1;font-variant-numeric:tabular-nums}
 .att-count span{color:var(--muted);font-weight:600}
-.att-breakdown{display:grid;gap:6px;margin:0;padding-bottom:4px;font-size:.9rem}
-.att-breakdown span{display:flex;align-items:center;gap:8px}
-.dot{display:inline-block;width:8px;height:8px;border-radius:50%}
-.dot.is-present{background:#27B66F}
-.dot.is-pending{background:#1598D1}
-.dot.is-rejected{background:#3A3E43}
+.att-breakdown{display:grid;gap:var(--space-1-5);margin:0;padding-bottom:var(--space-1);font-size:var(--text-base)}
+.att-breakdown span{display:flex;align-items:center;gap:var(--space-2)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:var(--radius-pill)}
+.dot.is-present{background:var(--ok)}
+.dot.is-pending{background:var(--primary)}
+.dot.is-rejected{background:var(--bg-input)}
 .dot.is-absent{background:transparent;box-shadow:inset 0 0 0 1.5px var(--text-3)}
 /* Absent and phone flags open their list */
-.att-breakdown-link{display:flex;align-items:center;gap:8px;width:max-content;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
-.att-breakdown-link:hover{color:var(--primary)}
-.att-breakdown-link:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:4px}
+.att-breakdown-link{display:flex;align-items:center;gap:var(--space-2);width:max-content;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.att-breakdown-link:hover{color:var(--primary-text)}
+.att-breakdown-link:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:var(--radius-sm)}
 .att-breakdown-link.is-flag{color:var(--warn)}
-.att-breakdown-link.is-flag svg{margin:0 -1px 0 -2px}
-.att-hint{margin:0;color:var(--muted);font-size:.8rem;text-align:center}
+.att-breakdown-link.is-flag svg{margin:0 calc(var(--space-0-5) * -1) 0 calc(var(--space-0-5) * -1)}
+.att-hint{margin:0;color:var(--muted);font-size:var(--text-sm);text-align:center}
 
-.att-table{padding:4px 0;overflow-x:auto;background:#2A2D31;color:var(--ink)}
-.att-table table{width:100%;border-collapse:collapse;font-size:.9rem}
-.att-table th{padding:12px 16px;color:var(--muted);font-size:.7rem;font-weight:700;letter-spacing:.06em;text-align:left;text-transform:uppercase}
-.att-table td{padding:11px 16px;border-top:1px solid #474C52;vertical-align:middle}
+.att-table{padding:var(--space-1) 0;overflow-x:auto;background:var(--bg-card);color:var(--ink)}
+.att-table table{width:100%;border-collapse:collapse;font-size:var(--text-base)}
+.att-table th{padding:var(--space-3) var(--space-4);color:var(--muted);font-size:var(--text-xs);font-weight:700;letter-spacing:.06em;text-align:left;text-transform:uppercase}
+.att-table td{padding:var(--space-2-5) var(--space-4);border-top:1px solid var(--border);vertical-align:middle}
 .att-table tr.is-removed td:not(.att-status-cell){opacity:.5}
 /* The number, and over it the row's tick box: shown on hover, on focus,
    while rows are chosen - and always on a touch screen. */
 .att-table .att-num{position:relative;width:44px;color:var(--faint);font-variant-numeric:tabular-nums}
-.att-pick{position:absolute;inset:0;z-index:1;display:flex;align-items:center;padding-left:16px;cursor:pointer;opacity:0}
+.att-pick{position:absolute;inset:0;z-index:1;display:flex;align-items:center;padding-left:var(--space-4);cursor:pointer;opacity:0}
 /* Faded, the number would stack over the box and take its clicks. */
 .att-index{pointer-events:none}
 .att-pick input{position:absolute;opacity:0;pointer-events:none}
-.att-pick-box{display:grid;place-items:center;width:18px;height:18px;border:1.5px solid #5A6066;border-radius:5px;background:var(--bg-card);color:#FFFFFF;transition:background .12s,border-color .12s}
+.att-pick-box{display:grid;place-items:center;width:18px;height:18px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:var(--bg-card);color:var(--white);transition:background .12s,border-color .12s}
 .att-pick.is-on .att-pick-box{border-color:var(--primary);background:var(--primary)}
-.att-pick input:focus-visible+.att-pick-box{box-shadow:0 0 0 3px rgba(21,152,209,.35)}
+.att-pick input:focus-visible+.att-pick-box{box-shadow:0 0 0 3px rgb(var(--primary-rgb) / .35)}
 .att-table tr:hover .att-pick,.att-pick:focus-within,.att-table.is-selecting .att-pick{opacity:1}
 .att-table tr:hover .att-index,.att-num:focus-within .att-index,.att-table.is-selecting .att-index{opacity:0}
-.att-table tr.is-picked td{background:rgba(21,152,209,.08)}
+.att-table tr.is-picked td{background:rgb(var(--primary-rgb) / .08)}
 @media (hover:none){.att-pick{opacity:1}.att-index{opacity:0}}
 .att-name{display:block;font-weight:700}
-.att-sub{display:block;color:var(--muted);font-size:.8rem}
-.att-flag{display:block;color:var(--danger);font-size:.78rem;font-weight:600}
+.att-sub{display:block;color:var(--muted);font-size:var(--text-sm)}
+.att-flag{display:block;color:var(--danger);font-size:var(--text-xs);font-weight:600}
 .att-flag.is-soft{color:var(--warn)}
 td .att-flag{display:inline}
 .att-who .att-flag{display:block}
 /* Absent: how often they come - red under the minimum */
 .att-share{font-weight:700;font-variant-numeric:tabular-nums}
 .att-share.is-short{color:var(--danger)}
-.att-of{margin-left:6px;color:var(--muted);font-size:.8rem;font-variant-numeric:tabular-nums}
+.att-of{margin-left:var(--space-1-5);color:var(--muted);font-size:var(--text-sm);font-variant-numeric:tabular-nums}
 .att-share-cell,.att-seen-cell{white-space:nowrap}
 .att-time{white-space:nowrap;font-variant-numeric:tabular-nums}
 /* Status pills: green present, blue pending, red removed - white, with the
    colour in the border and the word (a shade darker, to read on white). */
-.att-table .att-status{display:inline-flex;align-items:center;height:24px;padding:0 11px;border:1.5px solid;border-radius:999px;background:#FFFFFF;font-size:.75rem;font-weight:700;line-height:1;white-space:nowrap}
+.att-table .att-status{display:inline-flex;align-items:center;height:24px;padding:0 var(--space-2-5);border:1.5px solid;border-radius:var(--radius-pill);background:var(--white);font-size:var(--text-xs);font-weight:700;line-height:1;white-space:nowrap}
 .att-table .att-status::before{display:none}
-.att-table .att-status.is-present{border-color:#1BA566;color:#13804E}
-.att-table .att-status.is-pending{border-color:#1598D1;color:#0F6E99}
-.att-table .att-status.is-rejected{border-color:#C93443;color:#C93443}
-.att-breakdown .dot.is-present{background:#1BA566}
-.att-breakdown .dot.is-pending{background:#1598D1}
-.att-breakdown .dot.is-rejected{background:#C93443}
+.att-table .att-status.is-present{border-color:var(--ok);color:var(--ok-fill)}
+.att-table .att-status.is-pending{border-color:var(--primary);color:var(--primary-fill)}
+.att-table .att-status.is-rejected{border-color:var(--bad-fill);color:var(--bad-fill)}
+.att-breakdown .dot.is-present{background:var(--ok)}
+.att-breakdown .dot.is-pending{background:var(--primary)}
+.att-breakdown .dot.is-rejected{background:var(--bad-fill)}
 .att-row-action{text-align:right;white-space:nowrap}
-.att-row-action .link-button{color:var(--muted);font-size:.82rem;text-decoration:none}
+.att-row-action .link-button{color:var(--muted);font-size:var(--text-sm);text-decoration:none}
 .att-row-action .link-button:hover{color:var(--danger)}
-.att-row-action .att-add-back{color:var(--primary);font-weight:700}
+.att-row-action .att-add-back{color:var(--primary-text);font-weight:700}
 .att-row-action .att-add-back:hover:not(:disabled){color:var(--primary-hover)}
 .att-row-action .att-add-back:disabled{color:var(--faint);cursor:not-allowed}
-.att-empty{display:grid;justify-items:center;gap:4px;margin:0;padding:28px;color:var(--muted);text-align:center}
+.att-empty{display:grid;justify-items:center;gap:var(--space-1);margin:0;padding:var(--space-6);color:var(--muted);text-align:center}
 .att-empty p{margin:0}
 
 /* The list of sessions: its search and filter, then the sessions, in one card */
 .att-sessions{padding:0;overflow:hidden}
 .att-sessions .att-toolbar{min-height:0}
 .att-sessions .min-list{border-radius:0;background:transparent;box-shadow:none}
-.att-list-flag{display:inline-flex;align-items:center;gap:4px;color:var(--warn);font-weight:700;font-variant-numeric:tabular-nums}
+.att-list-flag{display:inline-flex;align-items:center;gap:var(--space-1);color:var(--warn);font-weight:700;font-variant-numeric:tabular-nums}
+
+/* Calendar controls sit inside the filter's scrolling columns, not above its scroll area. */
+.att-calendar{display:grid;gap:var(--space-2-5);min-width:0;padding:0 var(--space-2-5) var(--space-1-5)}
+.att-calendar-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--space-1);padding:var(--space-1);border-radius:var(--radius-sm);background:var(--bg-input)}
+.att-calendar-modes button{min-height:36px;min-width:0;padding:var(--space-1) var(--space-1-5);border:0;border-radius:var(--radius-sm);background:transparent;color:var(--text-2);font:inherit;font-size:var(--text-sm);font-weight:700;cursor:pointer}
+.att-calendar-modes button:hover{color:var(--text);background:rgb(var(--primary-rgb) / .1)}
+.att-calendar-modes button[aria-pressed="true"]{color:var(--on-accent);background:var(--accent)}
+.att-calendar-modes button:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+.att-calendar-field{display:grid;gap:var(--space-1);min-width:0;color:var(--text-2);font-size:var(--text-sm)}
+.att-calendar-field .text-input{box-sizing:border-box;width:100%;max-width:100%;min-width:0;min-height:42px;padding:var(--space-2);font:inherit;color:var(--text);color-scheme:dark}
+.att-calendar-field .text-input[aria-invalid="true"]{border-color:var(--bad)}
+.att-calendar :is(.att-calendar-hint,.att-calendar-error){margin:0;font-size:var(--text-xs);line-height:1.5;overflow-wrap:anywhere}
+.att-calendar-hint{color:var(--text-3)}
+.att-calendar-error{color:var(--bad)}
 
 /* Student page */
-.att-student{width:min(100%,430px);margin:24px auto 0;padding:28px;background:#2A2D31;color:var(--ink)}
-.att-student h1{margin:2px 0 18px;font-size:1.5rem;font-weight:700;letter-spacing:-.04em;line-height:1.25}
-.att-kicker{margin:0;color:#F39A4A;font-size:.72rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
+.att-student{width:min(100%,430px);margin:var(--space-6) auto 0;padding:var(--space-6);background:var(--bg-card);color:var(--ink)}
+.att-student h1{margin:var(--space-0-5) 0 var(--space-4);font-size:var(--text-xl);font-weight:700;letter-spacing:-.04em;line-height:1.25}
+.att-kicker{margin:0;color:var(--warn);font-size:var(--text-xs);font-weight:700;letter-spacing:.1em;text-transform:uppercase}
 .att-student .auth-title{display:none}
-.att-lead,.att-message{margin:0 0 14px;line-height:1.5}
-.att-message{padding:14px;border-radius:12px;background:rgba(21,152,209,.12);color:#F39A4A}
-.att-message strong{display:block;margin-bottom:2px;color:var(--ink)}
-.att-mark-form{display:grid;gap:6px}
-.att-mark-form>p:first-child{margin:0 0 8px}
-.att-mark-button{margin-top:10px;min-height:54px;font-size:1.05rem}
-.att-result{display:grid;justify-items:center;gap:6px;padding:24px 8px 8px;text-align:center;line-height:1.5}
-.att-result-icon{display:grid;place-items:center;width:58px;height:58px;margin-bottom:6px;border-radius:50%;font-size:1.5rem;font-weight:700}
-.att-result strong{font-size:1.15rem;font-weight:700}
-.att-result span:last-child{color:var(--muted);font-size:.9rem}
-.att-result.is-present .att-result-icon{background:rgba(39,182,111,.14);color:var(--success)}
-.att-result.is-pending .att-result-icon{background:rgba(21,152,209,.12);color:#F39A4A}
-.att-result.is-rejected .att-result-icon{background:rgba(239,91,95,.14);color:var(--danger)}
-.att-guest{margin-top:18px}
-.att-or{display:flex;align-items:center;gap:10px;margin:0 0 12px;color:var(--faint,#AAB6BC);font-size:.8rem}
+.att-lead,.att-message{margin:0 0 var(--space-3-5);line-height:1.5}
+.att-message{padding:var(--space-3-5);border-radius:var(--radius-md);background:rgb(var(--primary-rgb) / .12);color:var(--warn)}
+.att-message strong{display:block;margin-bottom:var(--space-0-5);color:var(--ink)}
+.att-mark-form{display:grid;gap:var(--space-1-5)}
+.att-mark-form>p:first-child{margin:0 0 var(--space-2)}
+.att-mark-button{margin-top:var(--space-2-5);min-height:54px;font-size:var(--text-md)}
+.att-result{display:grid;justify-items:center;gap:var(--space-1-5);padding:var(--space-6) var(--space-2) var(--space-2);text-align:center;line-height:1.5}
+.att-result-icon{display:grid;place-items:center;width:58px;height:58px;margin-bottom:var(--space-1-5);border-radius:var(--radius-pill);font-size:var(--text-xl);font-weight:700}
+.att-result strong{font-size:var(--text-lg);font-weight:700}
+.att-result span:last-child{color:var(--muted);font-size:var(--text-base)}
+.att-result.is-present .att-result-icon{background:rgb(var(--ok-rgb) / .14);color:var(--success)}
+.att-result.is-pending .att-result-icon{background:rgb(var(--primary-rgb) / .12);color:var(--warn)}
+.att-result.is-rejected .att-result-icon{background:rgb(var(--bad-rgb) / .14);color:var(--danger)}
+.att-guest{margin-top:var(--space-4)}
+.att-or{display:flex;align-items:center;gap:var(--space-2-5);margin:0 0 var(--space-3);color:var(--faint);font-size:var(--text-sm)}
 .att-or::before,.att-or::after{content:"";flex:1;height:1px;background:var(--line)}
-.att-guest-button{margin-top:10px}
+.att-guest-button{margin-top:var(--space-2-5)}
 
 /* A tablet has enough room for the navigation but not for a useful table and
    a 300 px QR column. Keep the table full width here: its cells remain easy
@@ -210,7 +233,7 @@ td .att-flag{display:inline}
   .att-board-side{grid-template-columns:minmax(0,1fr)}
   .att-create-options{grid-template-columns:1fr}
   .min-list-side .att-list-count{display:none}
-  .att-student{margin-top:8px;padding:22px}
+  .att-student{margin-top:var(--space-2);padding:var(--space-5)}
 }
 
 /* One screen, no page scroll: on a laptop or a projector the teacher sees
@@ -225,34 +248,34 @@ td .att-flag{display:inline}
   .att-session:not(.is-editing) .att-board{flex:1;min-height:0;align-items:stretch}
   .att-session:not(.is-editing) .att-table{display:flex;flex-direction:column;min-height:0;padding:0;overflow:hidden}
   .att-session:not(.is-editing) .att-table-scroll{flex:1;min-height:0;overflow:auto}
-  .att-session:not(.is-editing) .att-table thead th{position:sticky;top:0;z-index:1;background:var(--bg-card,#2A2D31)}
+  .att-session:not(.is-editing) .att-table thead th{position:sticky;top:0;z-index:1;background:var(--bg-card)}
   .att-session:not(.is-editing) .att-board-side{min-height:0}
-  .att-session:not(.is-editing) .att-qr{display:flex;flex-direction:column;justify-content:center;flex:1;min-height:0;padding:16px}
+  .att-session:not(.is-editing) .att-qr{display:flex;flex-direction:column;justify-content:center;flex:1;min-height:0;padding:var(--space-4)}
   .att-session:not(.is-editing) .att-qr-button{display:flex;align-items:center;justify-content:center;flex:1;min-height:0;width:100%}
   /* The SVG fills the room left and keeps the code square in the middle of it. */
   .att-session:not(.is-editing) .att-qr-button .att-qr-code{width:100%;height:100%;max-width:none;border-radius:0}
   .att-session:not(.is-editing) .att-qr-button .att-qr-wait{width:auto;height:100%;max-width:100%}
-  .att-session:not(.is-editing) .att-side{flex:none;gap:10px;padding:18px}
+  .att-session:not(.is-editing) .att-side{flex:none;gap:var(--space-2-5);padding:var(--space-4)}
   /* Two columns of counts: the height they save goes to the QR. */
-  .att-session:not(.is-editing) .att-breakdown{grid-template-columns:repeat(2,minmax(0,max-content));gap:6px 22px}
+  .att-session:not(.is-editing) .att-breakdown{grid-template-columns:repeat(2,minmax(0,max-content));gap:var(--space-1-5) var(--space-5)}
 }
 
 /* Download attendance (AttendanceExportModal): several sessions as one register. */
-.min-head-actions{display:flex;flex-wrap:wrap;gap:8px}
-.att-export-classes{display:grid;gap:8px;max-height:220px;margin:0;padding:0;overflow-y:auto;border:0}
+.min-head-actions{display:flex;flex-wrap:wrap;gap:var(--space-2)}
+.att-export-classes{display:grid;gap:var(--space-2);max-height:220px;margin:0;padding:0;overflow-y:auto;border:0}
 .att-export-classes .check-row span{flex:1;min-width:0;overflow-wrap:anywhere}
-.att-export-classes .check-row small{color:var(--text-3);font-size:.78rem;white-space:nowrap}
-.att-export-dates{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.att-export-dates label{display:grid;gap:4px}
+.att-export-classes .check-row small{color:var(--text-3);font-size:var(--text-xs);white-space:nowrap}
+.att-export-dates{display:grid;grid-template-columns:1fr 1fr;gap:var(--space-2-5)}
+.att-export-dates label{display:grid;gap:var(--space-1)}
 .dialog .att-export-summary{color:var(--text-3)}
-.att-export-min{display:grid;gap:4px}
+.att-export-min{display:grid;gap:var(--space-1)}
 .att-export-min .input-with-unit{width:140px}
-.att-export-min .help{font-size:.8rem}
+.att-export-min .help{font-size:var(--text-sm)}
 
 /* Absent rows on a phone: attendance and last seen under the name, Mark present at the right. */
 @media (max-width:640px){
-  .att-table td.att-share-cell{grid-column:2;grid-row:2;color:var(--text-2);font-size:.82rem}
-  .att-table td.att-seen-cell{grid-column:2;grid-row:3;color:var(--text-2);font-size:.82rem}
+  .att-table td.att-share-cell{grid-column:2;grid-row:2;color:var(--text-2);font-size:var(--text-sm)}
+  .att-table td.att-seen-cell{grid-column:2;grid-row:3;color:var(--text-2);font-size:var(--text-sm)}
   .att-table td.att-seen-cell::before{content:"Last here "}
   .att-table .att-pick{inset:-2px auto auto -4px;padding:0;width:24px;height:24px}
   .att-table th.att-num,.att-table td.att-num{width:auto}

@@ -8,7 +8,7 @@ import { QuestionImage } from '../../../components/QuestionImage.jsx';
 import { InfoTip } from '../../../components/InfoTip.jsx';
 import { PersonLink } from '../../../components/PersonLink.jsx';
 import { SheetSwitch } from './SheetSwitch.jsx';
-import { STATE_WORDS, answerOf, answerState, initialsOf, papersWith } from '../review.js';
+import { STATE_WORDS, answerOf, answerState, initialsOf, papersWith, reviewForRegistration } from '../review.js';
 
 const TYPE_NAMES = { mcq: 'Single choice', msq: 'Multiple choice', short: 'Short answer' };
 const clip = (text, length) => (String(text || '').length > length ? `${String(text).slice(0, length - 1)}…` : String(text || ''));
@@ -115,7 +115,7 @@ function MarkPanel({ answer, question, frozen, saving, onSave, onNext, showToast
  * Any mark can be changed - a right or wrong choice answer's too. The paper
  * on screen has a button to its student's window, on their activity log (`onOpenLog`).
  */
-export function ResultReviewModal({ code, startAt = null, startQuestion = null, startMode = 'student', onClose, onChanged, showToast, onOpenLog = null }) {
+export function ResultReviewModal({ code, startAt = null, startQuestion = null, startMode = 'student', onlyRegistrationId = null, onClose, onChanged, showToast, onOpenLog = null }) {
   const [data, setData] = useState(null);
   const [failed, setFailed] = useState('');
   const [mode, setMode] = useState(startMode);
@@ -131,26 +131,34 @@ export function ResultReviewModal({ code, startAt = null, startQuestion = null, 
     api(`/api/admin/tests/${encodeURIComponent(code)}/review`)
       .then((next) => {
         if (!alive) return;
-        setData(next);
-        const at = startAt ? next.papers.findIndex((paper) => paper.registrationId === startAt) : -1;
+        const scoped = reviewForRegistration(next, onlyRegistrationId);
+        setData(scoped);
+        if (onlyRegistrationId !== null && onlyRegistrationId !== undefined) {
+          setStudent(0); setPosition(0); setQuestionIndex(0); setHolder(0); setOnlyToMark(false);
+        }
+        const at = startAt !== null && startAt !== undefined ? scoped.papers.findIndex((paper) => paper.registrationId === startAt || String(paper.registrationId ?? paper.id) === String(startAt)) : -1;
         if (at >= 0) {
           setStudent(at);
           // Opened on one answer (a tile in the Analysis rank list): that question on their paper.
-          const spot = startQuestion === null ? -1 : next.papers[at].answers.findIndex((answer) => answer.questionId === startQuestion);
+          const spot = startQuestion === null || startQuestion === undefined ? -1 : scoped.papers[at].answers.findIndex((answer) => String(answer.questionId) === String(startQuestion));
           if (spot >= 0) setPosition(spot);
         }
         // By question: start on the first question with something still to mark.
         if (startMode === 'question') {
-          const first = next.questions.findIndex((question) => papersWith(next.papers, question.id, true).length);
+          const first = scoped.questions.findIndex((question) => papersWith(scoped.papers, question.id, true).length);
           if (first >= 0) { setQuestionIndex(first); setOnlyToMark(true); }
         }
       })
       .catch((error) => { if (alive) setFailed(error.message); });
     return () => { alive = false; };
-  }, [code, startAt, startQuestion, startMode]);
+  }, [code, startAt, startQuestion, startMode, onlyRegistrationId]);
 
-  const papers = data?.papers || [];
-  const questions = data?.questions || [];
+  // Also scope before a replacement response arrives: changing the prop can
+  // never leave the previous whole-class navigation visible for one render.
+  const scoped = useMemo(() => reviewForRegistration(data, onlyRegistrationId), [data, onlyRegistrationId]);
+  const papers = scoped?.papers || [];
+  const questions = scoped?.questions || [];
+  const restricted = onlyRegistrationId !== null && onlyRegistrationId !== undefined;
   const bank = useMemo(() => new Map(questions.map((question) => [question.id, question])), [questions]);
   const frozen = Boolean(data?.test.frozen);
   const question = questions[questionIndex];
@@ -212,9 +220,10 @@ export function ResultReviewModal({ code, startAt = null, startQuestion = null, 
     ? student === papers.length - 1 && position >= (paper?.answers.length || 1) - 1
     : questionIndex === questions.length - 1 && holder >= holders.length - 1;
 
-  // A new answer starts at its top.
+  // Reset before paint, so a new question never flashes at the previous
+  // answer's scroll position when picked from the strip or Previous/Next.
   const bodyRef = useRef(null);
-  useEffect(() => { bodyRef.current?.scrollTo?.({ top: 0 }); }, [mode, paper?.registrationId, answer?.questionId]);
+  useLayoutEffect(() => { bodyRef.current?.scrollTo?.({ top: 0, behavior: 'auto' }); }, [mode, paper?.registrationId, answer?.questionId]);
 
   // A choice question fits the window without scrolling: one under another
   // where that fits, else its options two across (where the window is wide
@@ -243,7 +252,7 @@ export function ResultReviewModal({ code, startAt = null, startQuestion = null, 
     <Modal label="Review results" onClose={onClose} className="review-sheet">
       {/* The student on screen - by question, the one whose answer this is: on to what they did while writing. */}
       {ready && paper && onOpenLog && (
-        <SheetSwitch icon={ScrollText} label="Activity log" short="Log" tip={`${paper.name}'s activity log`} onClick={() => onOpenLog(paper.registrationId, { sapId: paper.sapId, name: paper.name })}/>
+        <SheetSwitch icon={ScrollText} label="Activity log" short="Log" tip={`${paper.name}'s activity log`} who={paper.name} onClick={() => onOpenLog(paper.registrationId, { sapId: paper.sapId, name: paper.name })}/>
       )}
       <div className="review-bar">
         <div className="review-column">
@@ -323,10 +332,10 @@ export function ResultReviewModal({ code, startAt = null, startQuestion = null, 
         </div>
       </div>
 
-      <div className="review-body" ref={bodyRef}>
+      <div className="review-body" ref={bodyRef} role="region" aria-label="Question and answer" tabIndex={0}>
         <div className="review-column">
           {failed ? <p className="notice danger">{failed}</p> : !data ? <p className="help review-empty">Loading the papers…</p> : !papers.length ? (
-            <p className="help review-empty">No paper has been handed in yet.</p>
+            <p className="help review-empty">{restricted ? "This student's submitted paper is not available." : 'No paper has been handed in yet.'}</p>
           ) : !answer || !shown ? (
             <p className="help review-empty">{onlyToMark ? 'Nothing left to mark on this question.' : 'Nothing to show here.'}</p>
           ) : (

@@ -73,6 +73,10 @@ test('only safe repeatable GET routes are classified as pollable', () => {
   assert.equal(isPollableRequest('GET', '/api/admin/tests/TEST-X'), true);
   assert.equal(isPollableRequest('POST', '/api/test-attempts/a/answer'), false);
   assert.equal(isPollableRequest('POST', '/api/test-attempts/a/submit'), false);
+  // Questions ahead and the next one's key: a paper moves on without them, only less quickly.
+  assert.equal(isPollableRequest('GET', '/api/test-attempts/a/ahead'), true);
+  assert.equal(isPollableRequest('POST', '/api/test-attempts/a/next-key'), true);
+  assert.equal(isPollableRequest('POST', '/api/test-attempts/a/next'), false);
   assert.equal(isPollableRequest('GET', '/api/me/results'), false);
   assert.equal(isLiveStreamRequest('GET', '/api/tests/TEST-X/events'), true);
   assert.equal(isLiveStreamRequest('GET', '/api/admin/tests/TEST-X/events'), true);

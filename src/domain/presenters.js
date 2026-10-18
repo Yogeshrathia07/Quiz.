@@ -4,7 +4,9 @@ import { describeEvent, integrityRecord, integritySummary, keptEvents, locksOnVi
 import { activityLog } from './activity.js';
 import { activeQuestions, questionPoolCounts, questionType } from './question-bank.js';
 import { attemptDeadlineMs, endModeOf, isAnswered, isAttemptTimeOver, isPerStudent, isTimeOver, isUntimed, startModeOf } from './attempt-rules.js';
-import { DEFAULT_TYPE_SECONDS, allowsNext, isStrict, openQuestionEndsAt, questionSeconds, strictPaper } from './strict-timing.js';
+import {
+  DEFAULT_TYPE_SECONDS, allowsNext, allowsPrevious, hasQuestionTimers, isStrict, nextOpenAfter, openBefore, openQuestionEndsAt, questionSeconds, reachedOf, strictProgress
+} from './strict-timing.js';
 import { DEVICE_NOTES, deviceRuleOf, kindWord } from './device.js';
 import { DEFAULT_TYPE_MARKS, earnedMarks, paperMarks, paperScore, questionMarks, roundMarks } from './marks.js';
 import { imageView, paperHasImages, questionHasImage, shownGraceMs } from './question-image.js';
@@ -53,9 +55,12 @@ export function publicTest(doc) {
     devices: deviceRuleOf(doc),
     questionLayout: doc.questionLayout === 'all' ? 'all' : 'one',
     strictTiming: isStrict(doc),
-    // One way only, and whether any question has a timer - with none, it is just "no going back".
-    strictTimed: isStrict(doc) && activeQuestions(doc).some((question) => questionSeconds(doc, question) > 0),
+    // One way only, and whether any question has a timer - with none, it is just "no going back",
+    // and going back can be turned on; with one, it goes forward only.
+    strictTimed: hasQuestionTimers(doc),
     strictNext: allowsNext(doc),
+    // One at a time with going back (no question timers; older timed tests keep the time each did not use).
+    strictPrevious: allowsPrevious(doc),
     questionDraw: doc.questionDraw === 'spread' ? 'spread' : 'random',
     typeSeconds: doc.typeSeconds || DEFAULT_TYPE_SECONDS,
     // What each question type is worth unless a question says otherwise (domain/marks.js).
@@ -84,7 +89,8 @@ const answerFor = (attempt, questionId) => (attempt.answers || []).find((answer)
  * One question as it appears on the student's paper, carrying its own answer and
  * its own lock state so the client never has to re-derive the end-time policy.
  */
-function paperQuestion(test, attempt, assigned, atMs) {
+/** One question as the paper shows it - also what travels ahead, sealed (domain/paper-seal.js). */
+export function paperQuestion(test, attempt, assigned, atMs) {
   const question = (test.questions || []).find((entry) => entry.id === assigned.questionId);
   if (!question) return null;
   const answer = answerFor(attempt, question.id) || {};
@@ -114,24 +120,33 @@ function paperQuestion(test, attempt, assigned, atMs) {
 /**
  * Strict timing sends only the open question - never the ones ahead, which
  * would let a student read the paper in advance, nor the ones behind, which
- * are closed. The rest of the paper is described by counts alone.
+ * are closed (or, where the test lets students go back, opened again one at
+ * a time). The rest of the paper is described by counts alone.
  */
 function strictView(test, attempt, atMs) {
   const state = attempt.strict || { index: 0, shownAt: null, log: [] };
-  const paper = strictPaper(test, attempt);
-  const open = paper[state.index];
+  const progress = strictProgress(test, attempt);
+  const { paper } = progress;
+  const index = state.index ?? 0;
+  const reached = reachedOf(state, paper.length);
+  const open = paper[index];
   const assigned = open && (attempt.questions || []).find((entry) => entry.questionId === open.questionId);
   const endsAt = openQuestionEndsAt(test, attempt, atMs);
   // What the rest of the paper can still take: this question's time left plus
-  // every later question's time. Questions without a timer add nothing, so
-  // then it is "at least".
-  const later = paper.slice(state.index + 1);
-  const laterSeconds = later.reduce((total, entry) => total + (entry.seconds || 0), 0);
-  const untimedLeft = later.filter((entry) => !entry.seconds).length + (open && !open.seconds ? 1 : 0);
+  // the time of every other question that can still open - those not reached
+  // and, with going back, those left with time. Questions without a timer add
+  // nothing, so then it is "at least".
+  const others = paper.map((entry, position) => ({ entry, position }))
+    .filter(({ position }) => position !== index && !progress.isFinal(position));
+  const laterSeconds = others.reduce((total, { entry, position }) => total + (entry.seconds ? Math.round(progress.leftMs(position) / 1000) : 0), 0);
+  const untimedLeft = others.filter(({ entry }) => !entry.seconds).length + (open && !open.seconds ? 1 : 0);
+  const answers = new Map((attempt.answers || []).map((answer) => [answer.questionId, answer]));
+  const newest = index >= reached - 1;
   return {
     strict: {
-      index: state.index,
+      index,
       total: paper.length,
+      reached,
       questionEndsAt: iso(endsAt),
       // Stopped while the student is away (or locked): the times above are then
       // as if they came back now, and the page holds them still.
@@ -141,11 +156,27 @@ function strictView(test, attempt, atMs) {
       paperEndsAt: endsAt ? iso(new Date(endsAt.getTime() + laterSeconds * 1000)) : null,
       laterSeconds,
       untimedLeft,
+      // The open question's whole time, and what it had left when this visit began.
       questionSeconds: open?.seconds || null,
-      // Next is offered when the admin allows it, and always on a question
-      // with no timer - otherwise the student could never leave it.
-      canMoveOn: allowsNext(test) || !open?.seconds,
-      // For the dots along the top: done, and whether the clock closed it.
+      questionLeftSeconds: open?.seconds ? Math.round(progress.leftMs(index) / 1000) : null,
+      // Next is offered when the admin allows it, always on a question with no
+      // timer - otherwise the student could never leave it - and on one gone
+      // back to, where it leads on through questions already seen.
+      canMoveOn: allowsNext(test) || !open?.seconds || !newest,
+      // Going back: where Previous leads (null: nowhere). Where Next leads; null
+      // when nothing can open after this one, so Next hands the paper in.
+      previous: progress.previous,
+      backTo: open ? openBefore(progress, index) : null,
+      forwardTo: open ? nextOpenAfter(progress, index, reached) : null,
+      // The numbers along the top, one for each question opened so far:
+      // answered or not, and whether it is closed for good.
+      track: paper.slice(0, reached).map((entry, position) => ({
+        answered: isAnswered(answers.get(entry.questionId)),
+        final: position !== index && progress.isFinal(position),
+        timedOut: progress.timedOut.has(entry.questionId)
+      })),
+      // As pages from before `track` read it: a page open across an update
+      // keeps its old code until the paper is handed in (useAppUpdate.js).
       closed: (state.log || []).map((entry) => ({ how: entry.how }))
     },
     questions: assigned ? [paperQuestion(test, attempt, assigned, atMs)].filter(Boolean) : []
@@ -238,12 +269,14 @@ const optionText = (question, optionIds) => {
 
 function strictTimes(test, attempt, questionId) {
   if (!isStrict(test)) return {};
-  const entry = (attempt.strict?.log || []).find((item) => item.questionId === questionId);
+  // Every visit to it: one, or several where the test let students go back.
+  const visits = (attempt.strict?.log || []).filter((item) => item.questionId === questionId);
   const question = (test.questions || []).find((item) => item.id === questionId);
+  const spentMs = visits.reduce((total, visit) => total + Math.max(0, dateMs(visit.closedAt) - dateMs(visit.shownAt)), 0);
   return {
     timeAllowedSeconds: questionSeconds(test, question) || null,
-    timeSpentSeconds: entry ? Math.max(0, Math.round((dateMs(entry.closedAt) - dateMs(entry.shownAt)) / 1000)) : null,
-    timedOut: entry ? entry.how === 'time' : null
+    timeSpentSeconds: visits.length ? Math.round(spentMs / 1000) : null,
+    timedOut: visits.length ? visits.some((visit) => visit.how === 'time') : null
   };
 }
 

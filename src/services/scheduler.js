@@ -5,6 +5,8 @@ import { END_GRACE_MS, isTimeOver } from '../domain/attempt-rules.js';
 import { beginTest } from './test-lifecycle.js';
 import { finishOwnTimes, finishTest } from './admin-service.js';
 import { compensateForOutage, recordHeartbeat } from './outage.js';
+import { kickResultMails } from './result-mail-service.js';
+import { PROBE_EVERY_MS, probeReach, unreachable } from './reachability.js';
 
 const TICK_MS = 5_000;
 
@@ -61,6 +63,9 @@ export async function runScheduleOnce(atMs = Date.now()) {
   ).toArray();
   let handedIn = 0;
   for (const test of ownTimed) handedIn += await finishOwnTimes(test, atMs);
+
+  // Results emails still waiting - after a restart, say: sent on in the background.
+  if (await registrations().countDocuments({ 'resultMail.status': 'queued' }, { limit: 1 })) kickResultMails();
   return { started: due.length, ended: ending.length, expired, handedIn };
 }
 
@@ -71,6 +76,10 @@ export async function runScheduleOnce(atMs = Date.now()) {
  */
 export function startScheduler(intervalMs = TICK_MS) {
   let running = false;
+  // Whether a test is running, as the last pass found: the server asks for itself every PROBE_EVERY_MS meanwhile.
+  let testRunning = false;
+  const probe = setInterval(() => { void probeReach({ testsRunning: testRunning }); }, PROBE_EVERY_MS);
+  probe.unref?.();
   const tick = async () => {
     if (running) return;
     running = true;
@@ -80,6 +89,10 @@ export function startScheduler(intervalMs = TICK_MS) {
         const outage = await compensateForOutage();
         if (outage) console.log(`Server was paused for ${Math.round(outage.ms / 1000)} s; ${outage.tests} running test(s) ${outage.gaveBack ? 'given the time back' : 'recorded'}.`);
         await recordHeartbeat();
+        // Can students reach the server? Asked while a test runs (never waited on here). While they cannot,
+        // nothing is closed by time: the time is given back the moment they can (reachability.js).
+        testRunning = Boolean(await tests().findOne({ isStarted: true, isClosed: { $ne: true } }, { projection: { _id: 1 } }));
+        if (unreachable()) return;
         await runScheduleOnce();
       }, Math.max(30_000, intervalMs * 4));
     } catch (error) { console.error('Test scheduler:', error); } finally { running = false; }
@@ -87,5 +100,5 @@ export function startScheduler(intervalMs = TICK_MS) {
   const timer = setInterval(tick, intervalMs);
   timer.unref?.();
   tick();
-  return () => clearInterval(timer);
+  return () => { clearInterval(timer); clearInterval(probe); };
 }

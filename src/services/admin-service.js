@@ -11,7 +11,7 @@ import { questionType } from '../domain/question-bank.js';
 import { automaticMarks, earnedMarks, paperMarks, paperScore, questionMarks, roundMarks } from '../domain/marks.js';
 import { refuseIfFrozen } from '../domain/freeze.js';
 import { END_GRACE_MS, attemptDeadlineMs, endModeOf, isPerStudent, isTimeOver, isUntimed, ownBaseDeadlineMs } from '../domain/attempt-rules.js';
-import { isStrict } from '../domain/strict-timing.js';
+import { extraTimeWrite, hasQuestionTimers, isStrict, lockedMsToGiveBack } from '../domain/strict-timing.js';
 import { DEVICE_KINDS, DEVICE_NOTES, deviceFactLine, deviceFits, deviceRuleOf, kindWord } from '../domain/device.js';
 import {
   MAX_EVENTS, describeEvent, integrityCells, integrityHeaders, integrityRecord, integritySummary, keptEvents, locksOnViolation, violationActionOf
@@ -28,6 +28,7 @@ import {
 import { buildAttempt, finalizeAttempt, venueClosed } from './attempt-service.js';
 import { activityLog } from '../domain/activity.js';
 import { beginTest, plannedEndsAt } from './test-lifecycle.js';
+import { dashboardAnswerFilter } from './dashboard-answer-filter.js';
 
 /* ------------------------------------------------------------------ reading */
 
@@ -124,6 +125,9 @@ export async function duplicateTest(req, code) {
     endMode,
     endsAt: null,
     durationMinutes: endMode === 'duration' || endMode === 'each' ? (test.durationMinutes || runMinutes(test) || 30) : test.durationMinutes ?? null,
+    // A new test follows today's rule: no going back with a timer on each question
+    // (an older original may have both - test-builder.js).
+    strictPrevious: test.strictPrevious === true && !hasQuestionTimers(test),
     isStarted: false, startedAt: null, isClosed: false, closedAt: null, closedAutomatically: false,
     paperSlots: 0, resultsReleasedAt: null, releaseUnmarked: false, resultsFrozenAt: null, outages: [],
     createdAt, updatedAt: createdAt, archivedAt: null
@@ -317,7 +321,7 @@ export async function adminDashboard(req, code, pageOptions = null) {
   // Exports and a few offline reports intentionally request the whole class.
   // Keep that established behaviour, but make normal browser table reads use
   // `skip`/`limit` in MongoDB instead of fetching every registration first.
-  if (pageOptions?.pageSize) return pagedAdminDashboard(test, pageOptions, manualQuestionIds);
+  if (pageOptions?.pageSize || pageOptions?.af !== undefined) return pagedAdminDashboard(test, pageOptions, manualQuestionIds);
 
   const registrations = await registrationsCollection().find(
     { testCode: test.code }, { projection: DASHBOARD_REGISTRATION_PROJECTION }
@@ -508,10 +512,10 @@ function countGroup(fields) {
   return Object.fromEntries(Object.entries(fields).map(([key, condition]) => [key, { $sum: { $cond: [condition, 1, 0] } }]));
 }
 
-function dashboardClassCountPipeline(code, manualQuestionIds) {
+function dashboardClassCountPipeline(code, manualQuestionIds, cohortMatch = null) {
   const awaiting = joinExpressionAnd([equals('attempt.status', 'submitted'), dashboardFilterExpression('marking:awaiting')]);
   return withManualMetrics([
-    { $match: { testCode: code } },
+    { $match: joinMongoAnd([{ testCode: code }, cohortMatch]) },
     { $project: DASHBOARD_AGGREGATION_PROJECTION }
   ], manualQuestionIds).concat([{
     $group: {
@@ -589,14 +593,18 @@ export { RESULT_SORTS, STUDENT_SORTS, dashboardCounts, paginateDashboard, result
 async function pagedAdminDashboard(test, rawPage, manualQuestionIds) {
   const page = dashboardPageOptions(rawPage);
   const emptyPage = page.section === 'test';
-  const baseMatch = dashboardBaseMatch(test.code, page);
-  const selectedMatch = dashboardSelectedMongoMatch(page, manualQuestionIds);
   const collection = registrationsCollection();
+  // Resolve every submitted paper first, not just the first returned page.
+  // Search, the usual filters, totals and sorting all see the same cohort.
+  const answerFilter = await dashboardAnswerFilter(collection, test, rawPage.af);
+  const baseMatch = joinMongoAnd([dashboardBaseMatch(test.code, page), answerFilter?.match]);
+  const selectedMatch = dashboardSelectedMongoMatch(page, manualQuestionIds);
 
-  const [pageCounts, wholeCounts, initialRows] = await Promise.all([
+  const [pageCounts, wholeCounts, initialRows, classCounts] = await Promise.all([
     emptyPage ? Promise.resolve([]) : collection.aggregate(dashboardPageCountPipeline(baseMatch, page, manualQuestionIds)).toArray(),
-    collection.aggregate(dashboardClassCountPipeline(test.code, manualQuestionIds)).toArray(),
-    emptyPage ? Promise.resolve([]) : collection.aggregate(dashboardPagePipeline(baseMatch, selectedMatch, page)).toArray()
+    collection.aggregate(dashboardClassCountPipeline(test.code, manualQuestionIds, answerFilter?.match)).toArray(),
+    emptyPage ? Promise.resolve([]) : collection.aggregate(dashboardPagePipeline(baseMatch, selectedMatch, page)).toArray(),
+    answerFilter ? collection.aggregate(dashboardClassCountPipeline(test.code, manualQuestionIds)).toArray() : Promise.resolve(null)
   ]);
 
   const pageCount = pageCounts[0] || {};
@@ -615,6 +623,7 @@ async function pagedAdminDashboard(test, rawPage, manualQuestionIds) {
   return {
     ...dashboard,
     counts: asDashboardCounts(wholeCounts[0], test),
+    ...(answerFilter ? { answerFilter: answerFilter.metadata, classCounts: asDashboardCounts(classCounts?.[0], test) } : {}),
     filterCounts,
     pagination: { page: resolvedPage, pageSize: page.pageSize, total, unfilteredTotal, pages, section: page.section }
   };
@@ -1178,10 +1187,16 @@ async function reviveAttempt(test, registration) {
   const resumedAt = now();
   // Reviving clears the counters the LIMITS read, so the student can carry
   // on, but never the lifetime record the report reads: the dashboard still
-  // shows every time they left. It never moves the deadline either - extend
-  // the test for that.
-  return updateAttemptWhere(test.code, registration.id, { id: attempt.id, isLocked: true }, {
+  // shows every time they left. It does not move the deadline - extend the
+  // test for that - except with a timer on each question, where the time the
+  // lock took comes back on the student's own end (their question's clock
+  // stood still meanwhile, and the paper's end must not cut off the rest).
+  const back = lockedMsToGiveBack(test, attempt, resumedAt.getTime());
+  const extra = extraTimeWrite(attempt, back);
+  return updateAttemptWhere(test.code, registration.id, { id: attempt.id, isLocked: true, lockedAt: attempt.lockedAt ?? null, ...extra.expect }, {
+    ...(extra.inc ? { $inc: extra.inc } : {}),
     $set: {
+      ...extra.set,
       isLocked: false,
       lockedAt: null,
       lockReason: null,
@@ -1198,7 +1213,7 @@ async function reviveAttempt(test, registration) {
       // their log; newer ones already have it and it is left to its counters.
       ...(attempt.integrity ? {} : { integrity: integrityRecord(attempt) })
     },
-    $push: { events: { $each: [{ type: 'attempt_resumed', createdAt: resumedAt, durationMs: null, detail: null }], $slice: -MAX_EVENTS } }
+    $push: { events: { $each: [{ type: 'attempt_resumed', createdAt: resumedAt, durationMs: back || null, detail: null }], $slice: -MAX_EVENTS } }
   });
 }
 

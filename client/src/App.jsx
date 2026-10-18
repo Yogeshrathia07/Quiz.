@@ -1,5 +1,5 @@
 import { Component, Suspense, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import { SESSION_ENDED_EVENT, api, isRetryable, post } from './lib/api.js';
+import { SESSION_ENDED_EVENT, api, isOffline, isRetryable, isServerUnreachable, post } from './lib/api.js';
 import { useAppUpdate, useExamInProgress } from './lib/useAppUpdate.js';
 import { clearCache, dropCached } from './lib/cache.js';
 import { prefetchRoute, preloadScreens, rememberRole, rememberedRole, watchLinks } from './lib/prefetch.js';
@@ -8,8 +8,10 @@ import { ViewerContext, setNavigator } from './lib/people.js';
 import { lazyScreen, screens } from './screens/loaders.js';
 import { SiteHeader } from './components/SiteHeader.jsx';
 import { HoverTips } from './components/HoverTips.jsx';
+import { ServerOffline } from './components/ServerOffline.jsx';
 import { TOAST_FADE_MS, Toast, toastDuration } from './components/Toast.jsx';
 import { pageTitle } from './brand.js';
+import { adminAreaOf } from './lib/admin-navigation.js';
 
 // Each area is downloaded only when it is opened - most students never need
 // the creator, attendance admin and spreadsheet UI, and keeping them out of
@@ -64,6 +66,11 @@ function currentRoute() {
     test: query.get('test')?.toUpperCase() || null,
     attend: query.get('attend')?.toUpperCase() || null,
     admin: query.get('admin') || null,
+    tab: query.get('tab') || null,
+    rview: query.get('rview') || null,
+    view: query.get('view') || null,
+    filter: query.get('filter') || null,
+    af: query.get('af') || null,
     page: query.get('page') || null,
     // One handed-in test's result, found by the account (ResultDetailScreen).
     result: query.get('result')?.toUpperCase() || null
@@ -72,6 +79,12 @@ function currentRoute() {
 
 export default function App() {
   const [auth, setAuth] = useState(null);
+  // The server could not be reached as the page opened: 'server' (off, or the tunnel answered for it) or 'device' (no connection).
+  const [serverDown, setServerDown] = useState(null);
+  // A game under way on that page holds it open when the server answers again: it says so, and waits for Open the page.
+  const [serverBack, setServerBack] = useState(false);
+  const playingOffline = useRef(false);
+  const notePlaying = useCallback((on) => { playingOffline.current = on; }, []);
   const [route, setRoute] = useState(currentRoute);
   const [toast, setToast] = useState(null);
   const [changingPassword, setChangingPassword] = useState(false);
@@ -135,10 +148,35 @@ export default function App() {
       // Offline on a test link (a reload mid-test): the paper this device
       // holds still opens (StudentScreen); the account is asked for again
       // once the connection is back.
-      if (isRetryable(error) && currentRoute().test) setAuth((current) => current || { user: null, offline: true });
+      if (isRetryable(error) && currentRoute().test) {
+        setAuth((current) => current || { user: null, offline: true });
+        showToast(error.message);
+        return;
+      }
+      // Any other page: the Server offline page (components/ServerOffline.jsx), which asks again by itself.
+      if (isServerUnreachable(error) || isOffline(error)) { setServerDown(navigator.onLine === false ? 'device' : 'server'); return; }
       showToast(error.message);
     });
   }, [refreshAuth, showToast]);
+  useEffect(() => {
+    if (!serverDown || serverBack) return undefined;
+    const retry = () => {
+      const lost = (error) => {
+        if (isServerUnreachable(error) || isOffline(error)) setServerDown(navigator.onLine === false ? 'device' : 'server');
+      };
+      if (playingOffline.current) { api('/api/auth/status').then(() => setServerBack(true), lost); return; }
+      refreshAuth().then(() => setServerDown(null), lost);
+    };
+    window.addEventListener('online', retry);
+    const timer = window.setInterval(retry, 5_000);
+    return () => {
+      window.removeEventListener('online', retry);
+      window.clearInterval(timer);
+    };
+  }, [serverDown, serverBack, refreshAuth]);
+  const openAfterOutage = useCallback(() => {
+    refreshAuth().then(() => { setServerDown(null); setServerBack(false); }, () => setServerBack(false));
+  }, [refreshAuth]);
   useEffect(() => {
     if (!auth?.offline) return undefined;
     const retry = () => { refreshAuth().catch(() => {}); };
@@ -173,18 +211,20 @@ export default function App() {
       return () => window.clearTimeout(gone);
     }
     const dismiss = () => setToast((current) => (current === toast ? { ...current, leaving: true } : current));
+    // Left alone it fades away; any tap (anywhere) or key takes it away at once - it never stands in the way.
+    const dismissNow = () => setToast((current) => (current === toast ? null : current));
     const timer = window.setTimeout(dismiss, toastDuration(toast.tone));
-    // Any tap or key fades it early. The tap that caused it has already gone
-    // down by now, so listening from the next tick never fades it at once.
+    // The tap that caused it has already gone down by now, so listening from
+    // the next tick never takes it away the moment it shows.
     const arm = window.setTimeout(() => {
-      document.addEventListener('pointerdown', dismiss, true);
-      document.addEventListener('keydown', dismiss, true);
+      document.addEventListener('pointerdown', dismissNow, true);
+      document.addEventListener('keydown', dismissNow, true);
     }, 0);
     return () => {
       window.clearTimeout(timer);
       window.clearTimeout(arm);
-      document.removeEventListener('pointerdown', dismiss, true);
-      document.removeEventListener('keydown', dismiss, true);
+      document.removeEventListener('pointerdown', dismissNow, true);
+      document.removeEventListener('keydown', dismissNow, true);
     };
   }, [toast]);
 
@@ -193,7 +233,7 @@ export default function App() {
   // know more (a test's name) refine it with usePageTitle.
   useEffect(() => {
     document.body.dataset.area = route.test ? 'test' : 'portal';
-    const titles = { attendance: 'Attendance', users: 'Users', tests: 'Tests', create: 'New test', edit: 'Edit test' };
+    const titles = { attendance: 'Attendance', users: 'Users', tests: 'Quizzes', quizzes: 'Quizzes', results: 'Results', create: 'Create quiz', edit: 'Edit quiz' };
     // Faculty reach the results page as their own test attempts.
     const results = auth?.user?.role === 'student' ? 'My results' : 'My test attempts';
     document.title = pageTitle(route.page === 'results' ? results : route.page === 'window-check' ? 'Browser check' : titles[route.admin] || (route.attend ? 'Attendance' : null));
@@ -257,21 +297,26 @@ export default function App() {
   const screen = useMemo(() => {
     // Open to anyone: for trying the private-window check on a phone before a test.
     if (route.page === 'window-check') return <WindowCheckScreen/>;
-    if (!auth) return <div className="empty card">Loading portal…</div>;
+    if (!auth) {
+      return serverDown ? <ServerOffline deviceOffline={serverDown === 'device'} back={serverBack} onOpen={openAfterOutage} onPlaying={notePlaying}/>
+        : <div className="empty card">Loading portal…</div>;
+    }
     if (route.attend) return <AttendanceScreen code={route.attend} auth={auth} refreshAuth={onSignedIn} go={go} showToast={showToast}/>;
     if (route.test) return <StudentScreen code={route.test} auth={auth} refreshAuth={onSignedIn} go={go} showToast={showToast}/>;
     if (route.page === 'results' && auth.user && !auth.user.isGuest) return <MyResultsScreen go={go} showToast={showToast} isStudent={auth.user.role === 'student'}/>;
     if (route.result && auth.user && !auth.user.isGuest) return <ResultDetailScreen code={route.result} go={go} showToast={showToast} isStudent={auth.user.role === 'student'}/>;
     if (route.admin && !auth.user) return <HomeScreen auth={auth} onSignedIn={onSignedIn} go={go} showToast={showToast}/>;
     if (route.admin || auth.user?.role === 'admin') {
-      return <AdminScreen code={route.admin || 'portal'} auth={auth} go={go} showToast={showToast}/>;
+      return <AdminScreen code={route.admin || 'portal'} area={adminAreaOf(route)} navigation={route} auth={auth} go={go} showToast={showToast}/>;
     }
     return <HomeScreen auth={auth} onSignedIn={onSignedIn} go={go} showToast={showToast}/>;
-  }, [auth, route, onSignedIn, go, showToast]);
+  }, [auth, serverDown, serverBack, openAfterOutage, notePlaying, route, onSignedIn, go, showToast]);
 
   // The admin's quiz list and dashboard are tables and panels that earn the
   // extra width; forms and the student's paper read better kept narrow.
-  const isWideScreen = Boolean(auth?.user && !auth.user.isGuest && !route.test && !route.attend &&!['create', 'edit'].includes(route.admin));
+  // The Server offline page too: its message and its game side by side.
+  const isWideScreen = Boolean(auth?.user && !auth.user.isGuest && !route.test && !route.attend &&!['create', 'edit'].includes(route.admin))
+    || Boolean(serverDown && !auth);
 
   return (
     // Who is signed in, for what a page offers them (a name opening the person: components/PersonLink.jsx).
@@ -279,7 +324,8 @@ export default function App() {
       <div className={`nav-progress${navigating ? ' is-active' : ''}`} aria-hidden="true"/>
       <div className={`shell${sitting ? ' is-exam' : ''}`}>
         {/* A test in progress has the whole screen: no header, no way out but Submit. */}
-        {!sitting && (
+        {/* The Server offline page stands alone: the header's links all need the server. */}
+        {!sitting && !(serverDown && !auth) && (
           <SiteHeader auth={auth} route={route} go={go} onChangePassword={() => setChangingPassword(true)} onSignOut={signOut}/>
         )}
         <main className={`main${isWideScreen ? ' main-wide' : ''}`} aria-live="polite">

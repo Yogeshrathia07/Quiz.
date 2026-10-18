@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { leavingRules } from './leaving-rules.js';
 import { isRetryable, post } from '../../lib/api.js';
 import { durationLabel } from '../../lib/format.js';
+import { secondsLabel } from '../../lib/quiz.js';
 import { LocationHelp, LocationPanel } from '../../components/LocationCheck.jsx';
 import { locationPermission } from '../../lib/geo.js';
 import { readDeviceSignals } from '../../lib/device.js';
@@ -120,7 +121,9 @@ export function TestLaunch({ test, code, reload, location, onStarted = () => {},
   // What a student needs before Begin, one line each; the detail of each sits behind its (i).
   const how = [
     test.strictTiming
-      ? 'Change your answer as often as you like until you move on — after that it is final.'
+      ? (test.strictPrevious
+        ? 'Change your answer as often as you like while the question still has time — you can go back to it with Previous.'
+        : 'Change your answer as often as you like until you move on — after that it is final.')
       : 'Move between questions in any order and change your answers as often as you like.',
     test.untimed
       ? 'Submit when you are done; if your instructor closes the test first, your answers are submitted as they stand.'
@@ -128,9 +131,18 @@ export function TestLaunch({ test, code, reload, location, onStarted = () => {},
         ? 'Your clock starts when your paper appears on your screen. You get a warning 5 minutes and 1 minute before your time is up; then the answers you have given are submitted automatically.'
         : 'You get a warning 5 minutes and 1 minute before the end. When time runs out, the answers you have given are submitted automatically.'
   ].join(' ');
+  const back = test.strictPrevious
+    ? (test.strictTimed === false
+      ? ' You can go back to a question you have seen with Previous, or its number at the top.'
+      : ' A question\'s timer runs only while it is on screen: you can go back to one you have seen with Previous, or its number at the top, while it still has time.')
+    : ' You cannot go back.';
+  // How long each question gets, when every question this paper draws has the same time.
+  const drawnSeconds = ['mcq', 'msq', 'short'].filter((type) => !test.questionMix || test.questionMix[type]).map((type) => Number(test.typeSeconds?.[type]) || 0);
+  const eachTime = test.strictTimed && drawnSeconds.length && drawnSeconds[0] > 0 && drawnSeconds.every((seconds) => seconds === drawnSeconds[0])
+    ? ` · ${secondsLabel(drawnSeconds[0])} each` : '';
   const strictDetail = test.strictTimed === false
-    ? 'Move on with Next when you are ready. You cannot go back to an earlier question. You can submit the whole test at any time.'
-    : `Each question has its own timer. When it reaches zero, your answer as it stands is saved and the next question opens by itself.${test.strictNext ? ' You can move on early with Next.' : ' A timed question stays for its full time.'} You cannot go back. You can submit the whole test at any time.`;
+    ? `Move on with Next when you are ready.${test.strictPrevious ? back : ' You cannot go back to an earlier question.'} You can submit the whole test at any time.`
+    : `Each question has its own timer. When it reaches zero, your answer as it stands is saved and the next question opens by itself.${test.strictNext ? ' You can move on early with Next.' : ' A timed question stays for its full time.'}${back} You can submit the whole test at any time.`;
 
   return (
     <section className="join-card card launch-card">
@@ -144,8 +156,12 @@ export function TestLaunch({ test, code, reload, location, onStarted = () => {},
         <li>{test.questionCount} question{test.questionCount === 1 ? '' : 's'} · about {durationLabel(test.estimatedSeconds)}</li>
         <li><EndLine test={test} brief/></li>
         {test.strictTiming && (
-          <li className="is-danger">
-            <span>One question at a time — no going back</span>
+          <li className={test.strictPrevious ? undefined : 'is-danger'}>
+            <span>
+              {!test.strictPrevious ? 'One question at a time — no going back'
+                : test.strictTimed === false ? 'One question at a time — you can go back' : 'One question at a time — go back while time is left'}
+              {eachTime}
+            </span>
             <InfoTip label="About one question at a time">{strictDetail}</InfoTip>
           </li>
         )}

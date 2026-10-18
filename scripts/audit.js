@@ -757,7 +757,7 @@ try {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await buildTestSpreadsheet(data));
     assert.deepEqual(workbook.worksheets.map((sheet) => sheet.name),
-      ['Overview', 'Results', 'Answer grid', 'Question analysis', 'Responses', 'Integrity log', 'Activity log']);
+      ['Overview', 'Results', 'Marks', 'Marks as exported', 'Answer grid', 'Question analysis', 'Responses', 'Integrity log', 'Activity log']);
     const grid = workbook.getWorksheet('Answer grid');
     assert.equal(grid.getCell('A6').value, seat.registration.fullName);
     assert.match(String(grid.getRow(6).values.slice(4).find(Boolean)), /[✓✗]$/, 'the student’s answer carries its mark');
@@ -1225,7 +1225,8 @@ try {
     await workbook.xlsx.load(await buildTestSpreadsheet(data));
     assert.ok(workbook.getWorksheet('Results'));
     assert.ok(workbook.getWorksheet('Responses'));
-    assert.equal(workbook.getWorksheet('Responses').getCell('L5').value.length > 0, true);
+    // M is the answer's status (Correct, Wrong, ...), after the Marks and Max marks columns.
+    assert.equal(workbook.getWorksheet('Responses').getCell('M5').value.length > 0, true);
 
     const analysis = await registrationAnalysis(ADMIN, test.code, seat.registration.id);
     assert.equal(analysis.answers.length, 2);

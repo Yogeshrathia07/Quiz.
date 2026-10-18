@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  DEFAULT_TYPE_SECONDS, STRICT_GRACE_MS, acknowledgeShown, buildTypeSeconds, clockStartOnShown, openQuestionEndsAt, questionSeconds, resolveStrict,
-  strictEstimateSeconds
+  DEFAULT_TYPE_SECONDS, STRICT_GRACE_MS, acknowledgeShown, buildTypeSeconds, clockStartOnShown, extraTimeWrite, lockedMsToGiveBack, openQuestionEndsAt,
+  questionSeconds, resolveStrict, strictEstimateSeconds
 } from '../src/domain/strict-timing.js';
 import { attemptView } from '../src/domain/presenters.js';
 import { buildTest } from '../src/domain/test-builder.js';
@@ -51,6 +51,16 @@ test('a dropped connection costs the open question only, never the ones after it
   const moved = resolveStrict(quiz, attemptAt(0, t0), t0 + 10 * 60_000);
   assert.equal(moved.index, 1, 'only one question closes, however long they were gone');
   assert.equal(moved.shownAt.getTime(), t0 + 10 * 60_000);
+});
+
+test('a question whose key the device was given counts from the end of the one before, however long the device is gone', () => {
+  const keyed = { ...attemptAt(0, t0), strict: { index: 0, shownAt: new Date(t0), keyed: 2, log: [] } };
+  const moved = resolveStrict(quiz, keyed, t0 + 10 * 60_000);
+  assert.equal(moved.index, 1);
+  assert.equal(moved.shownAt.getTime(), t0 + 30_000, 'it was readable on the device from then');
+  assert.equal(moved.sentAt.getTime(), t0 + 30_000, 'the "on screen" grace counts from then too');
+  const stale = resolveStrict(quiz, { ...keyed, strict: { ...keyed.strict, keyed: 3 } }, t0 + 10 * 60_000);
+  assert.equal(stale.shownAt.getTime(), t0 + 10 * 60_000, 'a key to some other question changes nothing');
 });
 
 test('a question with no limit waits for the student', () => {
@@ -161,4 +171,20 @@ test('a one-way paper has question timers when any type, or any question of its 
   assert.equal(hasQuestionTimers({ ...NO_TYPE_SECONDS, short: 120 }, []), true);
   assert.equal(hasQuestionTimers(NO_TYPE_SECONDS, [{ type: 'mcq', timeSeconds: 45 }]), true, 'one question with its own time');
   assert.equal(hasQuestionTimers(undefined), false);
+});
+
+test("a lock on a timed one-way paper gives its time back on the student's own end; other papers get none", () => {
+  const lockedAt = new Date(t0);
+  const unlockAt = t0 + 125_000;
+  assert.equal(lockedMsToGiveBack(quiz, { lockedAt }, unlockAt), 125_000, 'two minutes five locked, two minutes five back');
+  assert.equal(lockedMsToGiveBack({ ...quiz, strictTiming: false }, { lockedAt }, unlockAt), 0, 'a free-moving paper: a lock costs its own time, as before');
+  assert.equal(lockedMsToGiveBack(quiz, { lockedAt: null }, unlockAt), 0, 'a lock with no start known gives nothing');
+  assert.equal(lockedMsToGiveBack(quiz, { lockedAt: new Date(t0 + 5_000) }, t0), 0, 'never negative');
+});
+
+test("time given back adds to a numeric extraMs and sets an older paper's only while unchanged", () => {
+  assert.deepEqual(extraTimeWrite({ extraMs: 60_000 }, 125_000), { set: {}, inc: { extraMs: 125_000 }, expect: {} });
+  assert.deepEqual(extraTimeWrite({}, 125_000), { set: { extraMs: 125_000 }, inc: null, expect: { extraMs: null } });
+  assert.deepEqual(extraTimeWrite({ extraMs: '30000' }, 1_000), { set: { extraMs: 31_000 }, inc: null, expect: { extraMs: '30000' } });
+  assert.deepEqual(extraTimeWrite({ extraMs: 5 }, 0), { set: {}, inc: null, expect: {} }, 'nothing to give: no write');
 });

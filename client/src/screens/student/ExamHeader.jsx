@@ -7,6 +7,20 @@ import { serverNow } from '../../lib/server-clock.js';
 const WARNINGS = [[300, '5 minutes left', 'Your test is submitted automatically when time runs out.'], [60, '1 minute left', 'Finish your last answer.']];
 
 /**
+ * How urgent a timer looks - blue, then orange, then red - by the less pressing of two measures: the share of its
+ * time left (under half orange, under a fifth red), and the seconds left against its own marks (`low`,
+ * `critical`). So a short question starts blue and turns orange, then red, as it runs - not red from the start -
+ * and an hour's test does not turn orange at half time.
+ */
+const STAGES = ['', 'is-low', 'is-critical'];
+const stageOf = (left, { total, low, critical }) => {
+  const bySeconds = left <= critical ? 2 : left <= low ? 1 : 0;
+  if (!(total > 0)) return STAGES[bySeconds];
+  const share = left / total;
+  return STAGES[Math.min(bySeconds, share <= 0.2 ? 2 : share <= 0.5 ? 1 : 0)];
+};
+
+/**
  * A countdown on the server's clock that calls `onExpire` once when it runs
  * out - once per deadline, so a new question (or an extension) arms it again.
  */
@@ -44,6 +58,31 @@ function useQuestionPause(strict, serverTime, away) {
     else if (!away) setHeldAt(null);
   }, [serverTime, serverPaused]); // eslint-disable-line react-hooks/exhaustive-deps
   return strict ? heldAt : null;
+}
+
+/**
+ * The test server out of reach (AttemptScreen's ServerOfflineGate): every clock
+ * held still from the moment the page noticed - the test paused for everyone,
+ * the server giving the time back. Held on until a view from the server has
+ * come since (it carries the given-back time), or a moment after it answered
+ * if nothing changed. Returns the moment (on the server's clock) they are held
+ * at, or null.
+ */
+function useServerHold(down, serverTime) {
+  const [heldAt, setHeldAt] = useState(null);
+  const heldView = useRef(null);
+  useEffect(() => {
+    if (!down) return;
+    setHeldAt((current) => current ?? serverNow());
+    heldView.current = serverTime;
+  }, [down]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (down || heldAt === null) return undefined;
+    if (serverTime !== heldView.current) { setHeldAt(null); return undefined; }
+    const timer = window.setTimeout(() => setHeldAt(null), 2_500);
+    return () => window.clearTimeout(timer);
+  }, [down, serverTime, heldAt]);
+  return heldAt;
 }
 
 /**
@@ -120,15 +159,18 @@ function IntegrityBadge({ attempt }) {
  * this question's under strict timing, else the test's - with a bar that
  * drains as it runs out, and one quiet line with the rest.
  */
-export function ExamHeader({ attempt, strict, away = false, waitingForPicture = false, answeredCount, totalCount, onTestExpire, onQuestionExpire, onWarn }) {
+export function ExamHeader({ attempt, strict, away = false, serverDown = false, waitingForPicture = false, answeredCount, totalCount, onTestExpire, onQuestionExpire, onWarn }) {
   const serverTime = attempt.serverTime;
   // A picture still on its way: the clock waiting for it has not started, so it shows its full time.
   const holdQuestion = waitingForPicture && Boolean(strict?.shownPending);
   const holdPaper = waitingForPicture && Boolean(attempt.clockPending);
-  const test = useDeadline(attempt.untimed || holdPaper ? null : attempt.deadlineAt, serverTime, onTestExpire);
+  // The test server out of reach: every clock held where it was (useServerHold).
+  const downAt = useServerHold(serverDown, serverTime);
+  const test = useDeadline(attempt.untimed || holdPaper || downAt !== null ? null : attempt.deadlineAt, serverTime, onTestExpire);
   // The question's (and, untimed, the paper's) clock, held still while away.
   // Held, it has no deadline to run out at - only the time it had left.
-  const heldAt = useQuestionPause(strict, serverTime, away);
+  const awayAt = useQuestionPause(strict, serverTime, away);
+  const heldAt = downAt ?? awayAt;
   const questionEndsAt = strict?.questionEndsAt || null;
   const paperEndsAt = strict && attempt.untimed ? strict.paperEndsAt : null;
   const running = useDeadline(heldAt === null && !holdQuestion ? questionEndsAt : null, serverTime, onQuestionExpire);
@@ -136,7 +178,11 @@ export function ExamHeader({ attempt, strict, away = false, waitingForPicture = 
   const held = (endsAt) => (endsAt ? { secondsLeft: (Date.parse(endsAt) - heldAt) / 1000, known: true, isOver: false } : running);
   const question = heldAt === null ? running : held(questionEndsAt);
   const paper = heldAt === null ? paperRunning : (paperEndsAt ? held(paperEndsAt) : paperRunning);
-  const testOver = attempt.timeOver || test.isOver;
+  // The test's own clock as shown: held where it was while the server is out of reach.
+  const testShown = downAt !== null && attempt.deadlineAt && !attempt.untimed
+    ? { secondsLeft: (Date.parse(attempt.deadlineAt) - downAt) / 1000, known: true, isOver: false }
+    : test;
+  const testOver = attempt.timeOver || testShown.isOver;
 
   // The 5- and 1-minute warnings for the test, once each, never for a mark already behind us.
   const warned = useRef(null);
@@ -153,7 +199,8 @@ export function ExamHeader({ attempt, strict, away = false, waitingForPicture = 
   const questionTimed = Boolean(strict?.questionEndsAt);
   let primary = null;
   if (questionTimed && holdQuestion) {
-    primary = { label: 'Starts when the picture loads', left: strict.questionSeconds, total: strict.questionSeconds, low: 0, critical: 0 };
+    // What it has left: all of it, unless the student went back to it.
+    primary = { label: 'Starts when the picture loads', left: strict.questionLeftSeconds ?? strict.questionSeconds, total: strict.questionSeconds, low: 0, critical: 0 };
   } else if (questionTimed) {
     primary = { label: 'This question', left: question.known ? question.secondsLeft : null, total: strict.questionSeconds, low: 30, critical: 10 };
   } else if (!attempt.untimed && holdPaper) {
@@ -163,10 +210,10 @@ export function ExamHeader({ attempt, strict, away = false, waitingForPicture = 
     const windowSeconds = (Date.parse(attempt.deadlineAt) - Date.parse(attempt.startedAt)) / 1000;
     const label = attempt.ownTime ? 'Your time left' : 'Time left';
     primary = testOver ? { label, text: 'Time over', tone: 'is-critical' }
-      : { label, left: test.known ? test.secondsLeft : null, total: windowSeconds, low: 300, critical: 60 };
+      : { label, left: testShown.known ? testShown.secondsLeft : null, total: windowSeconds, low: 300, critical: 60 };
   }
   const left = primary?.left === null || primary?.left === undefined ? null : Math.max(0, primary.left);
-  const tone = primary?.tone || (left === null ? '' : left <= primary.critical ? 'is-critical' : left <= primary.low ? 'is-low' : '');
+  const tone = primary?.tone || (left === null ? '' : stageOf(left, primary));
   const value = primary?.text || (left === null ? '—' : countdown(left));
   const fraction = left !== null && primary.total > 0 ? Math.min(1, left / primary.total) : null;
 
@@ -177,7 +224,7 @@ export function ExamHeader({ attempt, strict, away = false, waitingForPicture = 
       // The main timer is the question's: the test's time remaining, under it.
       parts.push(testOver
         ? { text: attempt.ownTime ? 'Your time is over' : 'Test time is over', urgent: true }
-        : { text: `${attempt.ownTime ? 'Your time left' : 'Test time left'} ${test.known ? countdown(test.secondsLeft) : '—'}`, urgent: test.known && test.secondsLeft <= 300 });
+        : { text: `${attempt.ownTime ? 'Your time left' : 'Test time left'} ${testShown.known ? countdown(testShown.secondsLeft) : '—'}`, urgent: testShown.known && testShown.secondsLeft <= 300 });
     } else if (attempt.untimed && (strict.paperEndsAt || strict.laterSeconds)) {
       const paperLeft = strict.paperEndsAt ? (paper.known ? paper.secondsLeft : null) : strict.laterSeconds;
       parts.push({ text: `Paper left ${paperLeft === null ? '—' : countdown(paperLeft)}${strict.untimedLeft ? '+' : ''}` });

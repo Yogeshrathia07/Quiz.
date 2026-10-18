@@ -6,7 +6,7 @@ import { InfoTip } from '../../components/InfoTip.jsx';
 export function TestHeader({ test, showInstructions = true }) {
   return (
     <>
-      <p className="eyebrow" style={{ color: 'var(--brand)' }}>{test.code}</p>
+      <p className="eyebrow" style={{ color: 'var(--primary-text)' }}>{test.code}</p>
       <h1>{test.title}</h1>
       {showInstructions && <p>{test.instructions || 'Follow the administrator’s instructions before you begin.'}</p>}
     </>
@@ -163,7 +163,7 @@ export function PausedAttempt({ attempt, reload }) {
   const leftMs = attempt.deadlineAt ? Math.max(0, Date.parse(attempt.deadlineAt) - Date.parse(attempt.serverTime)) : null;
   return (
     <section className="join-card card lock-card pause-card">
-      <p className="eyebrow" style={{ color: 'var(--primary, #1598D1)' }}>Test paused</p>
+      <p className="eyebrow" style={{ color: 'var(--primary-text)' }}>Test paused</p>
       <h1>Your teacher has paused your test</h1>
       <p>Your time is stopped{leftMs !== null ? <> with <strong>{countdown(Math.round(leftMs / 1000))}</strong> left</> : ''}. Your answers are saved.</p>
       <div className="lock-stats">

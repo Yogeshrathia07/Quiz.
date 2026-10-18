@@ -6,7 +6,7 @@
       <stop offset="1" stop-color="#0A0A0A"/>
     </linearGradient>
   </defs>
-  <circle cx="256" cy="256" r="256" fill="#1689C1"/>
+  <circle cx="256" cy="256" r="256" fill="#0E95E4"/>
   <g clip-path="url(#disc)">
     <!-- The long shadow, cast down and to the right from the Q. -->
     <path d="M348 136L566 336L356 566L168 334L256 236Z" fill="url(#shade)"/>

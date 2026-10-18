@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, CalendarClock, ClipboardList, Lock, PenLine, Plus, QrCode, Send, UserCheck, Users } from 'lucide-react';
+import { ArrowRight, BarChart3, CalendarClock, ClipboardList, Lock, PenLine, Plus, QrCode, Send, UserCheck, Users } from 'lucide-react';
 import { loadCached, useCached } from '../../lib/cache.js';
 import { clockTime, shortDateTime } from '../../lib/format.js';
+import { hasQuizResults } from '../../lib/admin-navigation.js';
 import { papersToMark } from './test-filters.js';
 import { sessionUrl } from '../attendance/attendance-paths.js';
 
-const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+const plural = (count, word, words = `${word}s`) => `${count} ${count === 1 ? word : words}`;
 /** Refreshed while the page is open, so "live" and "to mark" stay true. */
 const REFRESH_MS = 30_000;
 const testUrl = (test, rest = '') => `/?admin=${encodeURIComponent(test.code)}${rest}`;
@@ -51,7 +52,7 @@ function needsOf(tests, sessions) {
       items.push({ key: `${test.code}-mark`, icon: PenLine, tone: 'warn', text: `${plural(papersToMark(test), 'paper')} to mark`, where: test.title, action: 'Mark', url: testUrl(test, '&tab=responses&results=marking:awaiting') });
     }
     if (marksWaiting(test)) {
-      items.push({ key: `${test.code}-release`, icon: Send, tone: 'info', text: 'Marks not released yet', where: test.title, action: 'Release', url: testUrl(test) });
+      items.push({ key: `${test.code}-release`, icon: Send, tone: 'info', text: 'Marks not released yet', where: test.title, action: 'Release', url: testUrl(test, '&tab=responses') });
     }
   }
   for (const session of sessions || []) {
@@ -67,11 +68,11 @@ function statusLine(live, openSessions, needs) {
   if (live.length) {
     const test = live[0];
     const writing = Math.max(0, (test.startedCount || 0) - (test.submittedCount || 0));
-    return `${test.title} is live — ${writing} writing, ${test.submittedCount || 0} submitted${live.length > 1 ? `, and ${plural(live.length - 1, 'more test')} live` : ''}.`;
+    return `${test.title} is live — ${writing} writing, ${test.submittedCount || 0} submitted${live.length > 1 ? `, and ${plural(live.length - 1, 'more quiz', 'more quizzes')} live` : ''}.`;
   }
   if (openSessions.length) return `Attendance is open for ${openSessions[0].title}.`;
   if (needs.length) return `${plural(needs.length, 'thing')} ${needs.length === 1 ? 'needs' : 'need'} you — see below.`;
-  return 'Nothing is live right now. Start a test or open an attendance session.';
+  return 'Nothing is live right now. Start a quiz or open an attendance session.';
 }
 
 /** A clipboard of ticks beside a QR code: the two things this portal does. Drawing only, in the theme's colours. */
@@ -129,16 +130,22 @@ export function FacultyHome({ user, go }) {
   const live = (tests || []).filter((test) => test.isStarted && !test.isClosed);
   const openSessions = (sessions || []).filter((session) => session.isOpen);
   const needs = needsOf(tests, sessions);
-  const toMark = summary?.results?.toMark ?? (tests || []).reduce((sum, test) => sum + papersToMark(test), 0);
+  const resultQuizzes = tests?.filter(hasQuizResults) || null;
+  const toMark = resultQuizzes ? resultQuizzes.reduce((sum, test) => sum + papersToMark(test), 0) : summary?.results?.toMark;
   const upcoming = (tests || [])
     .filter((test) => !test.isStarted && test.startMode === 'scheduled' && test.opensAt && Date.parse(test.opensAt) > now.getTime())
     .sort((a, b) => Date.parse(a.opensAt) - Date.parse(b.opensAt))
     .slice(0, 3);
   const stats = [
     {
-      id: 'tests', icon: ClipboardList, tone: 'info', url: '/?admin=tests',
-      value: tests?.length ?? summary?.tests?.total, label: ['Test', 'Tests'],
-      line: [[`${live.length} live`], [`${toMark} to mark`, toMark > 0 && 'warn']]
+      id: 'quizzes', icon: ClipboardList, tone: 'info', url: '/?admin=quizzes',
+      value: tests?.length ?? summary?.tests?.total, label: ['Quiz', 'Quizzes'],
+      line: [[`${live.length} live`]]
+    },
+    {
+      id: 'results', icon: BarChart3, tone: 'info', url: '/?admin=results',
+      value: resultQuizzes?.length, label: ['Quiz result', 'Quiz results'],
+      line: [[`${Number.isFinite(toMark) ? toMark : '—'} to mark`, toMark > 0 && 'warn']]
     },
     {
       id: 'attendance', icon: QrCode, tone: 'ok', url: '/?admin=attendance',
@@ -161,8 +168,8 @@ export function FacultyHome({ user, go }) {
           <h1>{greeting(user, now)}</h1>
           <p className="home-hero-line">{loading ? ' ' : statusLine(live, openSessions, needs)}</p>
           <div className="home-hero-actions">
-            <a className="button button-primary" href="/?admin=create" onClick={link('/?admin=create')}><Plus size={17} aria-hidden="true"/>New test</a>
-            <a className="button button-secondary" href="/?admin=attendance&new=1" onClick={link('/?admin=attendance&new=1')}><QrCode size={17} aria-hidden="true"/><span className="home-action-long">Take attendance</span><span className="home-action-short">Attendance</span></a>
+            <a className="button button-primary" href="/?admin=create" onClick={link('/?admin=create')}><Plus size={17} aria-hidden="true"/>Create quiz</a>
+            <a className="button button-secondary" href={'/?admin=attendance&new=1'} onClick={link('/?admin=attendance&new=1')}><QrCode size={17} aria-hidden="true"/><span className="home-action-long">Take attendance</span><span className="home-action-short">Attendance</span></a>
           </div>
         </div>
         <HomeArt/>
@@ -217,7 +224,8 @@ export function FacultyHome({ user, go }) {
               <span className="home-stat-icon" aria-hidden="true"><stat.icon size={18}/></span>
               <ArrowRight className="home-stat-go" size={16} aria-hidden="true"/>
             </span>
-            {loading ? <span className="home-loading-line" aria-hidden="true"/> : (
+            {/* While loading, the hidden word still names the link */}
+            {loading ? <><span className="home-loading-line" aria-hidden="true"/><span className="sr-only">{stat.label[1]}</span></> : (
               <>
                 <span className="home-stat-value"><strong>{Number.isFinite(stat.value) ? stat.value : '—'}</strong>{stat.label[stat.value === 1 ? 0 : 1]}</span>
                 {/* Only what waits on you in colour: "1 live · 2 to mark". */}

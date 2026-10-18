@@ -84,13 +84,14 @@ export function activityLog(test, registration) {
       const label = event.type === 'fullscreen_exit' ? `Left the test: ${described.label.toLowerCase()}` : described.label;
       add(event.createdAt, EVENT_KIND[event.type] || 'other', label, described.detail || '', described.durationMs);
     }
-    // Strict timing: each question closing, by the student or by its clock.
+    // Strict timing: each visit to a question ending - by the student (on, or
+    // back where the test allows it) or by its clock.
     const numbers = new Map((attempt.questions || []).map((assigned) => [assigned.questionId, assigned.questionIndex + 1]));
+    const LEFT = { time: 'Time ran out on', back: 'Went back from' };
     for (const entry of attempt.strict?.log || []) {
       const seconds = Math.max(0, Math.round((new Date(entry.closedAt) - new Date(entry.shownAt)) / 1000));
       add(entry.closedAt, entry.how === 'time' ? 'lock' : 'answer',
-        entry.how === 'time' ? `Time ran out on Q${numbers.get(entry.questionId) ?? '?'}` : `Moved on from Q${numbers.get(entry.questionId) ?? '?'}`,
-        `after ${seconds}s`);
+        `${LEFT[entry.how] || 'Moved on from'} Q${numbers.get(entry.questionId) ?? '?'}`, `after ${seconds}s`);
     }
     if (attempt.status === 'submitted') add(attempt.submittedAt, 'submit', attempt.submittedBy === 'time' ? 'Submitted automatically (time up)' : 'Submitted the test');
   }

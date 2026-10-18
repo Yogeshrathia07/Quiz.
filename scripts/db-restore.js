@@ -29,4 +29,4 @@ for (const file of readdirSync(folder).filter((name) => name.endsWith('.json') &
   counts[name] = await db.collection(name).countDocuments();
 }
 await client.close();
-console.log(`Restored ${folder} into ${db.databaseName}`, counts);
+console.log('Restored %s into %s', folder, db.databaseName, counts);

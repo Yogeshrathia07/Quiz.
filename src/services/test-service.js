@@ -7,6 +7,7 @@ import { buildTest, timeMs } from '../domain/test-builder.js';
 import { endModeOf, startModeOf } from '../domain/attempt-rules.js';
 import { publicTest } from '../domain/presenters.js';
 import { activeQuestions } from '../domain/question-bank.js';
+import { hasQuestionTimers } from '../domain/strict-timing.js';
 import { qrSvg } from '../domain/qr-art.js';
 import { requireImages } from './question-image-service.js';
 import { adminEmail, invalidateTestCache, publicCode, requireOwnedTest, requireTest, testDocByCode, updateTest } from '../data/test-repository.js';
@@ -64,6 +65,7 @@ export async function createTest(req, raw) {
     questionLayout: input.questionLayout,
     strictTiming: input.strictTiming,
     strictNext: input.strictNext,
+    strictPrevious: input.strictPrevious,
     typeSeconds: input.typeSeconds,
     typeMarks: input.typeMarks,
     questionDraw: input.questionDraw,
@@ -96,14 +98,16 @@ export async function createTest(req, raw) {
 }
 
 /**
- * Fields that decide which questions a student's paper is drawn from. Once the
- * test starts, papers exist: changing these would leave the cohort sitting
- * different tests, and a restarted student would get a paper unlike everyone
- * else's. Everything not listed here is safe to change while the test runs.
+ * Fields that decide which questions a student's paper is drawn from, or how
+ * its clock runs. Once the test starts, papers exist: changing these would
+ * leave the cohort sitting different tests, and a restarted student would get
+ * a paper unlike everyone else's. Everything not listed here is safe to change
+ * while the test runs - Next among them, and going back, which can be turned
+ * on (never off again: see navigationProblem).
  */
 export const LOCKED_ONCE_STARTED = [
   'questionMix', 'questionCount', 'shuffleQuestions', 'opensAt', 'startMode', 'durationMinutes', 'strictTiming', 'typeSeconds', 'questionTimes',
-  'questionDraw', 'strictNext'
+  'questionDraw'
 ];
 
 const LOCKED_LABELS = {
@@ -116,9 +120,22 @@ const LOCKED_LABELS = {
   strictTiming: 'strict timing',
   typeSeconds: 'the question times',
   questionTimes: 'the question times',
-  questionDraw: 'how questions are picked',
-  strictNext: 'the Next button setting'
+  questionDraw: 'how questions are picked'
 };
+
+/**
+ * What moving between questions may change to on `test` as it stands, or
+ * why not. Next can go on and off at any time. Going back can be turned on
+ * while the test runs - students only gain by it - but once on with papers
+ * out, never off: questions students have already gone back to, and read,
+ * cannot be taken away fairly.
+ */
+export function navigationProblem(test, wanted) {
+  if (wanted.previous === false && test.strictPrevious === true && (test.isStarted || test.isClosed)) {
+    return 'Going back cannot be turned off once the test has started: students may already have used it.';
+  }
+  return null;
+}
 
 /**
  * Rewrites a test's setup. The payload is re-validated through `buildTest` with
@@ -140,6 +157,8 @@ export async function updateTestSettings(req, code, raw = {}) {
       throw new PublicTestError(409, `Students have already started, so ${blocked.join(' and ')} cannot change. Reset the test if you need to.`);
     }
   }
+  const navigation = navigationProblem(test, { previous: raw.strictPrevious });
+  if (navigation) throw new PublicTestError(409, navigation);
 
   // Once started, the start is history: keep it as it was.
   const startMode = test.isStarted ? startModeOf(test) : raw.startMode ?? startModeOf(test);
@@ -179,6 +198,7 @@ export async function updateTestSettings(req, code, raw = {}) {
     questionLayout: raw.questionLayout ?? test.questionLayout,
     strictTiming: raw.strictTiming ?? test.strictTiming === true,
     strictNext: raw.strictNext ?? test.strictNext !== false,
+    strictPrevious: raw.strictPrevious ?? test.strictPrevious === true,
     typeSeconds: raw.typeSeconds ?? test.typeSeconds,
     // Marks are set with the questions (Edit test), not here: kept as they are.
     typeMarks: test.typeMarks,
@@ -205,7 +225,8 @@ export async function updateTestSettings(req, code, raw = {}) {
   else if (test.questionMix) source.questionMix = test.questionMix;
   else source.questionCount = test.questionCount;
 
-  const input = buildTest(source);
+  // Going back already on in a running test stays on, whatever the paper's timers.
+  const input = buildTest(source, { keepPrevious: test.isStarted && test.strictPrevious === true });
   refusePastTimes(input, raw);
   // A running duration test already has its real end time (and any extension):
   // it stays unless the admin changed how the test ends.
@@ -237,6 +258,7 @@ export async function updateTestSettings(req, code, raw = {}) {
       questionLayout: input.questionLayout,
       strictTiming: input.strictTiming,
       strictNext: input.strictNext,
+      strictPrevious: input.strictPrevious,
       typeSeconds: input.typeSeconds,
       questionDraw: input.questionDraw,
       // Each active question's own time, written at its real place in the bank
@@ -252,6 +274,32 @@ export async function updateTestSettings(req, code, raw = {}) {
   // The settings dialog only needs the settings it just saved. Rebuilding the
   // whole registration dashboard here made a one-field time extension wait
   // behind every student's row and answer history.
+  const updated = await requireOwnedTest(req, code, { withStudents: false });
+  return { ok: true, code: updated.code, test: publicTest(updated) };
+}
+
+/**
+ * The dashboard's switches for a one-at-a-time paper on the clock, which
+ * work while it runs: `next` turns Next on or off - leaving a question before
+ * its time is up - and `previous: true` lets students go back to questions
+ * they have seen, on a paper with no question timers (a timed one goes
+ * forward only). Every open paper hears of it at once
+ * (the route signals the class) and follows on its next move.
+ */
+export async function setNavigation(req, code, raw = {}) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
+  if (test.isClosed) throw new PublicTestError(409, 'This test is complete. Reset it before changing its setup.');
+  if (test.strictTiming !== true) throw new PublicTestError(409, 'Students already move freely between the questions of this test.');
+  const set = {};
+  if (typeof raw.next === 'boolean') set.strictNext = raw.next;
+  if (typeof raw.previous === 'boolean') set.strictPrevious = raw.previous;
+  if (!Object.keys(set).length) throw new PublicTestError(400, 'Say whether Next or going back should change.');
+  const problem = navigationProblem(test, { previous: set.strictPrevious });
+  if (problem) throw new PublicTestError(409, problem);
+  if (set.strictPrevious === true && test.strictPrevious !== true && hasQuestionTimers(test)) {
+    throw new PublicTestError(409, 'Going back is not available when each question has a timer: a timed question closes once it is left.');
+  }
+  await updateTest(test.code, { $set: { ...set, updatedAt: now() } });
   const updated = await requireOwnedTest(req, code, { withStudents: false });
   return { ok: true, code: updated.code, test: publicTest(updated) };
 }

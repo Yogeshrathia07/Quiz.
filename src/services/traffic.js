@@ -20,8 +20,12 @@ export function isLiveStreamRequest(method, path) {
 
 /** Reads that are safe for the browser to retry and never carry an answer. */
 export function isPollableRequest(method, path) {
+  // The next question's key: without it the paper moves on as it always did.
+  if (method === 'POST') return /^\/api\/test-attempts\/[^/]+\/next-key$/.test(path);
   if (method !== 'GET') return false;
   return /^\/api\/tests\/[^/]+(?:\/attempt)?$/.test(path)
+    // Questions fetched ahead: the paper works without them, only less quickly.
+    || /^\/api\/test-attempts\/[^/]+\/ahead$/.test(path)
     || /^\/api\/admin\/tests\/[^/]+(?:\/overview|\/matrix)?$/.test(path)
     || /^\/api\/admin\/attendance\/[^/]+$/.test(path);
 }

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { AuthForm } from '../components/AuthForm.jsx';
 import { BRAND } from '../brand.js';
 import { MyResultsScreen } from './student/MyResultsScreen.jsx';
@@ -10,14 +11,49 @@ const AUTH_MESSAGES = {
   failed: 'Microsoft sign-in could not be completed. Please try again.'
 };
 
+/** Keep the displayed clock aligned to each second, including after returning to the tab. */
+function useClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    let timer;
+    const tick = () => {
+      setNow(new Date());
+      timer = window.setTimeout(tick, 1_000 - (Date.now() % 1_000) + 20);
+    };
+    timer = window.setTimeout(tick, 1_000 - (Date.now() % 1_000) + 20);
+    const onShow = () => { if (!document.hidden) setNow(new Date()); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => {
+      window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onShow);
+    };
+  }, []);
+  return now;
+}
+
+/** Today's date and the time, under Welcome. */
+function SignInClock() {
+  const now = useClock();
+  return (
+    <p className="sign-in-now">
+      <time dateTime={now.toISOString()}>
+        <span className="sign-in-date">{now.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+        <span className="sign-in-time">{now.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span>
+      </time>
+    </p>
+  );
+}
+
 export function HomeScreen({ auth, onSignedIn, go, showToast }) {
   const issue = new URLSearchParams(window.location.search).get('auth');
 
   if (!auth.user) {
     return (
       <section className="sign-in-page">
+        {/* No slogan: Welcome, and today's date and time. */}
         <div className="sign-in-intro">
-          <h1 className="sign-in-tagline">{BRAND.tagline}</h1>
+          <h1 className="sign-in-welcome">{BRAND.welcome}</h1>
+          <SignInClock/>
         </div>
         <div className="sign-in-panel">
           {issue && <div className="notice danger">{AUTH_MESSAGES[issue] || AUTH_MESSAGES.failed}</div>}

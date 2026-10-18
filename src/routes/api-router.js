@@ -1,4 +1,6 @@
 import express, { Router } from 'express';
+import { settleOutage } from '../services/outage.js';
+import { noteRequest, reachToken } from '../services/reachability.js';
 import { config } from '../config.js';
 import {
   authStatus, logout, requireAccount, requireAdmin, requireTestTaker, requireUserManager
@@ -7,8 +9,10 @@ import {
   changePassword, checkCode, logIn, passwordStatus, requestCode, resetPassword, signUp
 } from '../auth/account-login.js';
 import { beginMicrosoftLogin, finishMicrosoftLogin } from '../auth/microsoft-login.js';
-  import { createTest, testQrSvg, updateTestSettings } from '../services/test-service.js';
+  import { createTest, setNavigation, testQrSvg, updateTestSettings } from '../services/test-service.js';
 import { saveTestPaper, testForEditing } from '../services/paper-service.js';
+import { discardDraft, getDraft, saveDraft } from '../services/draft-service.js';
+import { queueResultMails, resultMailList, resultMailPreview } from '../services/result-mail-service.js';
 import { importMarks } from '../services/marks-import.js';
 import {
   beginGuestSession, endGuestVisit, getTest, myResponseData, myResponseView, myResults, registerForTest, setMySapId, studentProfile
@@ -17,9 +21,11 @@ import {
   blockUser, deleteUser, listUsers, setUserName, setUserSapId, unblockUser, userDetail, userResponseData
 } from '../services/user-service.js';
 import {
-  attemptResult, getAttempt, markShown, nextQuestion, recordFullscreenEvent, recordFullscreenEvents, recordLocationCheck, saveAnswer, startAttempt, submitAttemptForStudent
+  attemptResult, getAttempt, goToQuestion, markShown, nextQuestion, questionsAhead, recordFullscreenEvent, recordFullscreenEvents, recordLocationCheck, releaseNextKey,
+  saveAnswer, startAttempt, submitAttemptForStudent
 } from '../services/attempt-service.js';
 import { attemptRevision, compactAnswerResponse, compactAttemptState, revisionedAttempt } from '../domain/attempt-sync.js';
+import { imageIdOf } from '../domain/question-image.js';
 import {
   adminDashboard, adminExportData, adminTests, archiveTest, userTestAnalysis, bulkAttemptAction, duplicateTest, bulkDecision, closeTest, csvForAdmin, decideRegistration,
   deleteTest, gradeManualAnswer, manualReview, registrationAnalysis, registrationRecord, releaseResults, restartAllAttempts, restartQuiz, reviewData, setAnswerMarks, setResultsFrozen, setUnmarkedRelease,
@@ -36,7 +42,7 @@ import {
   reopenAttendance, searchPeople, setMarkStatus, setMarkStatuses
 } from '../services/attendance-service.js';
 import { homeSummary } from '../services/home-service.js';
-import { testMatrix, testOverview } from '../services/overview-service.js';
+import { questionStatistics, testMatrix, testOverview } from '../services/overview-service.js';
 import { MAX_IMAGE_BYTES, questionImage, saveQuestionImage } from '../services/question-image-service.js';
 import { checkAnyDevice, checkTestDevice } from '../services/device-service.js';
 import { limitPerAddress } from '../lib/security.js';
@@ -113,6 +119,21 @@ export function createApiRouter() {
     next();
   });
 
+  // An outage not yet given back - the server itself down a moment ago, or students unable to reach it until
+  // this request got through - is given back before any request goes on, so no question is closed, and no
+  // paper handed in, for the time it took (outage.js, reachability.js). Nothing to wait for: straight on.
+  router.use('/api', (req, _res, next) => {
+    const reach = noteRequest(req);
+    const restart = settleOutage();
+    if (!reach && !restart) { next(); return; }
+    Promise.all([reach, restart]).then(() => next(), () => next());
+  });
+  // The server asking for itself at its public address: proof students can reach it (reachability.js).
+  router.get('/api/reach', (_req, res) => {
+    res.set('Cache-Control', 'no-store');
+    res.json({ token: reachToken() });
+  });
+
   /* ------------------------------------------------------------------ auth */
   router.get('/api/auth/status', (req, res) => res.json(authStatus(req)));
   router.post('/api/auth/login', route(async (req, res) => res.json(await logIn(req, res, req.body || {}))));
@@ -174,8 +195,14 @@ export function createApiRouter() {
   /* -------------------------------------------------- tests and joining in */
   router.post('/api/tests', requireAdmin, route(async (req, res) => {
     const created = await createTest(req, req.body || {});
+    // It is a test now: the Create page's draft has done its work.
+    await discardDraft(req);
     res.status(201).json({ test: created.test, joinUrl: joinUrl(req, created.test.code) });
   }));
+  // The Create page's draft, kept on the server for its teacher (services/draft-service.js).
+  router.get('/api/admin/draft', requireAdmin, route(async (req, res) => res.json(await getDraft(req))));
+  router.put('/api/admin/draft', requireAdmin, route(async (req, res) => res.json(await saveDraft(req, req.body || {}))));
+  router.delete('/api/admin/draft', requireAdmin, route(async (req, res) => res.json(await discardDraft(req))));
   router.get('/api/tests/:code', route(async (req, res) => res.json(await getTest(req, req.params.code))));
   router.get('/api/tests/:code/qr.svg', route(async (req, res) => {
     // An SVG opened on its own is a page of this site: it may run nothing and load nothing.
@@ -229,12 +256,26 @@ export function createApiRouter() {
     signal({ code: attempt.code, kind: 'question_next' });
     res.json({ attempt });
   }));
+  // Going back, where the test allows it: leave the open question for one already seen that still has time.
+  router.post('/api/test-attempts/:attemptId/go', requireTestTaker, route(async (req, res) => {
+    const attempt = await goToQuestion(req, req.params.attemptId, req.body || {});
+    signal({ code: attempt.code, kind: 'question_next' });
+    res.json({ attempt });
+  }));
+  // A timed one-way paper: the next few questions, sealed, fetched while the student works ...
+  router.get('/api/test-attempts/:attemptId/ahead', requireTestTaker, route(async (req, res) => {
+    res.json(await questionsAhead(req, req.params.attemptId, req.query || {}));
+  }));
+  // ... and, in the open question's last moments, the key to the next one (domain/paper-seal.js).
+  router.post('/api/test-attempts/:attemptId/next-key', requireTestTaker, route(async (req, res) => {
+    res.json(await releaseNextKey(req, req.params.attemptId, req.body || {}));
+  }));
   // The paper or the open question is on the student's screen: its clock starts.
   router.post('/api/test-attempts/:attemptId/shown', requireTestTaker, route(async (req, res) => {
     res.json({ attempt: await markShown(req, req.params.attemptId, req.body || {}) });
   }));
   router.post('/api/test-attempts/:attemptId/submit', requireTestTaker, route(async (req, res) => {
-    const attempt = await submitAttemptForStudent(req, req.params.attemptId);
+    const attempt = await submitAttemptForStudent(req, req.params.attemptId, req.body || {});
     signal({ code: attempt.code, kind: 'submitted' });
     res.json({ attempt });
   }));
@@ -264,12 +305,15 @@ export function createApiRouter() {
     res.status(201).json(await saveQuestionImage(req, req.body, req.query));
   }));
   // A question's picture. Its id cannot be guessed and its bytes never change,
-  // so the browser keeps it for good - fetched once when the paper opens, it
-  // is there for every later look, and for a paper carried on offline.
-  router.get('/api/question-images/:id', route(async (req, res) => {
-    const image = await questionImage(req.params.id);
-    if (!image) { res.status(404).json({ error: 'This picture does not exist.' }); return; }
-    res.set({ 'Content-Type': image.contentType, 'Content-Length': String(image.bytes), 'Cache-Control': 'private, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'" });
+  // so it is kept for good - by the browser (fetched once when the paper opens,
+  // it is there for every later look, and for a paper carried on offline) and
+  // by Cloudflare, which then serves a whole class asking at once from near
+  // them: this server sends each picture out once, not once per student. The
+  // address may end in the picture's kind (domain/question-image.js imageUrl).
+  router.get('/api/question-images/:file', route(async (req, res) => {
+    const image = await questionImage(imageIdOf(req.params.file));
+    if (!image) { res.set('Cache-Control', 'no-store'); res.status(404).json({ error: 'This picture does not exist.' }); return; }
+    res.set({ 'Content-Type': image.contentType, 'Content-Length': String(image.bytes), 'Cache-Control': 'public, max-age=31536000, immutable', 'Content-Security-Policy': "default-src 'none'" });
     res.end(Buffer.from(image.data.buffer));
   }));
   router.get('/api/admin/home', requireAdmin, route(async (req, res) => res.json(await homeSummary(req))));
@@ -279,13 +323,14 @@ export function createApiRouter() {
     openAdminUpdates(req, res, test.code);
   }));
   router.get('/api/admin/tests/:code', requireAdmin, route(async (req, res) => {
-    const paged = req.query.pageSize ? {
+    const paged = req.query.pageSize || req.query.af !== undefined ? {
       section: req.query.section,
       page: req.query.page,
       pageSize: req.query.pageSize,
       search: req.query.search,
       filters: req.query.filters,
-      sort: req.query.sort
+      sort: req.query.sort,
+      af: req.query.af
     } : null;
     res.json(await adminDashboard(req, req.params.code, paged));
   }));
@@ -293,6 +338,8 @@ export function createApiRouter() {
   router.get('/api/admin/tests/:code/overview', requireAdmin, route(async (req, res) => res.json(await testOverview(req, req.params.code))));
   // The Analysis tab: every submitted paper against every question (overview-service matrixOf).
   router.get('/api/admin/tests/:code/matrix', requireAdmin, route(async (req, res) => res.json(await testMatrix(req, req.params.code))));
+  router.get('/api/admin/tests/:code/questions/:questionId/statistics', requireAdmin,
+    route(async (req, res) => res.json(await questionStatistics(req, req.params.code, req.params.questionId))));
   router.get('/api/admin/tests/:code/export.csv', requireAdmin, route(async (req, res) => {
     const dashboard = await adminDashboard(req, req.params.code);
     res.type('text/csv').attachment(`${req.params.code}-registrations.csv`).send(csvForAdmin(dashboard));
@@ -312,7 +359,22 @@ export function createApiRouter() {
   }));
   // The whole question paper, for the editor; saving it asks who it reaches once papers are out.
   router.get('/api/admin/tests/:code/paper', requireAdmin, route(async (req, res) => res.json(await testForEditing(req, req.params.code))));
-  router.put('/api/admin/tests/:code/paper', requireAdmin, route(async (req, res) => res.json(await saveTestPaper(req, req.params.code, req.body || {}))));
+  router.put('/api/admin/tests/:code/paper', requireAdmin, route(async (req, res) => {
+    const response = await saveTestPaper(req, req.params.code, req.body || {});
+    // How students move between questions changed under open papers: they follow at once.
+    if (response.liveChanged) signalTest(req.params.code, 'test_settings_changed', { test: response.test });
+    res.json(response);
+  }));
+  // A running one-at-a-time paper: Next on or off, going back on (services/test-service.js setNavigation).
+  // Results by email, once the marks are out (services/result-mail-service.js).
+  router.get('/api/admin/tests/:code/result-mails', requireAdmin, route(async (req, res) => res.json(await resultMailList(req, req.params.code))));
+  router.post('/api/admin/tests/:code/result-mails', requireAdmin, route(async (req, res) => res.json(await queueResultMails(req, req.params.code, req.body || {}))));
+  router.post('/api/admin/tests/:code/result-mails/preview', requireAdmin, route(async (req, res) => res.json(await resultMailPreview(req, req.params.code, req.body || {}))));
+  router.post('/api/admin/tests/:code/navigation', requireAdmin, route(async (req, res) => {
+    const response = await setNavigation(req, req.params.code, req.body || {});
+    signalTest(req.params.code, 'test_settings_changed', { test: response.test });
+    res.json(response);
+  }));
   // Works while the test is live: this is how an admin gives time back.
   router.post('/api/admin/tests/:code/end-time', requireAdmin, route(async (req, res) => {
     const response = await setTestEndTime(req, req.params.code, req.body || {}, { compact: true });

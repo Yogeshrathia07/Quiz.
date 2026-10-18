@@ -1,11 +1,16 @@
 import { MongoClient } from 'mongodb';
 import { config } from '../config.js';
+import { addImageEndings } from './add-image-endings.js';
 import { moveRegistrationsOut } from './move-registrations.js';
 import { repairAttendanceNames } from './repair-attendance-names.js';
 
 const client = new MongoClient(config.mongoUri, {
   maxPoolSize: config.mongoMaxPoolSize,
-  maxConnecting: config.mongoMaxConnecting
+  maxConnecting: config.mongoMaxConnecting,
+  // Never wait forever: a stuck call fails, its request answers, the device retries (config.js).
+  socketTimeoutMS: config.mongoSocketTimeoutMs,
+  waitQueueTimeoutMS: config.mongoWaitQueueTimeoutMs,
+  serverSelectionTimeoutMS: config.mongoServerSelectionTimeoutMs
 });
 let database = null;
 
@@ -30,10 +35,11 @@ export async function initializeDatabase() {
     { key: { 'attempt.id': 1 }, sparse: true },
     { key: { collegeEmail: 1 } },
     { key: { testCode: 1, sapId: 1 } },
-    { key: { testCode: 1, 'attempt.status': 1 } },
     // Dashboard pages first narrow to one test and then commonly filter by
     // registration/attempt state. These keep the 25–100 row browser pages
     // from walking an entire large class before aggregation applies its page.
+    // (The second also serves { testCode, attempt.status } alone, as its prefix,
+    // so an index on just those two is retired below.)
     { key: { testCode: 1, status: 1, requestedAt: 1 } },
     { key: { testCode: 1, 'attempt.status': 1, requestedAt: 1 } },
     { key: { testCode: 1, requestedAt: 1 } },
@@ -41,6 +47,13 @@ export async function initializeDatabase() {
     // pending ones are indexed, so it stays small however many students there are.
     { key: { requestedAt: 1 }, partialFilterExpression: { status: 'pending' }, name: 'pending_requests_by_age' }
   ]);
+  // Retired: { testCode, attempt.status } on its own. The compound index above
+  // starts with the same two fields and serves every query it did; keeping both
+  // only made each answer saved update one index more.
+  const registrationIndexes = await database.collection('registrations').indexes().catch(() => []);
+  if (registrationIndexes.some((index) => index.name === 'testCode_1_attempt.status_1')) {
+    await database.collection('registrations').dropIndex('testCode_1_attempt.status_1');
+  }
   // Tests from before each student had a document of their own are moved over
   // once, here, before a single request is served (see move-registrations.js).
   await moveRegistrationsOut(database);
@@ -76,6 +89,10 @@ export async function initializeDatabase() {
     { key: { email: 1, createdAt: -1 } },
     { key: { ip: 1, createdAt: -1 } }
   ]);
+  // One entry per results email sent, kept a day: what today's allowance has used.
+  await database.collection('resultMailSends').createIndex({ createdAt: 1 }, { expireAfterSeconds: 24 * 60 * 60 });
+  // Results emails waiting to go, or going (result-mail-service.js).
+  await database.collection('registrations').createIndex({ 'resultMail.status': 1, 'resultMail.queuedAt': 1 }, { sparse: true });
   // One document per attendance session, its marks embedded, so marking and
   // closing are single atomic writes like everything else here.
   await database.collection('attendanceSessions').createIndexes([
@@ -87,6 +104,7 @@ export async function initializeDatabase() {
     { key: { sapId: 1 }, unique: true }
   ]);
   await repairAttendanceNames(database);
+  await addImageEndings(database);
 }
 
 export const tests = () => database.collection('tests');
@@ -104,6 +122,9 @@ export const attendanceSessions = () => database.collection('attendanceSessions'
 export const questionImages = () => database.collection('questionImages');
 // One document: the server's heartbeat, so a restart can tell how long it was down.
 export const serverState = () => database.collection('serverState');
+// A test being written on the Create page and not created yet, one per teacher: { _id: their email, json, bytes, savedAt } (services/draft-service.js).
+export const creatorDrafts = () => database.collection('creatorDrafts');
+export const resultMailSends = () => database.collection('resultMailSends');
 
 export async function closeDatabase() {
   await client.close();

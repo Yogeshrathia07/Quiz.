@@ -5,15 +5,20 @@ import {
   Info, Lock, LogOut, PenLine, ScrollText, Search, ShieldCheck, SlidersHorizontal, TrendingDown, TrendingUp, Trophy, X
 } from 'lucide-react';
 import { FilterMenu } from '../../components/FilterMenu.jsx';
+import { InfoTip } from '../../components/InfoTip.jsx';
 import { Modal } from '../../components/Modal.jsx';
 import { durationLabel, shortDateTime } from '../../lib/format.js';
 import { useFitToScreen } from '../../lib/fit-to-screen.js';
 import { useFloatingPanel } from '../../lib/useFloatingPanel.js';
 import { BANDS, PENDING_BAND, STATE_NAMES, bandOf, cellOf, compute, rangeOf, spanOf } from './analysis-compute.js';
 import { TYPE_WORD, marksText, percentText, plural, useOverview } from './TestOverview.jsx';
+import { QuestionStatisticsModal } from './modals/QuestionStatisticsModal.jsx';
+import { AnswerAnalysisView } from './AnswerAnalysisView.jsx';
+import { useAnswerFilters } from './useAnswerFilters.js';
+import { encodeAnswerFilters } from './answer-filters.js';
 
 /*
- * The Analysis tab, one screen tall, in three views the switch at the top
+ * The Analysis tab, one screen tall, in four views the switch at the top
  * chooses between: Charts (six figures, the score bands and the marks
  * chart), Questions (every question's average) and the Rank list (every
  * paper, answer by answer). All three share one toolbar: search, Sort &
@@ -24,20 +29,24 @@ import { TYPE_WORD, marksText, percentText, plural, useOverview } from './TestOv
  */
 
 /**
- * The score bands' colours, low to high: rose (below 30%), orange (30-50%),
- * yellow (50-70%), teal (70-80%), sky (80-90%), blue (90-100%); grey for
- * still to mark. The legend names each band beside its colour.
+ * The score bands' colours, low to high, from the colour scheme's accents:
+ * red (below 30%), orange (30-50%), yellow (50-70%), green (70-80%), teal
+ * (80-90%), blue (90-100%); grey for still to mark. The red stays darker than
+ * the orange beside it even to red-green colour-blind eyes, and the legend
+ * names each band beside its colour.
  */
-const BAND_COLOURS = { 90: '#5B8DEF', 80: '#38BDF8', 70: '#2DD4BF', 50: '#FACC15', 30: '#FB923C', 0: '#F43F5E', [PENDING_BAND]: '#5C636A' };
+const BAND_COLOURS = { 90: '#0E95E4', 80: '#4DA5B5', 70: '#2FB67C', 50: '#F5C842', 30: '#F49D37', 0: '#EF4444', [PENDING_BAND]: '#5F6673' };
 /**
- * The bars' colours (the marks chart, the question averages): one purple,
- * darkest for the lowest band and brightest for the best, so on the dark
+ * The bars' colours (the marks chart, the question averages): the scheme's
+ * blue, darkest for the lowest band and lightest for the best, so on the dark
  * card the better marks stand out. The donut keeps its own colours above.
  */
-const BAR_COLOURS = { 90: '#E0E3FF', 80: '#B8BFFB', 70: '#959FF6', 50: '#7480EC', 30: '#5A65CC', 0: '#4A50A8' };
-/** Suggested numbers of bars for the marks chart; any whole number from 1 to MAX_BARS will do. */
-const BAR_CHOICES = [5, 10, 20];
+const BAR_COLOURS = { 90: '#E3F1F8', 80: '#9DCBE3', 70: '#5FA9CC', 50: '#2B93C9', 30: '#1A7DAB', 0: '#136790' };
+/** Suggested numbers of bars for the marks chart (null: as suit the paper); any whole number from 1 to MAX_BARS will do. */
+const BAR_CHOICES = [null, 5, 10, 20];
 const MAX_BARS = 100;
+/** A bar narrower than this is too thin to press (a finger's 24 px): the chart makes fewer, wider ones. */
+const MIN_BAR_PX = 24;
 const barsOf = (value) => {
   const number = Math.round(Number(value));
   return Number.isFinite(number) && number >= 1 && number <= MAX_BARS ? number : null;
@@ -45,6 +54,7 @@ const barsOf = (value) => {
 const VIEWS = [
   { id: 'charts', label: 'Charts', icon: ChartPie },
   { id: 'questions', label: 'Questions', icon: ChartColumnBig },
+  { id: 'answers', label: 'Answer analysis', icon: ListChecks },
   { id: 'list', label: 'Rank list', icon: ListOrdered }
 ];
 
@@ -121,14 +131,15 @@ function orderQuestions(figures, selected, sort) {
 /* --------------------------------------------------------- the address */
 
 const fromAddress = (key) => new URLSearchParams(window.location.search).get(key);
-const ADDRESS_KEYS = ['view', 'qs', 'bins'];
+const ADDRESS_KEYS = ['view', 'qs', 'bins', 'aq'];
 function initialChoices(questions) {
   const asked = fromAddress('qs');
   const numbers = asked === 'none' ? [] : asked ? asked.split(',').map(Number) : null;
   const selected = numbers ? new Set(questions.flatMap((question, column) => (numbers.includes(question.number) ? [column] : []))) : new Set(questions.map((_question, column) => column));
-  const bins = barsOf(fromAddress('bins')) ?? 10;
+  // None asked for: as many as suit the paper (analysis-compute.js markBars).
+  const bins = barsOf(fromAddress('bins'));
   const view = fromAddress('view');
-  return { view: view === 'list' || view === 'questions' ? view : 'charts', selected, bins };
+  return { view: ['list', 'questions', 'answers'].includes(view) ? view : 'charts', selected, bins };
 }
 
 /* --------------------------------------------------------------- widgets */
@@ -137,45 +148,62 @@ function Tile({ label, value, sub }) {
   return <div className="an-tile" title={sub ? `${label}: ${value} · ${sub}` : `${label}: ${value}`}><strong>{value}</strong><span>{label}{sub ? <small> · {sub}</small> : null}</span></div>;
 }
 
-/** Score bands as a ring: a slice per band and one for papers still to mark, each with its count and share in the legend. For reading: nothing here filters. */
-function Donut({ bands }) {
+/**
+ * Score bands as a ring: a slice per band and one for papers still to mark,
+ * each with its count and share in the legend. A band - its slice or its
+ * legend line - lists its students (`onPick`); the band picked stays lit, and
+ * pressing it again lets it go.
+ */
+function Donut({ bands, picked = null, onPick }) {
   const [hover, setHover] = useState(null);
   const total = bands.reduce((sum, band) => sum + band.count, 0);
-  const radius = 52;
+  // A slim ring, so the middle has room for its words.
+  const radius = 56;
   const circumference = 2 * Math.PI * radius;
   const shown = bands.filter((band) => band.count > 0);
   // Between two bands, just a hairline of the card showing through.
   const gap = shown.length > 1 ? 0.7 : 0;
-  // Pointing at a slice or its legend line: that band stands out, and the middle says its count.
-  const pointed = bands.find((band) => band.id === hover && band.count > 0) || null;
+  // Pointing at a slice or its legend line - or, pointing at none, the band picked: that band stands out, and the middle says its count.
+  const pointed = bands.find((band) => band.id === hover && band.count > 0) || bands.find((band) => band.id === picked && band.count > 0) || null;
   const point = (id) => ({ onPointerEnter: () => setHover(id), onPointerLeave: () => setHover((current) => (current === id ? null : current)) });
   let offset = 0;
   return (
     <div className="an-donut-box">
     <div className={`an-donut${pointed ? ' is-pointing' : ''}`}>
       <svg viewBox="0 0 140 140" role="img" aria-label={`Score bands: ${bands.map((band) => `${band.label} ${band.count}`).join(', ')}`}>
-        <circle cx="70" cy="70" r={radius} fill="none" stroke="var(--bg-raised)" strokeWidth="18"/>
+        <circle cx="70" cy="70" r={radius} fill="none" stroke="var(--bg-raised)" strokeWidth="13"/>
         {shown.map((band) => {
           const length = (band.count / total) * circumference;
           const slice = (
-            <circle key={band.id} cx="70" cy="70" r={radius} fill="none" stroke={BAND_COLOURS[band.id]} strokeWidth={pointed?.id === band.id ? 23 : 18}
+            <circle key={band.id} cx="70" cy="70" r={radius} fill="none" stroke={BAND_COLOURS[band.id]} strokeWidth={pointed?.id === band.id ? 17 : 13}
               strokeDasharray={`${Math.max(0, length - gap)} ${circumference}`} strokeDashoffset={-offset} transform="rotate(-90 70 70)"
-              className={`an-slice${pointed?.id === band.id ? ' is-on' : ''}`} {...point(band.id)}/>
+              className={`an-slice${pointed?.id === band.id ? ' is-on' : ''}`} {...point(band.id)} onClick={() => onPick?.(band.id)}/>
           );
           offset += length;
           return slice;
         })}
-        <text x="70" y="68" textAnchor="middle" className="an-donut-total">{pointed ? pointed.count : total}</text>
-        <text x="70" y="86" textAnchor="middle" className="an-donut-word">
-          {pointed ? `${pointed.label} · ${pointed.share}%` : total === 1 ? 'student' : 'students'}
-        </text>
+        {/* The middle: the class at rest; pointing at a band, three short lines - which band, how many (in the
+            band's colour, tying it to its slice), and what they are. Its share is on its legend line. */}
+        {pointed ? <>
+          <text x="70" y="53" textAnchor="middle" className="an-donut-band">{pointed.label}</text>
+          <text x="70" y="80" textAnchor="middle" className="an-donut-total"
+            style={pointed.id === PENDING_BAND ? undefined : { fill: BAND_COLOURS[pointed.id] }}>{pointed.count}</text>
+          <text x="70" y="95" textAnchor="middle" className="an-donut-word">{pointed.count === 1 ? 'student' : 'students'}</text>
+        </> : <>
+          <text x="70" y="68" textAnchor="middle" className="an-donut-total">{total}</text>
+          <text x="70" y="86" textAnchor="middle" className="an-donut-word">{total === 1 ? 'student' : 'students'}</text>
+        </>}
       </svg>
       <ul className="an-legend">
         {bands.map((band) => (
           <li key={band.id} className={`${band.count ? '' : 'is-empty'}${pointed?.id === band.id ? ' is-on' : ''}`.trim() || undefined} {...(band.count ? point(band.id) : {})}>
-            <i style={{ background: BAND_COLOURS[band.id] }} aria-hidden="true"/>
-            <span className="an-legend-label">{band.label}</span>
-            <span className="an-legend-count">{band.count} · {band.share}%</span>
+            <button type="button" className="an-legend-button" disabled={!band.count && picked !== band.id} aria-pressed={picked === band.id}
+              data-tip={picked === band.id ? 'Show everyone again' : `List the ${plural(band.count, 'student')} in ${band.id === PENDING_BAND ? 'Still to mark' : band.label}`}
+              onClick={() => onPick?.(band.id)}>
+              <i style={{ background: BAND_COLOURS[band.id] }} aria-hidden="true"/>
+              <span className="an-legend-label">{band.label}</span>
+              <span className="an-legend-count">{band.count} · {band.share}%</span>
+            </button>
           </li>
         ))}
       </ul>
@@ -186,30 +214,59 @@ function Donut({ bands }) {
 
 const ON_BARS = [{ id: 'count', label: 'Students' }, { id: 'share', label: '% of class' }];
 
-/** How many bars: any number typed, from 1 to MAX_BARS - or one of three suggestions. */
-function BarsChoice({ bins, setBins }) {
-  const [text, setText] = useState(String(bins));
-  useLayoutEffect(() => { setText(String(bins)); }, [bins]);
+/** A bar's marks, short: '7', '6–7'. */
+const barMarks = (bin) => {
+  const end = bin.last ? bin.to : bin.to - 1;
+  return bin.from === end ? `${bin.from}` : `${bin.from}–${end}`;
+};
+/** A bar in words, for its tip and its chip: '7 marks', '6–7 marks', with part marks '7 to under 8 marks'; or '40–50%'. */
+const barWords = (bin, fractions) => {
+  if (bin.unit !== 'marks') return `${Math.round(bin.from)}–${Math.round(bin.to)}%`;
+  if (fractions && !bin.last) return `${bin.from} to under ${bin.to} marks`;
+  return `${barMarks(bin)} ${bin.from === bin.to || (!bin.last && bin.to - bin.from === 1 && bin.from === 1) ? 'mark' : 'marks'}`;
+};
+
+/**
+ * How many bars: as suit the paper (Auto), one of three suggestions, or any
+ * number typed from 1 to MAX_BARS. Along whole marks the chart may make a few
+ * fewer (never a bar no score can land in), and it says what it made.
+ */
+function BarsChoice({ bins, setBins, histogram }) {
+  const [text, setText] = useState(bins === null ? '' : String(bins));
+  useLayoutEffect(() => { setText(bins === null ? '' : String(bins)); }, [bins]);
   const typedBars = barsOf(text);
+  const made = histogram.bins.length;
+  const outcome = histogram.unit === 'marks'
+    ? `${plural(made, 'bar')} for ${marksText(histogram.fullMarks)} marks, ${histogram.step === 1 ? 'one for each mark' : `${histogram.step} marks to a bar`}${
+      histogram.capped ? ' - as many as this width has room to press'
+        : bins === null || bins === made ? '' : bins > histogram.top + 1 ? ` - there are only ${histogram.top + 1} possible scores` : ` - as near ${bins} as whole marks allow`}.`
+    : `${plural(made, 'bar')} of ${marksText(Math.round(histogram.step * 10) / 10)}% each: the papers are out of different marks${histogram.capped ? ', and this width has room for no more' : ''}.`;
   return (
     <fieldset className="an-option">
       <legend>Bars</legend>
       <div className="an-bars-choice">
-        <input className="text-input" type="number" inputMode="numeric" min="1" max={MAX_BARS} step="1" value={text} aria-label="Number of bars"
-          onChange={(event) => { setText(event.target.value); const next = barsOf(event.target.value); if (next) setBins(next); }}/>
+        <input className="text-input" type="number" inputMode="numeric" min="1" max={MAX_BARS} step="1" value={text} placeholder="Auto" aria-label="Number of bars"
+          onChange={(event) => {
+            setText(event.target.value);
+            if (event.target.value.trim() === '') { setBins(null); return; }
+            const next = barsOf(event.target.value);
+            if (next) setBins(next);
+          }}/>
         <div className="an-bars-suggest" role="group" aria-label="Suggestions">
           {BAR_CHOICES.map((count) => (
-            <button key={count} type="button" className={bins === count ? 'is-on' : undefined} aria-pressed={bins === count} onClick={() => setBins(count)}>{count}</button>
+            <button key={String(count)} type="button" className={bins === count ? 'is-on' : undefined} aria-pressed={bins === count} onClick={() => setBins(count)}>{count ?? 'Auto'}</button>
           ))}
         </div>
       </div>
-      {text.trim() !== '' && !typedBars && <p className="an-option-note">A whole number from 1 to {MAX_BARS}.</p>}
+      {text.trim() !== '' && !typedBars
+        ? <p className="an-option-note">A whole number from 1 to {MAX_BARS}.</p>
+        : <p className="an-option-help">{outcome}</p>}
     </fieldset>
   );
 }
 
 /** The marks chart's options, behind its Edit button: how many bars, what the bars say, the average and median lines. */
-function ChartOptions({ bins, setBins, onBars, setOnBars, lines, setLines }) {
+function ChartOptions({ bins, setBins, histogram, onBars, setOnBars, lines, setLines }) {
   const [open, setOpen] = useState(false);
   const { holder, panel, style, isDialog } = useFloatingPanel(open, setOpen, 'right', { dialog: true });
   const choice = (label, options, value, onPick) => (
@@ -236,12 +293,12 @@ function ChartOptions({ bins, setBins, onBars, setOnBars, lines, setLines }) {
             <button type="button" className="filter-close" aria-label="Close" title="Close" onClick={() => setOpen(false)}><X size={17} aria-hidden="true"/></button>
           </div>
           <div className="an-options-body">
-            <BarsChoice bins={bins} setBins={setBins}/>
+            <BarsChoice bins={bins} setBins={setBins} histogram={histogram}/>
             {choice('Numbers on the bars', ON_BARS, onBars, setOnBars)}
             {choice('Average and median lines', [{ id: true, label: 'Show' }, { id: false, label: 'Hide' }], lines, setLines)}
           </div>
           <div className="filter-panel-foot">
-            <button type="button" className="button button-quiet button-small" onClick={() => { setBins(10); setOnBars('count'); setLines(true); }}>Reset</button>
+            <button type="button" className="button button-quiet button-small" onClick={() => { setBins(null); setOnBars('count'); setLines(true); }}>Reset</button>
             <button type="button" className="button button-primary button-small" onClick={() => setOpen(false)}>Done</button>
           </div>
         </div>
@@ -250,45 +307,103 @@ function ChartOptions({ bins, setBins, onBars, setOnBars, lines, setLines }) {
   );
 }
 
+/** An element's width, kept up to date. */
+function useWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return undefined;
+    const measure = () => setWidth(element.clientWidth);
+    measure();
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
+    observer?.observe(element);
+    return () => observer?.disconnect();
+  }, []);
+  return [ref, width];
+}
+
 /**
- * The marks chart: how many students scored in each slice of 0-100%, with
- * the group's average and median marked on it. A bar says its count on hover
- * and goes nowhere on a click. Its options are behind Edit.
+ * The marks chart: how many students scored in each bar - along whole marks
+ * when every paper is out of the same marks (one bar a mark on a short paper),
+ * else in equal slices of 0-100% - with the group's average and median as two
+ * lines, named in the key above. A bar says its count on hover; pressing it
+ * lists its students (`onPick`), and pressing the bar picked lets it go. An
+ * empty bar keeps a sliver, so every bar is there to see. Each bar's count is
+ * on it while the bars are wide enough for it; the marks under them thin out
+ * as they narrow. Its options are behind Edit.
  */
-function Histogram({ histogram, stats, bins, setBins, onBars, setOnBars, lines, setLines }) {
+function Histogram({ histogram, stats, bins, setBins, onBars, setOnBars, lines, setLines, picked = null, onPick, onWidth }) {
+  const [plotRef, plotWidth] = useWidth();
+  // How many bars the chart has room for (MIN_BAR_PX each) is the tab's to decide: it works the bars out.
+  useEffect(() => { if (plotWidth) onWidth?.(plotWidth); }, [plotWidth, onWidth]);
   const most = Math.max(...histogram.bins.map((bin) => bin.count), 0);
   const total = histogram.bins.reduce((sum, bin) => sum + bin.count, 0);
   const label = (count) => (onBars === 'share' ? `${total ? Math.round((count / total) * 100) : 0}%` : String(count));
+  const byMarks = histogram.unit === 'marks';
+  const full = histogram.fullMarks;
+  const weights = histogram.bins.map((bin) => bin.weight || 1);
+  const slots = weights.reduce((sum, weight) => sum + weight, 0);
+  const columns = weights.map((weight) => `minmax(0, ${weight}fr)`).join(' ');
+  const slotWidth = slots ? plotWidth / slots : 0;
+  // Along whole marks a score sits in the middle of its own slot: 0 in the first, the full marks in the last.
+  const placeOf = (percent) => (byMarks ? ((percent / 100) * full + 0.5) / (histogram.top + 1) * 100 : percent);
   const markers = lines ? [
     stats.average !== null && { id: 'average', word: 'Average', value: stats.average },
     stats.median !== null && { id: 'median', word: 'Median', value: stats.median }
   ].filter(Boolean) : [];
+  const valueText = (percent) => (byMarks ? `${marksText(Math.round((percent / 100) * full * 10) / 10)}/${marksText(full)}` : percentText(percent));
+  const isPicked = (bin) => Boolean(picked) && picked.unit === bin.unit && picked.from === bin.from && picked.to === bin.to && picked.last === bin.last;
+  // The marks under the bars: as many as fit, the rest skipped evenly.
+  const axisLabels = histogram.bins.map((bin) => barMarks(bin));
+  const widest = Math.max(...axisLabels.map((text) => text.length), 1);
+  const every = byMarks && slotWidth ? Math.max(1, Math.ceil((widest * 7 + 8) / (slotWidth * (histogram.step || 1)))) : 1;
+  const note = byMarks
+    ? `${histogram.step === 1 ? 'Students on each mark' : `Students by marks, ${histogram.step} to a bar`}, out of ${marksText(full)}${onBars === 'share' ? ', as a share of those shown' : ''}. Click a bar to list them.`
+    : `Students in each band of marks${onBars === 'share' ? ', as a share of those shown' : ''}. Click a bar to list them.`;
   return (
     <section className="card an-card an-histogram" aria-label="Marks">
       <header className="an-card-head">
         <h2>Marks</h2>
-        <p className="an-note">Students in each band of marks{onBars === 'share' ? ', as a share of those shown' : ''}.</p>
-        <ChartOptions bins={bins} setBins={setBins} onBars={onBars} setOnBars={setOnBars} lines={lines} setLines={setLines}/>
+        <p className="an-note">{note}</p>
+        {markers.length > 0 && (
+          <ul className="an-mkeys" aria-label="Lines on the chart">
+            {markers.map((marker) => <li key={marker.id} className={`is-${marker.id}`}><i aria-hidden="true"/>{marker.word} {valueText(marker.value)}</li>)}
+          </ul>
+        )}
+        <ChartOptions bins={bins} setBins={setBins} histogram={histogram} onBars={onBars} setOnBars={setOnBars} lines={lines} setLines={setLines}/>
       </header>
-      <figure className="ov-spread an-bars">
-        <div className="ov-spread-plot" style={{ gridTemplateColumns: `repeat(${histogram.bins.length}, minmax(0, 1fr))` }}>
-          {histogram.bins.map((bin) => {
-            const tip = `${Math.round(bin.from)}–${Math.round(bin.to)}%: ${plural(bin.count, 'student')}${total ? ` (${Math.round((bin.count / total) * 100)}%)` : ''}`;
+      <figure className={`ov-spread an-bars${picked ? ' has-pick' : ''}`}>
+        {/* The two axes named: how many students up the side, their marks along the bottom. */}
+        <span className="an-axis-title is-y" aria-hidden="true">{onBars === 'share' ? 'Share of students' : 'Students'}</span>
+        <div className="ov-spread-plot" ref={plotRef} style={{ gridTemplateColumns: columns }} role="group" aria-label="Marks chart: press a bar to list its students">
+          {histogram.bins.map((bin, index) => {
+            const words = barWords(bin, histogram.fractions);
+            const tip = `${words}: ${plural(bin.count, 'student')}${total ? ` (${Math.round((bin.count / total) * 100)}%)` : ''}`;
+            const on = isPicked(bin);
+            const middle = byMarks ? (((bin.from + (bin.last ? bin.to : bin.to - 1)) / 2) / full) * 100 : (bin.from + bin.to) / 2;
+            // Its number on it when the bar is wide enough for that number.
+            const roomy = slotWidth * weights[index] >= label(bin.count).length * 7 + 4;
             return (
-              <div key={bin.index} className="ov-spread-col" data-tip={tip} role="img" aria-label={tip}>
-                {bin.count > 0 && (bin.count === most || histogram.bins.length <= 10) && <span className="ov-spread-label">{label(bin.count)}</span>}
-                {/* In the purple of the score band its middle falls in. */}
-                <span className="ov-spread-bar" style={{ height: most ? `${(bin.count / most) * 100}%` : 0, background: BAR_COLOURS[bandOf((bin.from + bin.to) / 2)] }}/>
-              </div>
+              <button key={bin.index} type="button" className={`ov-spread-col${on ? ' is-picked' : ''}`} disabled={!bin.count && !on} aria-pressed={on}
+                data-tip={on ? `${tip} · press again to show everyone` : bin.count ? `${tip} · press to list them` : tip} aria-label={tip}
+                onClick={() => onPick?.(bin)}>
+                {bin.count > 0 && (roomy || bin.count === most) && <span className="ov-spread-label">{label(bin.count)}</span>}
+                {/* In the colour of the score band its middle falls in; an empty bar a sliver. */}
+                <span className={`ov-spread-bar${bin.count ? '' : ' is-zero'}`} style={bin.count ? { height: `${(bin.count / most) * 100}%`, background: BAR_COLOURS[bandOf(middle)] } : undefined}/>
+              </button>
             );
           })}
-          {markers.map((marker, index) => (
-            <span key={marker.id} className={`an-marker is-${marker.id}${index ? ' is-second' : ''}${marker.value > 75 ? ' is-flip' : ''}`} style={{ left: `${Math.min(100, Math.max(0, marker.value))}%` }} aria-hidden="true">
-              <em>{marker.word} {percentText(marker.value)}</em>
-            </span>
+          {markers.map((marker) => (
+            <span key={marker.id} className={`an-marker is-${marker.id}`} style={{ left: `${Math.min(100, Math.max(0, placeOf(marker.value)))}%` }} aria-hidden="true"/>
           ))}
         </div>
-        <figcaption className="ov-spread-axis" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></figcaption>
+        {byMarks ? (
+          <figcaption className="an-axis" style={{ gridTemplateColumns: columns }} aria-hidden="true">
+            {axisLabels.map((text, index) => <span key={histogram.bins[index].index}>{index % every === 0 ? text : ''}</span>)}
+          </figcaption>
+        ) : <figcaption className="ov-spread-axis" aria-hidden="true"><span>0%</span><span>50%</span><span>100%</span></figcaption>}
+        <span className="an-axis-title is-x" aria-hidden="true">{byMarks ? `Marks (out of ${marksText(full)})` : 'Marks (%)'}</span>
       </figure>
     </section>
   );
@@ -319,14 +434,14 @@ const QUESTION_ROW_MAX = 56;
  * Every ticked question's average, as a share of what it is worth: one
  * column, a row each - its number and type, the question itself, a bar in
  * its score band's purple, the average, and how many got it right. A row
- * opens the rank list ordered by that question; hovering it shows the tip.
+ * opens its outcome and option statistics; hovering it shows the tip.
  */
 function QuestionChart({ figures, onPick }) {
   return (
     <section className="card an-card an-qchart" aria-label="Question averages">
       <header className="an-card-head">
         <h2>Question averages</h2>
-        <p className="an-note">Average marks on each question, over the answers already marked. Click a row to rank by it.</p>
+        <p className="an-note">Average marks on each question. Click a row for outcomes and option selections.</p>
         <ul className="an-qlegend" aria-label="Colours">
           {BANDS.map((band) => <li key={band.id}><i style={{ background: BAR_COLOURS[band.id] }} aria-hidden="true"/>{band.label}</li>)}
         </ul>
@@ -337,7 +452,7 @@ function QuestionChart({ figures, onPick }) {
             const percent = averagePercent(question);
             return (
               <button key={question.id} type="button" className="an-qbar" data-tip={questionTip(question)} data-tip-tone={questionTone(question) || undefined}
-                aria-label={`${questionTip(question)}. Rank by this question.`} onClick={() => onPick(question.column)}>
+                aria-label={`${questionTip(question)}. Open question statistics.`} aria-haspopup="dialog" onClick={() => onPick(question.column)}>
                 <span className="an-qbar-label">Q{question.number}</span>
                 <span className="an-qbar-sub">{question.pending ? <em>{question.pending} ?</em> : TYPE_WORD[question.type]}</span>
                 <span className="an-qbar-text">{question.prompt || 'Picture question'}</span>
@@ -388,7 +503,7 @@ function QuestionPicker({ figures, selected, setSelected }) {
   return (
     <div className="filter-menu an-qpicker" ref={holder}>
       <button type="button" className={`button button-secondary filter-trigger${selected.size !== every ? ' is-active' : ''}${open ? ' is-open' : ''}`}
-        aria-expanded={open} aria-haspopup="dialog" title={`Questions: ${summary}`} onClick={() => setOpen((value) => !value)}>
+        aria-expanded={open} aria-haspopup="dialog" aria-label={`Questions: ${summary}`} title={`Questions: ${summary}`} onClick={() => setOpen((value) => !value)}>
         <ListChecks size={16} aria-hidden="true"/>
         <span className="filter-trigger-label toolbar-text">{summary}</span>
         <ChevronDown className="toolbar-chevron" size={15} strokeWidth={2.5} aria-hidden="true"/>
@@ -566,7 +681,9 @@ function Cell({ cell, question, onOpen }) {
   const text = cell.state === 'Q' ? '?' : cell.state === 'B' ? '–' : marksText(cell.marks);
   return (
     <td className={`an-cell is-${cell.state}`} data-tip={tip} data-tip-tone={CELL_TONE[cell.state]}>
-      <button type="button" className="an-cell-open" onClick={onOpen} aria-label={`Q${question.number}: ${cell.state === 'Q' ? 'not marked yet - mark it' : `${CELL_RESULT[cell.state]} - open it`}`}>{text}</button>
+      <button type="button" className="an-cell-open" onClick={onOpen}>
+        {text}<span className="sr-only">{` - Q${question.number}, ${cell.state === 'Q' ? 'not marked yet: mark it' : `${CELL_RESULT[cell.state]}: open it`}`}</span>
+      </button>
     </td>
   );
 }
@@ -686,10 +803,10 @@ function StudentCard({ row, questions, columns, onClose, onReview, onLog }) {
       <div className="an-student-grid">
         {cells.map((cell) => (
           <button key={cell.column} type="button" className={`an-student-tile is-${cell.state}`} onClick={() => { onClose(); onReview(row.student.id, cell.question.id); }}
-            title={`Q${cell.question.number}: ${STATE_NAMES[cell.state]} - ${cell.question.prompt || 'Picture question'}`}
-            aria-label={`Q${cell.question.number}: ${STATE_NAMES[cell.state]}${cell.state === 'Q' ? ' - mark it' : ' - open it'}`}>
+            title={`Q${cell.question.number}: ${STATE_NAMES[cell.state]} - ${cell.question.prompt || 'Picture question'}`}>
             <b>Q{cell.question.number}</b>
             <small>{cell.state === 'Q' ? '?' : cell.state === 'B' ? '–' : `${marksText(cell.marks)}/${marksText(cell.question.worth)}`}</small>
+            <span className="sr-only">{`, ${STATE_NAMES[cell.state]}: ${cell.state === 'Q' ? 'mark it' : 'open it'}`}</span>
           </button>
         ))}
       </div>
@@ -759,7 +876,7 @@ function RankList({ view, questions, sort, setSort, onReview, onLog, summary, to
     const on = sortField === field;
     const next = () => setSort(`${field}-${on ? (sortDir === 'asc' ? 'desc' : 'asc') : firstWay}`);
     return (
-      <th className={`${extra}${on ? ' is-sorted' : ''}`} aria-sort={on ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <th key={field} className={`${extra}${on ? ' is-sorted' : ''}`} aria-sort={on ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}>
         <button type="button" onClick={next} data-tip={tip?.text} data-tip-tone={tip?.tone || undefined}>{label}{on ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}</button>
       </th>
     );
@@ -817,9 +934,10 @@ function RankList({ view, questions, sort, setSort, onReview, onLog, summary, to
                 <td className="an-col-time">{minutes(row.student.seconds)}</td>
                 <td className="an-col-flags">
                   {/* Their activity log - the Students tab's Log - with the way on to their answers. */}
-                  <button type="button" className="an-flags-button" onClick={() => onLog(row.student.id, { sapId: row.student.sapId, name: row.student.name })} aria-label={`${row.student.name}: activity log`}
+                  <button type="button" className="an-flags-button" onClick={() => onLog(row.student.id, { sapId: row.student.sapId, name: row.student.name })}
                     data-tip={[...flagLines(row.student.flags), 'Open their activity log'].join('\n')} data-tip-tone={flagLines(row.student.flags).length ? 'warn' : undefined}>
                     <Flags flags={row.student.flags}/>
+                    <span className="sr-only">{` - open ${row.student.name}'s activity log`}</span>
                   </button>
                 </td>
                 <td className="an-col-more">
@@ -871,8 +989,22 @@ function exportCsv(code, view, questions) {
 
 /* ------------------------------------------------------------------ the tab */
 
-function AnalysisView({ test, matrix, onReview, onLog }) {
+/**
+ * Beside the code in the page's header: an (i) that shows the test's details on
+ * a click - when it was held, how long, its marks, its papers, how many are
+ * shown, how far marking has got - and, to its right, just the date it was held.
+ */
+function HeaderLine({ items, date }) {
+  return <span className="dash-meta-box">
+    <InfoTip label="About this test"><span className="info-tip-list">{items.map((item) => <span key={item}>{item}</span>)}</span></InfoTip>
+    {date && <span className="dash-meta-date">{date}</span>}
+  </span>;
+}
+
+function AnalysisView({ test, matrix, onReview, onLog, answerFilter, onAnswerFilterChange, onMatching, headerLine = null }) {
   const { questions } = matrix;
+  const answers = useAnswerFilters({ code: test.code, questions, students: matrix.students, revision: matrix.serverTime, raw: answerFilter, onChange: onAnswerFilterChange });
+  const answerReady = !answers.result.active || answers.result.status === 'ready';
   const [choices, setChoices] = useState(() => initialChoices(questions));
   const [search, setSearch] = useState('');
   const [ticked, setTicked] = useState([]);
@@ -882,21 +1014,46 @@ function AnalysisView({ test, matrix, onReview, onLog }) {
   const [chartSort, setChartSort] = useState('number-asc');
   const [onBars, setOnBars] = useState('count');
   const [lines, setLines] = useState(true);
+  // A score band (its id) or a bar of the marks chart ({ unit, from, to, last }) picked: just those students.
+  const [bandPick, setBandPick] = useState(null);
+  const [barPick, setBarPick] = useState(null);
+  const [questionColumn, setQuestionColumn] = useState(null);
+  // The marks chart's width, measured: never more bars than it has room to press.
+  const [plotWidth, setPlotWidth] = useState(0);
+  const maxBars = plotWidth ? Math.max(1, Math.floor(plotWidth / MIN_BAR_PX)) : null;
   const { view: mode, selected, bins } = choices;
+  const answerMode = mode === 'answers';
   const set = (patch) => setChoices((current) => ({ ...current, ...(typeof patch === 'function' ? patch(current) : patch) }));
   const filters = useMemo(() => ({
     search,
+    studentIds: answers.result.active ? answers.result.ids || [] : null,
     // Marks in %: an open end is 0 or 100. In marks, or a rank: an open end has no limit.
-    range: marks.unit === 'marks' ? null : { from: marks.from ?? 0, to: marks.to ?? 100 },
-    marksRange: marks.unit === 'marks' && (marks.from !== null || marks.to !== null) ? { from: marks.from ?? 0, to: marks.to ?? Infinity } : null,
-    rankRange: rank.from !== null || rank.to !== null ? { from: rank.from ?? 1, to: rank.to ?? Infinity } : null,
-    average: ticked.filter((id) => id.startsWith('avg:')).map((id) => id.slice(4)),
-    median: ticked.filter((id) => id.startsWith('med:')).map((id) => id.slice(4)),
-    marking: ticked.filter((id) => id.startsWith('mark:')).map((id) => id.slice(5)),
-    flags: ticked.filter((id) => id.startsWith('flag:')).map((id) => id.slice(5))
-  }), [search, ticked, marks, rank]);
+    range: answerMode || marks.unit === 'marks' ? null : { from: marks.from ?? 0, to: marks.to ?? 100 },
+    marksRange: !answerMode && marks.unit === 'marks' && (marks.from !== null || marks.to !== null) ? { from: marks.from ?? 0, to: marks.to ?? Infinity } : null,
+    rankRange: !answerMode && (rank.from !== null || rank.to !== null) ? { from: rank.from ?? 1, to: rank.to ?? Infinity } : null,
+    average: answerMode ? [] : ticked.filter((id) => id.startsWith('avg:')).map((id) => id.slice(4)),
+    median: answerMode ? [] : ticked.filter((id) => id.startsWith('med:')).map((id) => id.slice(4)),
+    marking: answerMode ? [] : ticked.filter((id) => id.startsWith('mark:')).map((id) => id.slice(5)),
+    flags: answerMode ? [] : ticked.filter((id) => id.startsWith('flag:')).map((id) => id.slice(5)),
+    bands: !answerMode && bandPick ? [bandPick] : [],
+    bar: answerMode ? null : barPick
+  }), [search, ticked, marks, rank, bandPick, barPick, answers.result.active, answers.result.ids, answerMode]);
   const sortKey = useMemo(() => listSortOf(listSort), [listSort]);
-  const view = useMemo(() => compute(matrix, { selected, bins, filters, sort: sortKey }), [matrix, selected, bins, filters, sortKey]);
+  const view = useMemo(() => compute(matrix, { selected, bins, byMarks: true, maxBars, filters, sort: sortKey }), [matrix, selected, bins, maxBars, filters, sortKey]);
+  // Other bars: the bar picked may not be one of them any more.
+  const setBins = (value) => { set({ bins: value }); setBarPick(null); };
+  // A band or a bar pressed: its students, in the rank list. Pressed again (back on the charts): everyone again.
+  const pickBand = (id) => {
+    if (bandPick === id) { setBandPick(null); return; }
+    setBandPick(id);
+    set({ view: 'list' });
+  };
+  const pickBar = (bin) => {
+    const same = barPick && barPick.unit === bin.unit && barPick.from === bin.from && barPick.to === bin.to && barPick.last === bin.last;
+    if (same) { setBarPick(null); return; }
+    setBarPick({ unit: bin.unit, from: bin.from, to: bin.to, last: bin.last });
+    set({ view: 'list' });
+  };
 
   // The choices in the address, so a reload or a shared link opens the same view; gone again on leaving the tab.
   useEffect(() => {
@@ -905,7 +1062,7 @@ function AnalysisView({ test, matrix, onReview, onLog }) {
     const all = selected.size === questions.length;
     keep('view', mode === 'charts' ? null : mode);
     keep('qs', all ? null : selected.size ? [...selected].sort((a, b) => a - b).map((column) => questions[column].number).join(',') : 'none');
-    keep('bins', bins === 10 ? null : String(bins));
+    keep('bins', bins === null ? null : String(bins));
     if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url);
   }, [mode, selected, bins, questions]);
   useEffect(() => () => {
@@ -953,11 +1110,31 @@ function AnalysisView({ test, matrix, onReview, onLog }) {
     marksOn && { key: 'marks', text: `Marks ${end(marksOn.from)}–${end(marksOn.to)} of ${marksText(classFigures.maxMarks)}`, clear: () => setMarks({ unit: 'marks', from: null, to: null }) },
     rankOn && { key: 'rank', text: `Rank ${end(rankOn.from)}–${end(rankOn.to)}`, clear: () => setRank({ from: null, to: null }) }
   ].filter(Boolean);
+  const bandChip = bandPick && {
+    key: 'band', text: bandPick === PENDING_BAND ? 'Still to mark' : `Score band ${BANDS.find((band) => band.id === bandPick)?.label ?? ''}`, clear: () => setBandPick(null)
+  };
+  const barChip = barPick && {
+    key: 'bar',
+    text: barPick.unit !== 'marks' ? `Marks ${barWords(barPick)}`
+      : `Marks ${view.histogram.fractions && !barPick.last ? `${barPick.from} to under ${barPick.to}` : barMarks(barPick)} of ${marksText(view.histogram.fullMarks ?? classFigures.maxMarks)}`,
+    clear: () => setBarPick(null)
+  };
   const chips = [
+    ...[bandChip, barChip].filter(Boolean),
     ...rangeChips,
     ...ticked.map((id) => ({ key: id, text: labels[id], clear: () => setTicked((current) => current.filter((entry) => entry !== id)) }))
   ];
   const rankBy = (column) => { setListSort(`q${column}-desc`); set({ view: 'list' }); };
+  const filterQuestion = (patch) => {
+    const id = String(questions[questionColumn].id);
+    const existing = answers.value.questions.find((condition) => condition.id === id) || { id, states: [], optionMatch: 'all', options: {} };
+    // Answer analysis looks at one question at a time: this question's choice replaces any other.
+    answers.apply({ mode: 'all', questions: [{ ...existing, ...patch(existing) }] });
+    void answers.load(id);
+    const url = new URL(window.location.href); url.searchParams.set('aq', id);
+    window.history.replaceState(window.history.state, '', url);
+    setQuestionColumn(null); set({ view: 'answers' });
+  };
   // A question the list is sorted by: in the Sort group, so the menu says so.
   const sortedColumn = listSortOf(listSort).key;
   const listSorts = typeof sortedColumn === 'number' && questions[sortedColumn]
@@ -975,31 +1152,19 @@ function AnalysisView({ test, matrix, onReview, onLog }) {
   return (
     <div className={`an-view is-${mode}`}>
       <section className="card an-bar">
-        <div className="an-meta">
+        {headerLine ? createPortal(<HeaderLine items={[...meta.split(' · '), !answerMode && `Showing ${view.shown.length} of ${matrix.students.length}`, `Marking ${marked}% done`].filter(Boolean)}
+          date={test.startedAt ? shortDateTime(test.startedAt) : ''}/>, headerLine) : <div className="an-meta">
           <p title={meta}>{meta}</p>
-          <span className="an-count">Showing {view.shown.length} of {matrix.students.length}</span>
-          <div className="an-progress" title={`${fullyMarked} of ${matrix.students.length} papers fully marked`}>
-            <span className="an-progress-track"><span style={{ width: `${marked}%` }}/></span>
-            <span>Marking {marked}% done</span>
-          </div>
-          <button type="button" className="button button-view an-export" onClick={() => exportCsv(test.code, view, questions)} title="The rank list as it stands, as a CSV file">
-            <Download size={15} aria-hidden="true"/><span className="an-word">Export</span>
-          </button>
-        </div>
+          {!answerMode && <span className="an-count">Showing {view.shown.length} of {matrix.students.length}</span>}
+          <span className="an-progress" title={`${fullyMarked} of ${matrix.students.length} papers fully marked`}>Marking {marked}% done</span>
+        </div>}
         <div className="an-filters">
-          <div className="an-views" role="group" aria-label="View">
-            {VIEWS.map((option) => (
-              <button key={option.id} type="button" aria-pressed={mode === option.id} onClick={() => set({ view: option.id })} aria-label={option.label} data-tip={option.label}>
-                <option.icon size={16} aria-hidden="true"/><span className="an-word">{option.label}</span>
-              </button>
-            ))}
-          </div>
           <label className="search-field an-search">
             <Search size={15} aria-hidden="true"/>
-            <input className="text-input" type="search" placeholder="Search name or SAP ID" value={search}
+            <input className="text-input" type="search" name="analysis-search" placeholder="Search name or SAP ID" value={search}
               onChange={(event) => setSearch(event.target.value)} aria-label="Search students"/>
           </label>
-          <FilterMenu
+          {!answerMode && <FilterMenu
             groups={groups} rows={view.rows} selected={ticked} onChange={setTicked} icons={FILTER_ICONS}
             title={mode === 'list' ? 'Sort & filter the rank list' : mode === 'questions' ? 'Sort & filter the questions' : 'Filter the charts'} allLabel="Everyone"
             total={matrix.students.length} shown={view.shown.length}
@@ -1010,42 +1175,76 @@ function AnalysisView({ test, matrix, onReview, onLog }) {
             extra={<RangesFilter marks={marks} setMarks={setMarks} rank={rank} setRank={setRank} rows={view.rows} classFigures={classFigures}/>}
             extraActive={rangeChips.length} extraLabel={rangeChips.length === 1 ? rangeChips[0].text : null}
             onReset={() => { setMarks({ unit: 'marks', from: null, to: null }); setRank({ from: null, to: null }); }}
-          />
-          <QuestionPicker figures={view.questions} selected={selected} setSelected={(next) => set((current) => ({ selected: typeof next === 'function' ? next(current.selected) : next }))}/>
-          {chips.map((chip) => (
+          />}
+          {!answerMode && <QuestionPicker figures={view.questions} selected={selected} setSelected={(next) => set((current) => ({ selected: typeof next === 'function' ? next(current.selected) : next }))}/>}
+          {!answerMode && <button type="button" className="button button-secondary an-export" disabled={!answerReady} onClick={() => exportCsv(test.code, view, questions)}
+            aria-label="Export the rank list as it stands, as a CSV file" data-tip="Export the rank list (CSV)">
+            <Download size={16} aria-hidden="true"/>
+          </button>}
+          {!answerMode && chips.map((chip) => (
             <button key={chip.key} type="button" className="an-chip" onClick={chip.clear} title="Remove this filter">{chip.text}<X size={13} aria-hidden="true"/></button>
           ))}
+          <div className="an-views" role="group" aria-label="View">
+            {VIEWS.map((option) => (
+              <button key={option.id} type="button" aria-pressed={mode === option.id} onClick={() => set({ view: option.id })} aria-label={option.label} data-tip={option.label}>
+                <option.icon size={16} aria-hidden="true"/><span className="an-word">{option.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
+        {!answerMode && answers.result.active && <div className={`an-answer-status${answers.result.status === 'error' ? ' is-error' : ''}`} role="status">
+          <span>{answers.result.status === 'loading' ? 'Loading answer analysis…' : answers.result.status === 'error'
+            ? answers.result.errors.map((error) => error.message).join(' · ')
+            : `Answer analysis · ${answers.result.ids.length} of ${matrix.students.length} submitted students`}</span>
+          <div className="answer-cohort-actions" role="group" aria-label="Answer analysis actions">
+            {answerReady && onMatching && <>
+              <button className="button button-secondary button-small" type="button" onClick={() => onMatching('responses', encodeAnswerFilters(answers.value, questions))}>Matching results</button>
+              <button className="button button-secondary button-small" type="button" onClick={() => onMatching('students', encodeAnswerFilters(answers.value, questions))}>Matching students</button>
+            </>}
+            <button className="button button-secondary button-small" type="button" onClick={() => set({ view: 'answers' })}>Answer analysis</button>
+            <button className="button button-secondary button-small" type="button" onClick={answers.clear}>Clear</button>
+          </div>
+        </div>}
       </section>
 
-      {mode === 'charts' ? <>
-        <div className="an-tiles">
-          <Tile label="Attempted" value={stats.attempted} sub={`${stats.absent} ${test.isClosed ? 'absent' : 'not begun'}${stats.writing ? `, ${stats.writing} writing` : ''}`}/>
-          <Tile label="Average" value={figure(stats.averageMarks, stats.average)} sub={inMarks ? percentText(stats.average) : null}/>
-          <Tile label="Median" value={figure(stats.medianMarks, stats.median)} sub={inMarks ? percentText(stats.median) : null}/>
-          <Tile label="Highest" value={figure(stats.highestMarks, stats.highest)} sub={inMarks ? percentText(stats.highest) : null}/>
-          <Tile label="Lowest" value={figure(stats.lowestMarks, stats.lowest)} sub={inMarks ? percentText(stats.lowest) : null}/>
-          <Tile label="To mark" value={stats.pendingPapers} sub={stats.pendingPapers ? plural(pendingAnswers, 'answer') : 'all marked'}/>
-        </div>
+      {answerMode ? <AnswerAnalysisView questions={questions} students={matrix.students} answers={answers} search={search}
+        onReview={onReview} onLog={onLog} onMatching={onMatching}/> : !answerReady ? <section className="card ov-panel" aria-busy={answers.result.status === 'loading'}>
+        <p className="ov-empty">{answers.result.status === 'loading' ? 'Loading the responses needed by this analysis…' : 'Answer analysis could not be loaded. Open Answer analysis to retry, or clear it.'}</p>
+      </section> : mode === 'charts' ? <>
         <div className="an-charts">
+          <div className="an-tiles">
+            <Tile label={answers.result.active ? 'Matching students' : 'Attempted'} value={answers.result.active ? stats.inGroup : stats.attempted}
+              sub={answers.result.active ? 'Submitted papers' : `${stats.absent} ${test.isClosed ? 'absent' : 'not begun'}${stats.writing ? `, ${stats.writing} writing` : ''}`}/>
+            <Tile label="Average" value={figure(stats.averageMarks, stats.average)} sub={inMarks ? percentText(stats.average) : null}/>
+            <Tile label="Median" value={figure(stats.medianMarks, stats.median)} sub={inMarks ? percentText(stats.median) : null}/>
+            <Tile label="Highest" value={figure(stats.highestMarks, stats.highest)} sub={inMarks ? percentText(stats.highest) : null}/>
+            <Tile label="Lowest" value={figure(stats.lowestMarks, stats.lowest)} sub={inMarks ? percentText(stats.lowest) : null}/>
+            <Tile label="To mark" value={stats.pendingPapers} sub={stats.pendingPapers ? plural(pendingAnswers, 'answer') : 'all marked'}/>
+          </div>
           <section className="card an-card" aria-label="Score bands">
-            <header className="an-card-head"><h2>Score bands</h2></header>
-            <Donut bands={view.bands}/>
+            <header className="an-card-head"><h2>Score bands</h2><p className="an-note">Click a band to list its students.</p></header>
+            <Donut bands={view.bands} picked={bandPick} onPick={pickBand}/>
           </section>
-          <Histogram histogram={view.histogram} stats={stats} bins={bins} setBins={(value) => set({ bins: value })}
-            onBars={onBars} setOnBars={setOnBars} lines={lines} setLines={setLines}/>
+          <Histogram histogram={view.histogram} stats={stats} bins={bins} setBins={setBins}
+            onBars={onBars} setOnBars={setOnBars} lines={lines} setLines={setLines} picked={barPick} onPick={pickBar} onWidth={setPlotWidth}/>
         </div>
       </> : mode === 'questions' ? (
-        <QuestionChart figures={orderQuestions(view.questions, selected, chartSort)} onPick={rankBy}/>
+        <QuestionChart figures={orderQuestions(view.questions, selected, chartSort)} onPick={setQuestionColumn}/>
       ) : (
         <RankList view={view} questions={questions} sort={listSort} setSort={setListSort} onReview={onReview} onLog={onLog}
           summary={listSummary} total={matrix.students.length}/>
       )}
+      {questionColumn !== null && questions[questionColumn] && createPortal(<QuestionStatisticsModal key={questions[questionColumn].id}
+        code={test.code} question={questions[questionColumn]} revision={matrix.serverTime}
+        studentIds={view.shown.map((row) => row.student.id)} onClose={() => setQuestionColumn(null)}
+        onFilterOption={(index) => filterQuestion((existing) => ({ options: { ...existing.options, [index]: 'selected' } }))}
+        onFilterOutcome={(state) => filterQuestion(() => ({ states: [state] }))}
+        onRank={() => { setQuestionColumn(null); rankBy(questionColumn); }}/>, document.body)}
     </div>
   );
 }
 
-export function AnalysisSection({ test, counts, serverTime, refresh = 0, onReview, onLog }) {
+export function AnalysisSection({ test, counts, serverTime, refresh = 0, onReview, onLog, answerFilter = '', onAnswerFilterChange, onMatching, headerLine = null }) {
   const live = test.isStarted && !test.isClosed;
   const fitRef = useFitToScreen(true);
   const matrix = useOverview(test.code, {
@@ -1057,7 +1256,8 @@ export function AnalysisSection({ test, counts, serverTime, refresh = 0, onRevie
     <div ref={fitRef} className="an">
       {!matrix ? <div className="card ov-panel ov-wait" aria-busy="true">Working out the analysis…</div>
         : !matrix.students.length ? <div className="card ov-panel"><p className="ov-empty">The analysis appears here once papers are handed in.</p></div>
-          : <AnalysisView key={matrix.questions.map((question) => question.id).join(',')} test={{ ...test, ...matrix.test, code: test.code }} matrix={matrix} onReview={onReview} onLog={onLog}/>}
+          : <AnalysisView key={matrix.questions.map((question) => question.id).join(',')} test={{ ...test, ...matrix.test, code: test.code }} matrix={matrix} onReview={onReview} onLog={onLog}
+            answerFilter={answerFilter} onAnswerFilterChange={onAnswerFilterChange} onMatching={onMatching} headerLine={headerLine}/>}
     </div>
   );
 }

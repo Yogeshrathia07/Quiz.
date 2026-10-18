@@ -5,7 +5,8 @@ import { PublicTestError } from '../lib/errors.js';
 import { asInteger, hash, hmac, randomId, stableSort } from '../lib/crypto.js';
 import { currentMs, dateMs, now } from '../lib/time.js';
 import { activeQuestions, questionType, selectedAttemptQuestions } from '../domain/question-bank.js';
-import { attemptView } from '../domain/presenters.js';
+import { attemptView, paperQuestion } from '../domain/presenters.js';
+import { AHEAD_COUNT, KEY_EARLY_MS, questionKey, sealQuestion } from '../domain/paper-seal.js';
 import { TIME_OVER_MESSAGE, acceptsAttemptAnswers, isAttemptTimeOver, isPerStudent, isTimeOver } from '../domain/attempt-rules.js';
 import { MAX_EVENTS, RETIRED_FLAGS, emptyIntegrity, flagReason, leaveReason, locksOnViolation, violationActionOf, warningsBeforeLockOf } from '../domain/integrity.js';
 import { ANSWER_LOG_MAX, TYPING_MERGE_MS } from '../domain/activity.js';
@@ -19,7 +20,8 @@ import { deviceFromRequest, deviceUpdate, ownsTest, recordDevice } from './devic
 import { deviceRefusal, deviceVerdict } from '../domain/device.js';
 import { justWokeUp } from './outage.js';
 import {
-  EARLY_TIMEOUT_MS, STRICT_GRACE_MS, acknowledgeShown, allowsNext, clockStartOnShown, effectiveShownMs, emptyStrictState, isStrict, resolveStrict, strictPaper
+  EARLY_TIMEOUT_MS, STRICT_GRACE_MS, acknowledgeShown, allowsNext, allowsPrevious, clockStartOnShown, effectiveShownMs, emptyStrictState, extraTimeWrite,
+  firstOpen, isStrict, lockedMsToGiveBack, nextOpenAfter, reachedOf, resolveStrict, strictPaper, strictProgress
 } from '../domain/strict-timing.js';
 import { lateAnswerDeadline, lateAnswerRecord } from '../domain/late-answers.js';
 import { resultsFrozen } from '../domain/freeze.js';
@@ -317,7 +319,10 @@ async function syncStrict(test, registration, attempt, atMs = Date.now()) {
   if (!state.changed) return attempt;
   const storedIndex = attempt.strict?.index ?? 0;
   const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', 'strict.index': storedIndex }, {
-    $set: { 'strict.index': state.index, 'strict.shownAt': state.shownAt, 'strict.sentAt': state.sentAt, 'strict.pausedSince': state.pausedSince },
+    $set: {
+      'strict.index': state.index, 'strict.shownAt': state.shownAt, 'strict.sentAt': state.sentAt, 'strict.pausedSince': state.pausedSince,
+      'strict.reached': state.reached
+    },
     ...(state.closed.length ? { $push: { 'strict.log': { $each: state.closed } } } : {})
   });
   const fresh = (await attemptContext(attempt.id))?.attempt || attempt;
@@ -794,15 +799,17 @@ async function takeLateAnswer(test, registration, owned, current, raw) {
  */
 async function refuseUnlessOpenQuestion(test, registration, attempt, questionId) {
   const synced = await syncStrict(test, registration, attempt);
-  const open = strictPaper(test, synced)[synced.strict?.index ?? 0];
+  const index = synced.strict?.index ?? 0;
+  const open = strictPaper(test, synced)[index];
   if (synced.status !== 'in_progress' || !open || open.questionId !== questionId) {
     throw new PublicTestError(409, 'That question is closed — the paper has moved on to the next one.', 'QUESTION_CLOSED');
   }
   const shownMs = effectiveShownMs(synced.strict);
-  if (open.seconds > 0 && shownMs !== null && Date.now() > shownMs + open.seconds * 1000 + STRICT_GRACE_MS) {
+  // What it had left when this visit began: its whole time, unless it was opened before.
+  if (open.seconds > 0 && shownMs !== null && Date.now() > shownMs + strictProgress(test, synced).leftMs(index) + STRICT_GRACE_MS) {
     throw new PublicTestError(409, 'The time for this question is over.', 'QUESTION_CLOSED');
   }
-  return { index: synced.strict?.index ?? 0, attempt: synced };
+  return { index, attempt: synced };
 }
 
 /**
@@ -841,36 +848,196 @@ export async function nextQuestion(req, attemptId, raw = {}) {
   // Already moved on (a double tap, or the clock got there first).
   if (!open || open.questionId !== asInteger(raw.questionId, 1, Number.MAX_SAFE_INTEGER)) return studentView(test, registration, attempt);
 
-  const nextIndex = index + 1;
-  const done = nextIndex >= paper.length;
+  const progress = strictProgress(test, attempt);
+  const reached = reachedOf(attempt.strict, paper.length);
+  // The furthest question opened: leaving it early is what the Next setting is about.
+  const newest = index >= reached - 1;
   const closedAt = now();
   // The question's start as it stands - moved on by any time away from it.
   const shownAt = attempt.strict?.shownAt ? new Date(effectiveShownMs(attempt.strict, closedAt.getTime())) : closedAt;
-  const endsMs = shownAt.getTime() + open.seconds * 1000;
-  // Moving on while still counted as away (only ever a race): the next
-  // question starts with its clock stopped too.
-  const pausedSince = !done && attempt.strict?.pausedSince ? closedAt : null;
-  // Without a Next button, a timed question closes only when its time is up
-  // (a moment early is the student's clock running ahead, not a skip).
-  if (!allowsNext(test) && open.seconds > 0 && closedAt.getTime() < endsMs - EARLY_TIMEOUT_MS) {
+  // It ends when what it had left at this visit's start runs out.
+  const endsMs = shownAt.getTime() + (open.seconds > 0 ? progress.leftMs(index) : 0);
+  // Without a Next button, the newest timed question closes only when its time
+  // is up (a moment early is the student's clock running ahead, not a skip) -
+  // one gone back to may always be left for the next one already seen. Nor
+  // does any move the device makes because time ran out on its screen
+  // (`auto`) while the server still has time on it - given back for an
+  // outage, say: the question opens again there rather than being lost.
+  if (((!allowsNext(test) && newest) || raw.auto === true) && open.seconds > 0 && closedAt.getTime() < endsMs - EARLY_TIMEOUT_MS) {
     throw new PublicTestError(409, 'This question stays open until its time runs out.', 'QUESTION_OPEN');
   }
   const how = open.seconds > 0 && closedAt.getTime() >= endsMs - EARLY_TIMEOUT_MS ? 'time' : 'next';
   const closing = { questionId: open.questionId, shownAt, closedAt, how };
+  // On to the next question that can open. Its time ran out here with none
+  // ahead: back to one that still has time, where the test lets students go
+  // back. Pressed with nothing ahead, Next hands the paper in.
+  const after = strictProgress(test, attempt, [closing]);
+  const target = nextOpenAfter(after, index, reached) ?? (raw.auto === true ? firstOpen(after, reached) : null);
+  const done = target === null;
+  const nextIndex = done ? paper.length : target;
+  const nextReached = done ? reached : Math.max(reached, nextIndex + 1);
+  // The device already shows the next question (opened from its sealed copy the
+  // moment this one ran out): its clock starts now, without waiting for "on
+  // screen". Only ever earlier than waiting would - never more time. Only a
+  // question not opened before travels sealed.
+  const sentAt = done || (raw.shownEarly === true && sealsAhead(test) && nextIndex >= reached) ? null : closedAt;
+  // Moving on while still counted as away (only ever a race): the next
+  // question starts with its clock stopped too.
+  const pausedSince = !done && attempt.strict?.pausedSince ? closedAt : null;
+  const moved = { index: nextIndex, shownAt: done ? null : closedAt, sentAt, pausedSince, reached: nextReached };
   const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', 'strict.index': index }, {
-    $set: { 'strict.index': nextIndex, 'strict.shownAt': done ? null : closedAt, 'strict.sentAt': done ? null : closedAt, 'strict.pausedSince': pausedSince },
+    $set: {
+      'strict.index': moved.index, 'strict.shownAt': moved.shownAt, 'strict.sentAt': moved.sentAt, 'strict.pausedSince': moved.pausedSince,
+      'strict.reached': moved.reached
+    },
     $push: { 'strict.log': closing }
   });
   // Written only over what was read, so when it lands the paper as it now
   // stands is known without reading it back. Otherwise something else moved
   // it (another tab, the clock): read what that left.
   const fresh = applied
-    ? { ...attempt, strict: { ...attempt.strict, index: nextIndex, shownAt: done ? null : closedAt, sentAt: done ? null : closedAt, pausedSince, log: [...(attempt.strict?.log || []), closing] } }
+    ? { ...attempt, strict: { ...attempt.strict, ...moved, log: [...(attempt.strict?.log || []), closing] } }
     : (await attemptContext(attempt.id))?.attempt || attempt;
   if (applied && done) {
     return studentView(test, registration, await finalizeAttempt(test, registration, fresh, { by: how === 'time' ? 'time' : 'student' }));
   }
   return studentView(test, registration, fresh);
+}
+
+/**
+ * Going back (a test with `strictPrevious`): the student leaves the open
+ * question - its clock stops, keeping what it has left - for one they have
+ * already seen that still has time: Previous, or its number along the top.
+ * `questionId` is the question they are leaving, so a late or repeated
+ * request never moves a paper that has moved on. The answer on screen may
+ * ride along in `answer`, as with Next.
+ */
+export async function goToQuestion(req, attemptId, raw = {}) {
+  const { test, registration, attempt: owned } = await ownedAttempt(req, attemptId);
+  if (!allowsPrevious(test)) throw new PublicTestError(409, 'This test does not let you go back to a question.', 'NO_GOING_BACK');
+  if (owned.pausedAt && owned.status !== 'submitted') throw new PublicTestError(423, PAUSED_MESSAGE, 'PAUSED');
+  let loaded = owned;
+  if (raw.answer && typeof raw.answer === 'object') {
+    try {
+      loaded = await writeAnswer(test, registration, owned, { ...raw.answer, questionId: raw.questionId });
+    } catch (error) {
+      if (error?.code !== 'QUESTION_CLOSED' && error?.code !== 'TIME_OVER') throw error;
+      loaded = (await attemptContext(owned.id))?.attempt || owned;
+    }
+  }
+  const checked = await checkIn(test, registration, loaded);
+  if (checked.status === 'submitted') return studentView(test, registration, checked);
+  requireWritableAttempt(checked);
+  const attempt = await syncStrict(test, registration, checked);
+  if (attempt.status === 'submitted') return studentView(test, registration, attempt);
+
+  const paper = strictPaper(test, attempt);
+  const index = attempt.strict?.index ?? 0;
+  const open = paper[index];
+  // Moved on meanwhile (its time ran out, or another tab): the paper as it now stands.
+  if (!open || open.questionId !== asInteger(raw.questionId, 1, Number.MAX_SAFE_INTEGER)) return studentView(test, registration, attempt);
+  const reached = reachedOf(attempt.strict, paper.length);
+  const progress = strictProgress(test, attempt);
+  const to = asInteger(raw.to, 0, paper.length - 1);
+  if (to === null || to === index || to >= reached || progress.isFinal(to)) {
+    throw new PublicTestError(409, 'That question cannot be opened again - its time is over.', 'QUESTION_CLOSED');
+  }
+  // In the newest question's last moments the next one's key is out (paper-seal.js):
+  // going back now would leave that question readable. It opens in a moment.
+  if (index === reached - 1 && paper[reached] && attempt.strict?.keyed === paper[reached].questionId) {
+    throw new PublicTestError(409, 'This question is just ending. Go back once the next one is open.', 'QUESTION_ENDING');
+  }
+  const closedAt = now();
+  const shownAt = attempt.strict?.shownAt ? new Date(effectiveShownMs(attempt.strict, closedAt.getTime())) : closedAt;
+  const endsMs = open.seconds > 0 ? shownAt.getTime() + progress.leftMs(index) : Infinity;
+  const how = closedAt.getTime() >= endsMs - EARLY_TIMEOUT_MS ? 'time' : to < index ? 'back' : 'next';
+  const closing = { questionId: open.questionId, shownAt, closedAt, how };
+  // Opened again now; its clock waits for the device to say it is on screen, as any question's does.
+  const moved = { index: to, shownAt: closedAt, sentAt: closedAt, pausedSince: attempt.strict?.pausedSince ? closedAt : null, reached };
+  const applied = await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', 'strict.index': index }, {
+    $set: {
+      'strict.index': moved.index, 'strict.shownAt': moved.shownAt, 'strict.sentAt': moved.sentAt, 'strict.pausedSince': moved.pausedSince,
+      'strict.reached': moved.reached
+    },
+    $push: { 'strict.log': closing }
+  });
+  const fresh = applied
+    ? { ...attempt, strict: { ...attempt.strict, ...moved, log: [...(attempt.strict?.log || []), closing] } }
+    : (await attemptContext(attempt.id))?.attempt || attempt;
+  return studentView(test, registration, fresh);
+}
+
+/**
+ * Whether questions travel ahead sealed (domain/paper-seal.js): a timer on each
+ * question, so a change that comes because time ran out comes at a moment the
+ * server knows in advance - the end of the open question's time. With Next
+ * allowed too: the key still comes only in those last moments, so a student
+ * moving on earlier waits for the server as before, and nothing is readable
+ * any earlier than on a paper without Next.
+ */
+const sealsAhead = (test) => isStrict(test);
+
+/**
+ * The next few questions of a timed one-way paper, sealed: each encrypted with
+ * its own key, unreadable until releaseNextKey gives that key. The device
+ * fetches these while the student works, so a question is never waited for.
+ * Nothing for any other paper, or one not being written right now.
+ */
+export async function questionsAhead(req, attemptId, raw = {}) {
+  const { test, attempt } = await ownedAttempt(req, attemptId);
+  const index = attempt.strict?.index ?? 0;
+  if (!sealsAhead(test) || attempt.status !== 'in_progress' || attempt.pausedAt || attempt.isLocked || !attempt.strict) return { index, questions: [] };
+  const paper = strictPaper(test, attempt);
+  const atMs = currentMs();
+  // The questions not opened yet, after the furthest one - where the student
+  // is now when they have not gone back. From `from` on: the device asks only
+  // for what it does not hold yet.
+  const reached = reachedOf(attempt.strict, paper.length);
+  const first = Math.max(reached, asInteger(raw.from, 0, paper.length) ?? 0);
+  const questions = paper.slice(first, reached + AHEAD_COUNT).map((entry, offset) => {
+    const assigned = (attempt.questions || []).find((item) => item.questionId === entry.questionId);
+    const view = assigned ? paperQuestion(test, attempt, assigned, atMs) : null;
+    if (!view) return null;
+    return { questionId: entry.questionId, index: first + offset, seconds: entry.seconds || null, ...sealQuestion(questionKey(config.sessionSecret, attempt.id, entry.questionId), view) };
+  }).filter(Boolean);
+  return { index, questions };
+}
+
+/**
+ * The key to the question after the open one - only in the open question's last
+ * KEY_EARLY_MS by the server's clock, while it is running (not stopped by an
+ * absence, a lock or a pause), on a timed one-way paper. So the next question
+ * opens on the device the instant this one ends, and is never readable more
+ * than that early. Too early: when to ask again. Not this paper, or nothing
+ * next: none, and the device moves on as before.
+ */
+export async function releaseNextKey(req, attemptId, raw = {}) {
+  const { test, registration, attempt } = await ownedAttempt(req, attemptId);
+  const none = { ready: false };
+  const state = attempt.strict;
+  if (!sealsAhead(test) || attempt.status !== 'in_progress' || attempt.pausedAt || attempt.isLocked || attempt.awaySince) return none;
+  if (!state?.shownAt || state.pausedSince) return none;
+  const paper = strictPaper(test, attempt);
+  const index = state.index ?? 0;
+  const open = paper[index];
+  const next = paper[index + 1];
+  if (!open || !next || !open.seconds || open.questionId !== asInteger(raw.questionId, 1, Number.MAX_SAFE_INTEGER)) return none;
+  // Only from the furthest question opened, onto one not opened yet: one gone
+  // back to has the questions already seen after it, and those are not sealed.
+  if (index !== reachedOf(state, paper.length) - 1) return none;
+  const atMs = Date.now();
+  const leftMs = effectiveShownMs(state, atMs) + strictProgress(test, attempt).leftMs(index) - atMs;
+  if (leftMs > KEY_EARLY_MS) return { ready: false, retryInMs: Math.ceil(leftMs - KEY_EARLY_MS) };
+  // Noted on the paper, so the next question's clock counts from this one's end
+  // even if nothing more is heard from the device (resolveStrict). And this
+  // one's end is final from now on: an "on screen" still to come can no longer
+  // move it later, while the next question is already readable.
+  if (state.keyed !== next.questionId || state.sentAt) {
+    const noted = await updateAttemptWhere(test.code, registration.id,
+      { id: attempt.id, status: 'in_progress', 'strict.index': index }, { $set: { 'strict.keyed': next.questionId, 'strict.sentAt': null } });
+    if (!noted) return none;
+  }
+  return { ready: true, questionId: next.questionId, key: questionKey(config.sessionSecret, attempt.id, next.questionId).toString('base64') };
 }
 
 
@@ -914,10 +1081,15 @@ export async function markShown(req, attemptId, raw = {}) {
   return studentView(test, registration, (await attemptContext(checked.id))?.attempt || checked);
 }
 
-export async function submitAttemptForStudent(req, attemptId) {
+export async function submitAttemptForStudent(req, attemptId, raw = {}) {
   const { test, registration, attempt: owned } = await ownedAttempt(req, attemptId);
   if (owned.pausedAt && owned.status !== 'submitted') throw new PublicTestError(423, PAUSED_MESSAGE, 'PAUSED');
   const attempt = await checkIn(test, registration, owned);
+  // Handed in by the device because time ran out on its screen (`auto`): not while the server still has time
+  // on the paper - given back for an outage, say. The student pressing Submit is never refused this way.
+  if (raw.auto === true && attempt.status === 'in_progress' && !isAttemptTimeOver(test, attempt, Date.now())) {
+    throw new PublicTestError(409, 'There is still time on this paper.', 'TIME_LEFT');
+  }
   requireWritableAttempt(attempt);
   return studentView(test, registration, await finalizeAttempt(test, registration, attempt, { requireUnlocked: true }));
 }
@@ -1157,12 +1329,17 @@ async function autoUnlock(test, registration, attempt) {
   // over from before is lifted now.
   if (locksOnViolation(test, config.lockOnExit) && (LOCK_WAIT_MS() <= 0 || !attempt.lockedAt || Date.now() - dateMs(attempt.lockedAt) < LOCK_WAIT_MS())) return attempt;
   const unlockedAt = now();
-  await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', isLocked: true, lockedAt: attempt.lockedAt ?? null }, {
+  // A timer on each question: the time the lock took comes back on the student's own end.
+  const back = lockedMsToGiveBack(test, attempt, unlockedAt.getTime());
+  const extra = extraTimeWrite(attempt, back);
+  await updateAttemptWhere(test.code, registration.id, { id: attempt.id, status: 'in_progress', isLocked: true, lockedAt: attempt.lockedAt ?? null, ...extra.expect }, {
     $set: {
       isLocked: false, lockedAt: null, lockReason: null,
-      fullscreenExitCount: 0, fullscreenTotalAbsenceMs: 0, violationCount: 0, violationKey: null, awaySince: null, lastSeenAt: null
+      fullscreenExitCount: 0, fullscreenTotalAbsenceMs: 0, violationCount: 0, violationKey: null, awaySince: null, lastSeenAt: null,
+      ...extra.set
     },
-    $push: logEvent({ type: 'attempt_resumed', createdAt: unlockedAt, durationMs: null, detail: 'automatic' })
+    ...(extra.inc ? { $inc: extra.inc } : {}),
+    $push: logEvent({ type: 'attempt_resumed', createdAt: unlockedAt, durationMs: back || null, detail: 'automatic' })
   });
   return (await attemptContext(attempt.id))?.attempt || attempt;
 }

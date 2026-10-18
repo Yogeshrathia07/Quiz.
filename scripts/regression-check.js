@@ -5,15 +5,18 @@
  */
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
-import { closeDatabase, initializeDatabase, serverState, registrations, studentProfiles, tests } from '../src/db/index.js';
+import { closeDatabase, creatorDrafts, resultMailSends, initializeDatabase, serverState, registrations, studentProfiles, tests } from '../src/db/index.js';
 import { invalidateTestCache, testDocByCode } from '../src/data/test-repository.js';
 import { compensateForOutage } from '../src/services/outage.js';
 import { PublicTestError } from '../src/lib/errors.js';
-import { createTest, updateTestSettings } from '../src/services/test-service.js';
+import { createTest, setNavigation, updateTestSettings } from '../src/services/test-service.js';
+import { discardDraft, getDraft, MAX_DRAFT_BYTES, saveDraft } from '../src/services/draft-service.js';
+import { kickResultMails, queueResultMails, resultMailList, resultMailPreview } from '../src/services/result-mail-service.js';
+import { mailAllowance } from '../src/data/mail-allowance.js';
 import { beginGuestSession, getTest, myResponseView, myResults, registerForTest, studentProfile } from '../src/services/registration-service.js';
 import { homeSummary } from '../src/services/home-service.js';
 import {
-  attemptResult, buildAttempt, getAttempt, nextQuestion, recordFullscreenEvent, saveAnswer, startAttempt, submitAttemptForStudent
+  attemptResult, buildAttempt, getAttempt, goToQuestion, nextQuestion, recordFullscreenEvent, saveAnswer, startAttempt, submitAttemptForStudent
 } from '../src/services/attempt-service.js';
 import { STRICT_GRACE_MS } from '../src/domain/strict-timing.js';
 import { activityLog } from '../src/domain/activity.js';
@@ -35,6 +38,8 @@ import { compute } from '../client/src/screens/admin/analysis-compute.js';
 
 // These checks cover the lock rules, which are off by default (LOCK_ON_EXIT).
 config.lockOnExit = true;
+// Never real email from a check: with no Brevo key, results emails are written to the log (lib/mailer.js).
+config.brevo.apiKey = '';
 // A few time-travel scenarios intentionally edit MongoDB directly instead of
 // using the service that invalidates cache. Keep those synthetic writes live.
 config.redis.testCacheMs = 0;
@@ -542,6 +547,8 @@ try {
   paper = await getAttempt(strictSeat.studentRequest, strictTest.test.code);
   assert.equal(paper.strict.index, 2, 'the timed-out question closed by itself');
   assert.equal(paper.strict.closed[1].how, 'time');
+  // Along the top: Q1 answered, Q2 not - however each one closed.
+  assert.deepEqual(paper.strict.track.map((dot) => [dot.answered, dot.timedOut]), [[true, false], [false, true], [false, false]]);
   assert.equal(paper.strict.questionEndsAt, null, 'a question with no limit has no clock');
   await expectPublicError(() => saveAnswer(strictSeat.studentRequest, paper.id, { questionId: q2.id, selectedOptions: ['1'] }), 409);
 
@@ -602,14 +609,89 @@ try {
   const noNextDoc = await testDocByCode(noNext.test.code);
   assert.equal(noNextDoc.registrations[0].attempt.windowCheck, 'declared', 'what the private-window check saw is kept');
   assert.equal((await adminDashboard(adminReq, noNext.test.code)).registrations[0].windowCheck, 'declared');
-  // Edit test on a running one-way test keeps its clock: the times and the Next button stay as they were.
+  // Edit test on a running one-way test keeps its clock - the question times stay
+  // as they were - but Next may change, and going back may be turned on (never off).
   await saveTestPaper(adminReq, noNext.test.code, {
     questions: (await testForEditing(adminReq, noNext.test.code)).questions, applyTo: 'everyone', strictNext: true, typeSeconds: { mcq: 5, msq: 5, short: 5 }
   });
   const keptClock = await testDocByCode(noNext.test.code);
-  assert.equal(keptClock.strictNext, false, 'the Next button setting is fixed once started');
-  assert.deepEqual(keptClock.typeSeconds, noNextDoc.typeSeconds, 'so are the question times');
+  assert.equal(keptClock.strictNext, true, 'Next can change while the test runs');
+  assert.deepEqual(keptClock.typeSeconds, noNextDoc.typeSeconds, 'the question times cannot');
+  // A timer on each question: forward only - going back cannot be turned on, by the menu or by Edit test.
+  await expectPublicError(() => setNavigation(adminReq, noNext.test.code, { previous: true }), 409);
+  await saveTestPaper(adminReq, noNext.test.code, { questions: (await testForEditing(adminReq, noNext.test.code)).questions, applyTo: 'everyone', strictPrevious: true });
+  assert.equal((await testDocByCode(noNext.test.code)).strictPrevious, false, 'Edit test cannot add going back to a timed paper');
   await closeTest(adminReq, noNext.test.code);
+  // One way with no timer: going back can be turned on while it runs - and then never off.
+  const oneWay = await createTest(adminReq, {
+    ...objectivePayload(`One way ${identifier}`, { questionMix: { mcq: 2, msq: 0, short: 0 } }),
+    strictTiming: true, strictPrevious: false, typeSeconds: { mcq: 0, msq: 0, short: 0 },
+    questions: [
+      { prompt: 'Way one?', type: 'mcq', options: ['A', 'B'], correctOptions: ['0'] },
+      { prompt: 'Way two?', type: 'mcq', options: ['A', 'B'], correctOptions: ['1'] }
+    ]
+  });
+  createdCodes.push(oneWay.test.code);
+  assert.equal(oneWay.test.strictTimed, false);
+  await startTest(adminReq, oneWay.test.code);
+  const goingBack = await setNavigation(adminReq, oneWay.test.code, { previous: true });
+  assert.equal(goingBack.test.strictPrevious, true, 'going back turned on mid-test');
+  await expectPublicError(() => setNavigation(adminReq, oneWay.test.code, { previous: false }), 409);
+  await closeTest(adminReq, oneWay.test.code);
+
+  /* ------------------------------------------- GOING BACK ON A TIMED PAPER ---- */
+  const backTest = await createTest(adminReq, {
+    ...objectivePayload(`Going back ${identifier}`, { questionMix: { mcq: 3, msq: 0, short: 0 } }),
+    shuffleQuestions: false, strictTiming: true, strictPrevious: true, typeSeconds: { mcq: 60, msq: 60, short: 120 },
+    questions: [
+      { prompt: 'Back one?', type: 'mcq', options: ['A', 'B'], correctOptions: ['0'] },
+      { prompt: 'Back two?', type: 'mcq', options: ['A', 'B'], correctOptions: ['0'] },
+      { prompt: 'Back three?', type: 'mcq', options: ['A', 'B'], correctOptions: ['0'] }
+    ]
+  });
+  createdCodes.push(backTest.test.code);
+  assert.equal(backTest.test.strictPrevious, false, 'a timer on each question: no going back for a new test');
+  // A test saved with a timer and going back before that rule keeps both, and still works as it did.
+  await tests().updateOne({ code: backTest.test.code }, { $set: { strictPrevious: true } });
+  const backSeat = await seatStudent(backTest.test.code);
+  await startTest(adminReq, backTest.test.code);
+  let backPaper = await startAttempt(backSeat.studentRequest, backTest.test.code);
+  const [b1, b2] = (await testDocByCode(backTest.test.code)).questions;
+  // Q1 answered and left after 20 s: it keeps the 40 s it did not use.
+  await registrations().updateOne(
+    { testCode: backTest.test.code, id: backSeat.registration.id },
+    { $set: { 'attempt.strict.shownAt': new Date(Date.now() - 20_000), 'attempt.strict.sentAt': null } }
+  );
+  backPaper = await nextQuestion(backSeat.studentRequest, backPaper.id, { questionId: b1.id, answer: { selectedOptions: ['0'] } });
+  assert.equal(backPaper.questions[0].id, b2.id);
+  assert.equal(backPaper.strict.backTo, 0, 'Previous leads back to Q1');
+  backPaper = await goToQuestion(backSeat.studentRequest, backPaper.id, { questionId: b2.id, to: 0 });
+  assert.equal(backPaper.questions[0].id, b1.id, 'Q1 is open again');
+  assert.equal(backPaper.questions[0].answered, true, 'with its answer');
+  const leftOnQ1 = Date.parse(backPaper.strict.questionEndsAt) - Date.parse(backPaper.serverTime);
+  assert.ok(leftOnQ1 > 35_000 && leftOnQ1 <= 41_000, `Q1 has the time it did not use (${leftOnQ1} ms)`);
+  backPaper = await saveAnswer(backSeat.studentRequest, backPaper.id, { questionId: b1.id, selectedOptions: ['1'] });
+  assert.deepEqual(backPaper.questions[0].selectedOptions, ['1'], 'its answer can change while it has time');
+  // Next leads on to Q2, seen before - not to a new question.
+  backPaper = await nextQuestion(backSeat.studentRequest, backPaper.id, { questionId: b1.id });
+  assert.equal(backPaper.questions[0].id, b2.id);
+  assert.equal(backPaper.strict.reached, 2);
+  assert.deepEqual(backPaper.strict.track.map((dot) => dot.answered), [true, false]);
+  // A question whose time ran out cannot be opened again.
+  await registrations().updateOne(
+    { testCode: backTest.test.code, id: backSeat.registration.id },
+    { $push: { 'attempt.strict.log': { questionId: b1.id, shownAt: new Date(Date.now() - 60_000), closedAt: new Date(Date.now() - 1_000), how: 'time' } } }
+  );
+  await expectPublicError(() => goToQuestion(backSeat.studentRequest, backPaper.id, { questionId: b2.id, to: 0 }), 409);
+  // Saving it while it runs (Edit test, settings) never takes its going back away.
+  await saveTestPaper(adminReq, backTest.test.code, { questions: (await testForEditing(adminReq, backTest.test.code)).questions, applyTo: 'everyone' });
+  await updateTestSettings(adminReq, backTest.test.code, { violationAction: 'warn' });
+  assert.equal((await testDocByCode(backTest.test.code)).strictPrevious, true, 'an older test keeps its going back');
+  await closeTest(adminReq, backTest.test.code);
+  // Its copy is a new test: today's rule - a timer on each question, no going back.
+  const backCopy = await duplicateTest(adminReq, backTest.test.code);
+  createdCodes.push(backCopy.test.code);
+  assert.deepEqual([backCopy.test.strictTimed, backCopy.test.strictPrevious, backCopy.test.strictNext], [true, false, true], 'a copy goes forward only');
 
   /* ------------------------------- EACH STUDENT'S OWN TIME, FROM THEIR BEGIN ---- */
   const ownTime = await createTest(adminReq, objectivePayload(`Own time ${identifier}`, { schedule: { startMode: 'manual', endMode: 'each', durationMinutes: 30 } }));
@@ -1862,6 +1944,71 @@ try {
   assert.ok(ownView.answers.every((answer) => answer.classPercentRight === 50 || classRight.size > 1), 'each answer says how many of the class got it right');
   assert.equal(JSON.stringify(ownView).includes('Overview wrong'), false, 'never another student\'s name');
 
+  // Results by email, once the marks are out: each student only their own, within the day's allowance, never twice at once.
+  const quietly = async (work) => {
+    const log = console.log;
+    console.log = () => {};
+    try { return await work(); } finally { console.log = log; }
+  };
+  const mailList = await resultMailList(adminReq, overviewCode);
+  assert.equal(mailList.problem, null, 'closed, marks released');
+  const mailRow = (name) => mailList.students.find((row) => row.name === `Overview ${name}`);
+  assert.deepEqual(['right', 'wrong'].map((name) => [mailRow(name).canEmail, mailRow(name).mail]), [[true, null], [true, null]], 'the two who handed in; nobody emailed yet');
+  assert.equal(mailList.students.some((row) => row.name === 'Overview absent'), false, 'no paper, no email');
+  const preview = await resultMailPreview(adminReq, overviewCode, { registrationId: mailRow('right').id, options: { answers: true, correct: true, classStats: true } });
+  assert.match(preview.subject, /^Your marks: Overview /);
+  assert.ok(preview.html.includes('Class average') && preview.text.includes('Your answers'), 'the class, and their answers, as chosen');
+  assert.equal(JSON.stringify(preview).includes('Overview wrong'), false, 'never another student\'s name');
+  const bare = await resultMailPreview(adminReq, overviewCode, { registrationId: mailRow('right').id, options: { answers: false, classStats: false } });
+  assert.equal(bare.text.includes('Your answers') || bare.text.includes('Class average'), false, 'only the marks, when that is all that is chosen');
+  assert.ok(preview.text.includes('Rank 1 of 2') && bare.text.includes('Rank 1 of 2'), 'the rank is always there: first of two');
+  assert.ok(preview.text.includes(`Teacher's email: ${adminReq.portalUser.email}`), 'the faculty email, to write to them');
+  const before = await mailAllowance();
+  const firstMail = await quietly(async () => {
+    const queued = await queueResultMails(adminReq, overviewCode, { registrationIds: [mailRow('right').id] });
+    assert.equal((await queueResultMails(adminReq, overviewCode, { registrationIds: [mailRow('right').id] })).queued, 0, 'already on its way: not queued twice');
+    await kickResultMails();
+    return queued;
+  });
+  assert.deepEqual([firstMail.queued, firstMail.overLimit, firstMail.skipped], [1, 0, 0]);
+  const afterMail = await resultMailList(adminReq, overviewCode);
+  assert.equal(afterMail.students.find((row) => row.name === 'Overview right').mail.status, 'sent');
+  assert.equal((await mailAllowance()).results, before.results + 1, 'it counts against the day - shared with sign-in codes');
+  // The day's share used up: refused, and nobody is queued.
+  const share = config.resultMail.dailyLimit;
+  try {
+    config.resultMail.dailyLimit = (await mailAllowance()).results;
+    await expectPublicError(() => queueResultMails(adminReq, overviewCode, { registrationIds: [mailRow('wrong').id] }), 429);
+    // Room for one: the first chosen goes, the other waits for another day; sent once already is no bar to sending again.
+    config.resultMail.dailyLimit += 1;
+    const partly = await quietly(async () => {
+      const queued = await queueResultMails(adminReq, overviewCode, { registrationIds: [mailRow('right').id, mailRow('wrong').id] });
+      await kickResultMails();
+      return queued;
+    });
+    assert.deepEqual([partly.queued, partly.overLimit], [1, 1]);
+  } finally { config.resultMail.dailyLimit = share; }
+  // Not over yet: no results email.
+  const notOver = await createTest(adminReq, objectivePayload(`Not over ${identifier}`));
+  createdCodes.push(notOver.test.code);
+  await expectPublicError(() => queueResultMails(adminReq, notOver.test.code, { registrationIds: ['1'] }), 409);
+  assert.match((await resultMailList(adminReq, notOver.test.code)).problem, /Close the test first/);
+
+  // The Create page's draft: kept for its own teacher only, refused when too big, gone once the test exists.
+  const otherAdmin = { portalUser: { email: `regression-other-${identifier}@ddn.upes.ac.in`, displayName: 'Other Admin', role: 'admin' } };
+  assert.deepEqual(await getDraft(adminReq), { draft: null, savedAt: null }, 'no draft to begin with');
+  const kept = { version: 1, details: { title: 'Half written' }, questions: [{ prompt: 'First?', type: 'mcq', options: ['a', 'b'], correctOptions: ['0'] }] };
+  const saved = await saveDraft(adminReq, { draft: kept });
+  assert.ok(saved.savedAt);
+  assert.deepEqual((await getDraft(adminReq)).draft, kept, 'back just as it was left');
+  assert.equal((await getDraft(otherAdmin)).draft, null, "never another teacher's");
+  await expectPublicError(() => saveDraft(adminReq, { draft: 'text' }), 400);
+  await expectPublicError(() => saveDraft(adminReq, { draft: { padding: 'x'.repeat(MAX_DRAFT_BYTES) } }), 413);
+  assert.deepEqual((await getDraft(adminReq)).draft, kept, 'a refused save leaves the last one');
+  await expectPublicError(() => getDraft({}), 401);
+  await discardDraft(adminReq);
+  assert.equal((await getDraft(adminReq)).draft, null, 'Start over, or the test created, throws it away');
+
   console.log([
     'Regression check passed:',
     'registration (student domain, plus guests only where the admin allowed them), SAP profile, approval and bulk approval,',
@@ -1870,7 +2017,7 @@ try {
     'and automatic submission by the scheduler, scheduled starts, durations from the real start,',
     'strict per-question timing (forward only, server-side timeouts, auto-submit on the last question),',
     'server outages given back once, editing the question paper for everyone or new papers only, restart quiz (running or finished), resuming a test closed by mistake (papers back where they were, time given back), pausing one student (time stopped and given back, the automatic end waiting for it), resuming paused students in bulk by search and filter, handing in one paper, reopening one handed-in paper (with minutes for that student alone), phones-only and laptops-only tests (Begin refused, the paper covered, exceptions, what the teacher sees), rejecting mid-test, unanswered requests expiring after the wait, a phone keyboard opening its own app noted rather than counted as leaving, the least-overlap question draw, papers made while students wait for Start (Begin handing out that very paper, made again when the paper changes), strict timing without Next (server-enforced), the question clock stopping while away or locked, the private-window record,',
-    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results as a paper they sat, the overview on the Test tab (who took part, the marks and their spread, question by question, leaving the page - every figure exact), the Analysis tab (each answer right, part, wrong, blank or still to mark; ranked) and students comparing their own paper with the class (only once marks are out, never another name); text all at once and extensions seen no longer recorded.'
+    'close, manual marking (and marks shown before it is finished), analysis, Excel export, restart/reset, all result-release modes, marks per question (part marks, re-marking when worth changes) marking in the Excel Marks sheet (an older file not undoing newer marks), any mark changed by hand (a right choice answer\'s too, standing through re-marking), and frozen results, each student\'s own time from their own Begin (extensions, the scheduler handing each paper in, close and resume), and the quiz list (scores, duplicate, archive - an archived test leaving students\' results and the home counts), and a teacher\'s own test in their results as a paper they sat, the overview on the Test tab (who took part, the marks and their spread, question by question, leaving the page - every figure exact), the Analysis tab (each answer right, part, wrong, blank or still to mark; ranked) and students comparing their own paper with the class (only once marks are out, never another name), the Create page\'s draft (its own teacher only, size-capped, thrown away), results by email (each their own, within the day\'s allowance, never twice at once); text all at once and extensions seen no longer recorded.'
   ].join(' '));
 } finally {
   if (createdCodes.length) {
@@ -1878,5 +2025,7 @@ try {
     await registrations().deleteMany({ testCode: { $in: createdCodes } });
   }
   await studentProfiles().deleteMany({ email: { $in: profileEmails } });
+  if (createdCodes.length) await resultMailSends().deleteMany({ testCode: { $in: createdCodes } });
+  await creatorDrafts().deleteMany({ _id: { $in: [adminReq.portalUser.email, `regression-other-${identifier}@ddn.upes.ac.in`] } });
   await closeDatabase();
 }

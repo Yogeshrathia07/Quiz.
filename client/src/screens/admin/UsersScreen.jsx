@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, ArrowDownUp, Ban, BadgeCheck, Check, ChevronLeft, ChevronRight, CircleCheck, GraduationCap, KeyRound, MoreVertical, Search, Trash2, Users } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Ban, BadgeCheck, CalendarDays, Check, ChevronLeft, ChevronRight, CircleCheck, GraduationCap, KeyRound, MoreVertical, Search, Trash2, Users } from 'lucide-react';
 import { api, post } from '../../lib/api.js';
 import { loadCached, setCached, useCached } from '../../lib/cache.js';
 import { shortDateTime } from '../../lib/format.js';
@@ -12,6 +12,9 @@ import { InfoTip } from '../../components/InfoTip.jsx';
 import { applyFilters } from '../../lib/filters.js';
 import { openedFromName } from '../../lib/people.js';
 import { USER_FILTERS } from './user-filters.js';
+import { mergeUserRows, sortUsers, USER_SORTS, USUAL_USER_SORT, userEmail } from './user-list.js';
+import { useAutoHideScrollbar } from '../../lib/useAutoHideScrollbar.js';
+import { Modal } from '../../components/Modal.jsx';
 
 /** People per page on the Users list. */
 const PAGE_SIZE = 20;
@@ -23,14 +26,14 @@ const FILTER_ICONS = {
   student: { icon: GraduationCap, tone: 'info' },
   faculty: { icon: BadgeCheck, tone: 'ok' },
   password: { icon: KeyRound, tone: 'muted' },
-  microsoft: { icon: Check, tone: 'muted' }
+  microsoft: { icon: Check, tone: 'muted' },
+  'no-account': { icon: Users, tone: 'muted' },
+  'no-signin': { icon: KeyRound, tone: 'muted' },
+  allowed: { icon: CircleCheck, tone: 'ok' },
+  blocked: { icon: Ban, tone: 'bad' }
 };
-const SORTS = {
-  newest: ['Newest first', (a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0)],
-  oldest: ['Oldest first', (a, b) => Date.parse(a.createdAt || 0) - Date.parse(b.createdAt || 0)],
-  recent: ['Last login', (a, b) => Date.parse(b.lastSignInAt || 0) - Date.parse(a.lastSignInAt || 0)],
-  name: ['Name A–Z', (a, b) => String(a.name || '').localeCompare(String(b.name || ''))]
-};
+const SORT_ICONS = { created: CalendarDays, login: KeyRound, name: Users };
+const SORTS = USER_SORTS.map((sort) => ({ ...sort, icon: SORT_ICONS[sort.id] }));
 
 function BlockForm({ busy, onBlock }) {
   const [email, setEmail] = useState('');
@@ -43,26 +46,32 @@ function BlockForm({ busy, onBlock }) {
         if (await onBlock(email, reason)) { setEmail(''); setReason(''); }
       }}
     >
-      <input className="text-input" type="email" required placeholder="Your college email" value={email} onChange={(event) => setEmail(event.target.value)}/>
-      <input className="text-input" maxLength="200" placeholder="Reason (optional)" value={reason} onChange={(event) => setReason(event.target.value)}/>
+      <input className="text-input" type="email" name="block-email" required aria-label="College email to block" placeholder="Their college email" value={email} onChange={(event) => setEmail(event.target.value)}/>
+      <input className="text-input" name="block-reason" maxLength="200" aria-label="Reason for blocking (optional)" placeholder="Reason (optional)" value={reason} onChange={(event) => setReason(event.target.value)}/>
       <button className="button button-warning" disabled={busy} type="submit"><Ban size={16} aria-hidden="true"/>Block email</button>
     </form>
   );
 }
 
 /**
- * Every account, plus the blocked list, which lasts until lifted.
+ * One display list of accounts and blocked emails. The server still keeps
+ * blocks separately, so deleting an account never lifts its block.
  */
 export function UsersScreen({ currentEmail, canManage, showToast }) {
   // Shown at once when seen before (lib/cache.js), and asked again behind.
   const users = useCached(canManage ? '/api/admin/users' : null);
   const data = users.data || null;
+  const people = useMemo(() => mergeUserRows(data?.accounts, data?.blocked), [data]);
   const setData = (next) => setCached('/api/admin/users', next);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState([]);
-  const [sort, setSort] = useState('newest');
+  const [sort, setSort] = useState(USUAL_USER_SORT);
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [blockingEmail, setBlockingEmail] = useState(false);
+  const list = useRef(null);
+  const listScroll = useAutoHideScrollbar();
+  const summaryScroll = useAutoHideScrollbar();
   const [opened, setOpened] = useState(null); // the account row, shown at once while its details load
   // A person named in the address (?admin=users&user=<email>) - a name clicked
   // elsewhere (components/PersonLink.jsx) - opens once the list is here.
@@ -111,36 +120,34 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
     return run(() => post(`${userPath(email)}/block`, { reason }), `${email} is blocked.`);
   };
   const unblock = (email) => run(() => post(`${userPath(email)}/unblock`), `${email} is unblocked.`);
-  const blockedEmails = useMemo(() => new Set((data?.blocked || []).map((entry) => entry.email)), [data]);
+  const blockedEmails = useMemo(() => new Set(people.filter((entry) => entry.blocked).map((entry) => entry.email)), [people]);
 
   // Searched first; the filter's counts are taken from that.
   const searched = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return (data?.accounts || []).filter((account) => `${account.name} ${account.email} ${account.sapId || ''}`.toLowerCase().includes(needle));
-  }, [data, query]);
-  const accounts = useMemo(() => [...applyFilters(searched, USER_FILTERS, filters)].sort(SORTS[sort][1]), [searched, filters, sort]);
+    return people.filter((account) => `${account.name} ${account.email} ${account.sapId || ''}`.toLowerCase().includes(needle));
+  }, [people, query]);
+  const accounts = useMemo(() => sortUsers(applyFilters(searched, USER_FILTERS, filters), sort), [searched, filters, sort]);
   const filtered = query.trim() || filters.length > 0;
 
   // The numbers at a glance, from the list already loaded.
   const stats = useMemo(() => {
-    const list = data?.accounts || [];
-    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     return {
-      total: list.length,
-      students: list.filter((account) => account.role === 'student').length,
-      faculty: list.filter((account) => account.role !== 'student').length,
-      active: list.filter((account) => (Date.parse(account.lastSignInAt || 0) || 0) >= weekAgo).length,
-      blocked: (data?.blocked || []).length
+      total: people.length,
+      students: people.filter((account) => account.hasAccount && account.role === 'student').length,
+      faculty: people.filter((account) => account.hasAccount && account.role !== 'student').length,
+      blocked: blockedEmails.size
     };
-  }, [data]);
-  const scrollTo = (id) => document.getElementById(id)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-  // Each count opens what it counts: the list filtered to them, or the blocked list.
+  }, [people, blockedEmails]);
+  const showGroup = (selected) => {
+    setFilters(selected); setQuery(''); setPage(0);
+    list.current?.scrollTo({ top: 0 });
+  };
   const tiles = [
-    { id: 'total', label: 'Accounts', value: stats.total, icon: Users, tone: 'info', open: () => { setFilters([]); setQuery(''); scrollTo('users-accounts'); } },
-    { id: 'students', label: 'Students', value: stats.students, icon: GraduationCap, tone: 'info', open: () => { setFilters(['student']); scrollTo('users-accounts'); } },
-    { id: 'faculty', label: 'Faculty', value: stats.faculty, icon: BadgeCheck, tone: 'ok', open: () => { setFilters(['faculty']); scrollTo('users-accounts'); } },
-    { id: 'active', label: 'Active this week', value: stats.active, icon: Activity, tone: 'ok', open: () => { setSort('recent'); scrollTo('users-accounts'); } },
-    { id: 'blocked', label: 'Blocked', value: stats.blocked, icon: Ban, tone: stats.blocked ? 'bad' : 'muted', open: () => scrollTo('users-blocked') }
+    { id: 'total', label: 'All users', value: stats.total, icon: Users, tone: 'info', filters: [] },
+    { id: 'student', label: 'Students', value: stats.students, icon: GraduationCap, tone: 'info', filters: ['student'] },
+    { id: 'faculty', label: 'Faculty', value: stats.faculty, icon: BadgeCheck, tone: 'ok', filters: ['faculty'] },
+    { id: 'blocked', label: 'Blocked', value: stats.blocked, icon: Ban, tone: stats.blocked ? 'bad' : 'muted', filters: ['blocked'] }
   ];
 
   // One page at a time. Any new search, filter or sort starts again from page 1.
@@ -153,7 +160,7 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
   // Turning the page starts at the top of the list, not where the buttons were.
   const turnTo = (next) => {
     setPage(next);
-    document.getElementById('users-accounts')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    list.current?.scrollTo({ top: 0 });
   };
 
   if (!canManage) {
@@ -162,159 +169,148 @@ export function UsersScreen({ currentEmail, canManage, showToast }) {
   if (!data) return <Skeleton rows={6} label="Loading users"/>;
 
   return (
-    <section className="admin-list">
-      <header className="page-title-row">
-        <div className="page-heading">
-          <h1>Users</h1>
-          <InfoTip label="About Users">Open a person to see their tests and SAP ID, or to delete or block them.</InfoTip>
-        </div>
-      </header>
-
-      <div className="stat-tiles" aria-label="Users at a glance">
-        {tiles.map((tile) => (
-          <button key={tile.id} type="button" className={`stat-tile is-${tile.tone}`} onClick={tile.open}>
-            <tile.icon className="stat-tile-icon" size={18} aria-hidden="true"/>
-            <strong>{tile.value}</strong>
-            <span>{tile.label}</span>
-          </button>
-        ))}
-      </div>
-
-      <section className="card students-card">
-        {/* One row, like the dashboard's lists: search, the tick-box filter, and the order. */}
-        <header className="students-toolbar" id="users-accounts">
-          <div>
-            <h2>Accounts</h2>
-            <p>{filtered ? `Showing ${accounts.length} of ${data.accounts.length}` : `${data.accounts.length} account${data.accounts.length === 1 ? '' : 's'}`}</p>
-          </div>
-          <div className="controls">
-            <label className="search-field">
-              <Search size={16} aria-hidden="true"/>
-              <input className="text-input" type="search" aria-label="Search" placeholder="Search name, email or SAP ID" value={query} onChange={(event) => setQuery(event.target.value)}/>
-            </label>
-            <FilterMenu groups={USER_FILTERS} rows={searched} selected={filters} onChange={setFilters} icons={FILTER_ICONS} title="Filter accounts" allLabel="Everyone"/>
-            <ActionMenu
-              label={`Sort: ${SORTS[sort][0]}`}
-              icon={ArrowDownUp}
-              items={Object.entries(SORTS).map(([id, [label]]) => ({
-                label, icon: id === sort ? Check : undefined, tone: id === sort ? 'info' : undefined, onSelect: () => setSort(id)
-              }))}
-            />
+    <section className="admin-list users-workspace">
+      <aside className="users-sidebar" aria-label="Users overview">
+        <header className="users-sidebar-heading">
+          <div className="page-heading">
+            <h1>Users</h1>
+            <InfoTip label="About Users">Accounts and blocked emails share one list. Open an account for its tests; the Blocked badge has its block details.</InfoTip>
           </div>
         </header>
-        <div className="table-scroll">
-          <table className="live-table">
-            <thead>
-              <tr>
-                <th>Person</th>
-                <th>Role</th>
-                <th className="col-created">Created</th>
-                <th>Last login</th>
-                <th className="column-actions">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((account) => {
-                const self = account.email === currentEmail;
-                return (
-                  <tr key={account.email} className="users-row-open" title="Open to see tests, scores and SAP ID" onClick={() => setOpened(account)}
-                    tabIndex={0} aria-label={`${account.name}: open`}
-                    onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) { event.preventDefault(); setOpened(account); } }}>
-                    <td data-label="Person">
-                      <div className="user-card-head">
-                        <span className="user-card-who">
-                          <strong>{account.name}</strong>
-                          <span className="table-subtext"><span className="user-email">{account.email}</span>{account.sapId && <span className="user-sap-inline">{account.sapId}</span>}</span>
-                        </span>
-                        {/* On a phone or tablet the card has no room for the buttons: Block and Delete are in this
-                            menu (a tap on the card itself opens the person). Not offered for your own account. */}
-                        <span className="user-card-menu" onClick={(event) => event.stopPropagation()}>
-                          <ActionMenu
-                            label={<MoreVertical size={18} aria-label={`More for ${account.name}`}/>}
-                            trigger="icon"
-                            items={[
-                              !self && !busy && { label: 'Block', icon: Ban, tone: 'warn', onSelect: () => block(account.email) },
-                              !self && !busy && { label: 'Delete', icon: Trash2, danger: true, onSelect: () => remove(account) }
-                            ]}
-                          />
-                        </span>
-                      </div>
-                    </td>
-                    <td data-label="Role"><InfoPill tone={account.role === 'faculty' ? 'success' : 'muted'}>{account.role === 'faculty' ? 'Faculty' : 'Student'}</InfoPill></td>
-                    <td data-label="Created" className="col-created">{shortDateTime(account.createdAt)}</td>
-                    <td data-label="Last login">
-                      {shortDateTime(account.lastSignInAt)}
-                      {!account.hasPassword && <span className="table-subtext">No password (Microsoft only)</span>}
-                    </td>
-                    <td data-label="Actions" onClick={(event) => event.stopPropagation()}>
-                      <div className="table-actions user-buttons">
-                        <button className="button button-warning button-small" type="button" title="Block" disabled={busy || self} onClick={() => block(account.email)}><Ban size={16} aria-hidden="true"/><span className="button-label">Block</span></button>
-                        <button className="button button-danger button-small" type="button" title="Delete" disabled={busy || self} onClick={() => remove(account)}><Trash2 size={16} aria-hidden="true"/><span className="button-label">Delete</span></button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {accounts.length === 0 && <p className="empty">{data.accounts.length ? 'Nobody matches these filters.' : 'No accounts yet.'}</p>}
+        <nav className="users-summary auto-hide-scrollbar" aria-label="Users at a glance" {...summaryScroll}>
+          {tiles.map((tile) => {
+            const active = !query.trim() && filters.length === tile.filters.length && tile.filters.every((id) => filters.includes(id));
+            return (
+              <button key={tile.id} type="button" className={'users-summary-button is-' + tile.tone + (active ? ' is-selected' : '')}
+                aria-controls="users-list" aria-pressed={active} onClick={() => showGroup(tile.filters)} title={'Show ' + tile.label.toLowerCase()}>
+                <tile.icon className="users-summary-icon" size={18} aria-hidden="true"/>
+                <span>{tile.label}</span><strong>{tile.value}</strong>
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+
+      <div className="users-content">
+        <section className="card students-card users-accounts-card" aria-label="User accounts">
+          <header className="students-toolbar" id="users-accounts">
+            <div>
+              <h2>Accounts</h2>
+              <p>{filtered ? 'Showing ' + accounts.length + ' of ' + people.length + ' entries' : people.length + ' users'}</p>
+            </div>
+            <div className="controls">
+              <label className="search-field">
+                <Search size={16} aria-hidden="true"/>
+                <input className="text-input" type="search" name="users-search" aria-label="Search" placeholder="Name, email or SAP ID"
+                  value={query} onChange={(event) => setQuery(event.target.value)}/>
+              </label>
+              <FilterMenu groups={USER_FILTERS} rows={searched} selected={filters} onChange={setFilters} icons={FILTER_ICONS}
+                title="Sort and filter users" allLabel="Sort & filter" sorts={SORTS} sort={sort} onSort={setSort} autoHideScrollbar/>
+              <button type="button" className="button button-secondary users-block-toggle" aria-label="Block an email" title="Block an email" onClick={() => setBlockingEmail(true)}>
+                <Ban size={16} aria-hidden="true"/><span className="toolbar-text">Block email</span>
+              </button>
+            </div>
+          </header>
+
+          <div className="table-scroll users-list-scroll auto-hide-scrollbar" ref={list} id="users-list" role="region" aria-label="Users list" tabIndex={0} {...listScroll}>
+            <table className="live-table users-table">
+              <thead>
+                <tr><th>Person</th><th>Role</th><th className="col-created">Created</th><th>Last login</th><th className="column-actions">Actions</th></tr>
+              </thead>
+              <tbody>
+                {shown.map((account) => {
+                  const self = account.email === userEmail(currentEmail);
+                  const name = account.hasAccount ? account.name : 'Blocked email';
+                  return (
+                    <tr key={account.email} className={'users-row-open' + (account.blocked ? ' is-blocked' : '') + (!account.hasAccount ? ' is-email-only' : '')}
+                      title={account.hasAccount ? 'Open to see tests, scores and SAP ID' : 'No account. Unblock to allow this email again.'}
+                      onClick={account.hasAccount ? () => setOpened(account) : undefined}
+                      tabIndex={account.hasAccount ? 0 : undefined} aria-label={account.hasAccount ? account.name + ': open' : account.email + ': blocked email, no account'}
+                      onKeyDown={(event) => {
+                        if (account.hasAccount && (event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+                          event.preventDefault(); setOpened(account);
+                        }
+                      }}>
+                      <td data-label="Person">
+                        <div className="user-card-head">
+                          <span className="user-card-who">
+                            <span className="user-card-name">
+                              <strong>{name}</strong>
+                              {account.blocked && <span className="users-block-marker" onClick={(event) => event.stopPropagation()}>
+                                <InfoPill tone="danger">Blocked</InfoPill>
+                                <InfoTip label={'Block details for ' + account.email}>
+                                  <span className="info-tip-list">
+                                    <span>{account.block?.reason || 'No reason given.'}</span>
+                                    {account.block?.blockedAt && <span><strong>Blocked</strong>{shortDateTime(account.block.blockedAt)}</span>}
+                                    {account.block?.blockedBy && <span><strong>By</strong>{account.block.blockedBy}</span>}
+                                  </span>
+                                </InfoTip>
+                              </span>}
+                            </span>
+                            <span className="table-subtext"><span className="user-email">{account.email}</span>{account.sapId && <span className="user-sap-inline">{account.sapId}</span>}</span>
+                          </span>
+                          <span className="user-card-menu" onClick={(event) => event.stopPropagation()}>
+                            <ActionMenu label={<MoreVertical size={18} aria-label={'More for ' + account.email}/>} trigger="icon" items={[
+                              !self && !busy && { label: account.blocked ? 'Unblock' : 'Block', icon: account.blocked ? CircleCheck : Ban, tone: account.blocked ? 'ok' : 'warn',
+                                onSelect: () => account.blocked ? unblock(account.email) : block(account.email) },
+                              account.hasAccount && !self && !busy && { label: 'Delete', icon: Trash2, danger: true, onSelect: () => remove(account) }
+                            ]}/>
+                          </span>
+                        </div>
+                      </td>
+                      <td data-label="Role"><InfoPill tone={account.hasAccount && account.role === 'faculty' ? 'success' : 'muted'}>{!account.hasAccount ? 'No account' : account.role === 'faculty' ? 'Faculty' : 'Student'}</InfoPill></td>
+                      <td data-label="Created" className="col-created">{shortDateTime(account.createdAt)}</td>
+                      <td data-label="Last login">
+                        {shortDateTime(account.lastSignInAt)}
+                        {account.hasAccount && !account.hasPassword && <span className="table-subtext">No password (Microsoft only)</span>}
+                      </td>
+                      <td data-label="Actions" onClick={(event) => event.stopPropagation()}>
+                        <div className="table-actions user-buttons">
+                          {account.blocked
+                            ? <button className="button button-unblock button-small" type="button" title="Unblock" disabled={busy || self} onClick={() => unblock(account.email)}><CircleCheck size={16} aria-hidden="true"/><span className="button-label">Unblock</span></button>
+                            : <button className="button button-warning button-small" type="button" title="Block" disabled={busy || self} onClick={() => block(account.email)}><Ban size={16} aria-hidden="true"/><span className="button-label">Block</span></button>}
+                          {account.hasAccount && <button className="button button-danger button-small" type="button" title="Delete" disabled={busy || self} onClick={() => remove(account)}><Trash2 size={16} aria-hidden="true"/><span className="button-label">Delete</span></button>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {accounts.length === 0 && <p className="empty">{people.length ? 'Nobody matches these filters.' : 'No users yet.'}</p>}
+          </div>
+
           {accounts.length > PAGE_SIZE && (
-            <nav className="pager" aria-label="Pages">
+            <nav className="pager users-pager" aria-label="Pages">
               <span className="pager-status">Showing {firstShown}–{lastShown} of {accounts.length}</span>
               <div className="pager-buttons">
-                <button className="button button-secondary button-small" type="button" disabled={current === 0} onClick={() => turnTo(current - 1)}>
-                  <ChevronLeft size={16} aria-hidden="true"/>Previous
+                <button className="button button-secondary button-small" type="button" disabled={current === 0} onClick={() => turnTo(current - 1)} aria-label="Previous" title="Previous page">
+                  <ChevronLeft size={16} aria-hidden="true"/><span className="pager-button-text">Previous</span>
                 </button>
                 <span className="pager-page">Page {current + 1} of {pageCount}</span>
-                <button className="button button-secondary button-small" type="button" disabled={current >= pageCount - 1} onClick={() => turnTo(current + 1)}>
-                  Next<ChevronRight size={16} aria-hidden="true"/>
+                <button className="button button-secondary button-small" type="button" disabled={current >= pageCount - 1} onClick={() => turnTo(current + 1)} aria-label="Next" title="Next page">
+                  <span className="pager-button-text">Next</span><ChevronRight size={16} aria-hidden="true"/>
                 </button>
               </div>
             </nav>
           )}
-        </div>
-      </section>
+        </section>
+      </div>
 
-      <section className="card students-card users-blocked">
-        <div className="users-toolbar" id="users-blocked">
-          <div className="page-heading">
-            <h2>Blocked</h2>
-            <InfoTip label="About blocking">Blocked people cannot log in, so they cannot take any test.</InfoTip>
-          </div>
-        </div>
-        <BlockForm busy={busy} onBlock={block}/>
-        <div className="table-scroll">
-          <table className="live-table">
-            <thead>
-              <tr><th>Email</th><th>Reason</th><th>Blocked</th><th className="column-actions">Actions</th></tr>
-            </thead>
-            <tbody>
-              {data.blocked.map((entry) => (
-                <tr key={entry.email}>
-                  <td data-label="Email"><strong>{entry.email}</strong></td>
-                  <td data-label="Reason">{entry.reason || <span className="table-subtext">—</span>}</td>
-                  <td data-label="Blocked">
-                    {shortDateTime(entry.blockedAt)}
-                    <span className="table-subtext">by {entry.blockedBy}</span>
-                  </td>
-                  <td data-label="Actions">
-                    <div className="table-actions user-buttons">
-                      <button className="button button-unblock button-small" type="button" title="Unblock" disabled={busy} onClick={() => unblock(entry.email)}><CircleCheck size={16} aria-hidden="true"/><span className="button-label">Unblock</span></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {data.blocked.length === 0 && <p className="empty">Nobody is blocked.</p>}
-        </div>
-      </section>
+      {blockingEmail && <Modal label="Block an email" className="users-block-modal" onClose={() => setBlockingEmail(false)}>
+        <h1>Block an email</h1>
+        <BlockForm busy={busy} onBlock={async (email, reason) => {
+          const done = await block(email, reason);
+          if (done) setBlockingEmail(false);
+          return done;
+        }}/>
+      </Modal>}
       {opened && (
         <UserDetailModal
           account={opened}
           currentEmail={currentEmail}
-          isSelf={opened.email === currentEmail}
-          isBlocked={blockedEmails.has(opened.email)}
+          isSelf={userEmail(opened.email) === userEmail(currentEmail)}
+          isBlocked={blockedEmails.has(userEmail(opened.email))}
           busy={busy}
           onBlock={() => block(opened.email)}
           onUnblock={() => unblock(opened.email)}

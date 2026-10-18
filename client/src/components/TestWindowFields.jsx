@@ -74,8 +74,8 @@ export function scheduleProblem(values) {
 }
 
 /** The end choice alone - also used while a test is running, where only these apply. */
-export function EndChoice({ value, onChange, idPrefix, options = END_OPTIONS }) {
-  return <ChoiceCards label="Ends" idPrefix={`${idPrefix}-end`} value={value} onChange={onChange} options={options}/>;
+export function EndChoice({ value, onChange, idPrefix, options = END_OPTIONS, hint = false }) {
+  return <ChoiceCards label="Ends" idPrefix={`${idPrefix}-end`} value={value} onChange={onChange} options={options} hint={hint}/>;
 }
 
 export const LIVE_END_OPTIONS = END_OPTIONS.filter((option) => option.value !== 'duration');
@@ -109,46 +109,51 @@ export function TestWindowFields({ values, estimatedSeconds, onChange, idPrefix 
   return (
     <div className="form-wide schedule-fields">
       <div className="schedule-row">
-        <ChoiceCards label="Starts" idPrefix={`${idPrefix}-start`} value={values.startMode} onChange={chooseStart} options={START_OPTIONS}/>
+        <ChoiceCards label="Starts" idPrefix={`${idPrefix}-start`} value={values.startMode} onChange={chooseStart} options={START_OPTIONS} hint/>
         {values.startMode === 'scheduled' && (
-          <DateTimeField
-            id={`${idPrefix}-opens`}
-            label="Start time"
-            value={values.opensAt}
-            onChange={(value) => onChange('opensAt', value)}
-            extras={[['+15 min', () => nowValue(15)], ['+1 h', () => nowValue(60)]]}
-          />
+          <div className="dependent-fields">
+            <DateTimeField
+              id={`${idPrefix}-opens`}
+              label="Start time"
+              value={values.opensAt}
+              onChange={(value) => onChange('opensAt', value)}
+              extras={[['+15 min', () => nowValue(15)], ['+1 h', () => nowValue(60)]]}
+            />
+          </div>
         )}
       </div>
 
       <div className="schedule-row">
-        <EndChoice value={endChoiceOf(values.endMode)} onChange={chooseEnd} idPrefix={idPrefix}/>
+        <EndChoice value={endChoiceOf(values.endMode)} onChange={chooseEnd} idPrefix={idPrefix} hint/>
         {values.endMode === 'at' && (
-          <DateTimeField
-            id={`${idPrefix}-ends`}
-            label="End time"
-            value={values.endsAt}
-            onChange={(value) => onChange('endsAt', value)}
-            extras={[['+30 min', () => later(values.endsAt || nowValue(), 30)]]}
-          />
+          <div className="dependent-fields">
+            <DateTimeField
+              id={`${idPrefix}-ends`}
+              label="End time"
+              value={values.endsAt}
+              onChange={(value) => onChange('endsAt', value)}
+              extras={[['+30 min', () => later(values.endsAt || nowValue(), 30)]]}
+            />
+          </div>
         )}
+        {/* How long, and from whose start: both only for "After a duration". */}
         {timed && (
-          <Stepper
-            id={`${idPrefix}-duration`}
-            label="Duration"
-            value={values.durationMinutes ?? ''}
-            min={1}
-            max={24 * 60}
-            step={5}
-            unit="min"
-            onChange={(value) => onChange('durationMinutes', value)}
-            presets={[[fit, `Fit questions (${fit} min)`]]}
-          />
+          <div className="dependent-fields">
+            <Stepper
+              id={`${idPrefix}-duration`}
+              label="Duration"
+              value={values.durationMinutes ?? ''}
+              min={1}
+              max={24 * 60}
+              step={5}
+              unit="min"
+              onChange={(value) => onChange('durationMinutes', value)}
+              presets={[[fit, `Fit questions (${fit} min)`]]}
+            />
+            <ChoiceCards label="Counted from" idPrefix={`${idPrefix}-from`} value={values.endMode} onChange={(mode) => onChange('endMode', mode)} options={DURATION_FROM} hint/>
+          </div>
         )}
       </div>
-      {timed && (
-        <ChoiceCards label="Counted from" idPrefix={`${idPrefix}-from`} value={values.endMode} onChange={(mode) => onChange('endMode', mode)} options={DURATION_FROM}/>
-      )}
 
       <p className={`schedule-summary${problem ? ' is-problem' : ''}`}>
         {problem || scheduleSummary(values)}

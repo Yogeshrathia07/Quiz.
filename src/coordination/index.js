@@ -162,11 +162,14 @@ export async function cachedJson(resource, load, ttlMs = config.redis.testCacheM
 
   cacheCounters.misses += 1;
   // Collapse a same-worker burst to one MongoDB read.
-  if (cacheLoads.has(key)) return cloneJson(await cacheLoads.get(key));
+  // Every request for this resource shares one load - but none waits on it for
+  // good (waitForLoad): one stuck read must never hold every student of a test.
+  const shared = cacheLoads.get(key);
+  if (shared) return cloneJson(await waitForLoad(key, shared));
   const pending = Promise.resolve().then(load);
   cacheLoads.set(key, pending);
   try {
-    const value = await pending;
+    const value = await waitForLoad(key, pending);
     const json = cloneJson(value);
     localCache.set(key, { value: json, expiresAt: Date.now() + ttlMs });
     if (localCache.size > 5_000) localCache.delete(localCache.keys().next().value);
@@ -176,8 +179,35 @@ export async function cachedJson(resource, load, ttlMs = config.redis.testCacheM
     }
     return cloneJson(json);
   } finally {
-    cacheLoads.delete(key);
+    // Only this load's own entry: a stuck one already dropped may have a fresh successor.
+    if (cacheLoads.get(key) === pending) cacheLoads.delete(key);
   }
+}
+
+let lastSlowLoadLogAt = 0;
+
+/**
+ * Waits on a shared load, but not past cacheLoadTimeoutMs. Then the load stops
+ * being shared - the next request starts a fresh one - and this request answers
+ * "busy", which the student's device retries. Without this, one read that never
+ * came back held every student of a test until a restart (14 Oct 2026).
+ */
+function waitForLoad(key, pending) {
+  const ms = config.redis.cacheLoadTimeoutMs;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      if (cacheLoads.get(key) === pending) cacheLoads.delete(key);
+      cacheCounters.errors += 1;
+      if (Date.now() - lastSlowLoadLogAt > 10_000) {
+        lastSlowLoadLogAt = Date.now();
+        console.error(`Coordination: reading ${key} took over ${ms} ms; requests stopped waiting for it and read afresh.`);
+      }
+      const busy = new PublicTestError(503, 'The test server is slow to answer just now. Your device will try again; please stay on this page.', 'SERVER_BUSY');
+      reject(busy);
+    }, ms);
+    timer.unref?.();
+    pending.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
 }
 
 /** Invalidate locally and in Redis after a test-setting mutation. */

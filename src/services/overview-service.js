@@ -16,6 +16,10 @@ import { earnedMarks, marksOrNull, paperMarks, questionMarks, roundMarks } from 
 import { LEAVE_REASONS, integritySummary } from '../domain/integrity.js';
 import { timeTakenSeconds } from '../domain/presenters.js';
 import { oneLine } from '../domain/rich-text.js';
+import { imageView } from '../domain/question-image.js';
+import { PublicTestError } from '../lib/errors.js';
+import { answerState, questionResponse } from '../domain/question-statistics.js';
+export { answerState } from '../domain/question-statistics.js';
 
 /** Only what the overview reads: never answer text or events. */
 const PROJECTION = {
@@ -336,14 +340,7 @@ const MATRIX_PROJECTION = {
   'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1, 'attempt.answers.answeredAt': 1, 'attempt.answers.selectedOptions': 1
 };
 
-/** One answer's state, by the marks it has (null: not marked yet) and whether it was answered. */
-export function answerState(marks, given, worth) {
-  if (!given) return 'B';
-  if (marks === null) return 'Q';
-  if (marks >= worth) return 'O';
-  return marks > 0 ? 'P' : 'W';
-}
-
+/** The compact answer-state matrix for the Analysis tab. */
 export async function matrixOf(test) {
   const bank = test.questions || [];
   const byId = new Map(bank.map((question, index) => [question.id, { question, number: index + 1, worth: questionMarks(test, question) }]));
@@ -418,5 +415,31 @@ export async function matrixOf(test) {
       }).join('');
       return { id: paper.id, name: paper.name, sapId: paper.sapId, seconds: paper.seconds, flags: paper.flags, st, pm: partial };
     })
+  };
+}
+
+/** Loaded only when a question is opened; the matrix stays compact. Ownership
+ * is checked before reading any responses or revealing the answer key. */
+export async function questionStatistics(req, code, questionId) {
+  const test = await requireOwnedTest(req, code, { withStudents: false });
+  const index = (test.questions || []).findIndex((question) => String(question.id) === String(questionId));
+  if (index < 0) throw new PublicTestError(404, 'This question is no longer available.');
+  const question = test.questions[index];
+  const worth = questionMarks(test, question);
+  const responses = [];
+  const cursor = registrations().find({ testCode: test.code, 'attempt.status': 'submitted', $or: [
+    { 'attempt.answers.questionId': question.id }, { 'attempt.questions.questionId': question.id }
+  ] }, { projection: { _id: 0, id: 1, 'attempt.status': 1, 'attempt.questions.questionId': 1,
+    'attempt.answers.questionId': 1, 'attempt.answers.isCorrect': 1,
+    'attempt.answers.answeredAt': 1, 'attempt.answers.selectedOptions': 1 } });
+  for await (const registration of cursor) {
+    const response = questionResponse(question, registration, worth);
+    if (response) responses.push(response);
+  }
+  return {
+    question: { id: question.id, number: index + 1, type: questionType(question), prompt: question.prompt,
+      image: imageView(question.image), worth, options: question.options || [],
+      correctOptions: (question.correctOptions || []).map(String) },
+    responses
   };
 }

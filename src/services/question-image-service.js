@@ -4,14 +4,14 @@ import { PublicTestError } from '../lib/errors.js';
 import { randomId } from '../lib/crypto.js';
 import { now } from '../lib/time.js';
 import { adminEmail } from '../data/test-repository.js';
-import { IMAGE_ID, imageUrl } from '../domain/question-image.js';
+import { IMAGE_EXTENSIONS, IMAGE_ID, imageUrl } from '../domain/question-image.js';
 
 /**
  * Pictures on questions. The editor shrinks every picture before it is sent
  * (client/src/lib/image-compress.js: its longest side 1600 px, about 500 KB at
  * most), so a paper with pictures still opens quickly on a weak phone
  * connection. They are added in the editor only - a JSON import carries text.
- * Each is kept once, here, and a question holds only `{ id, width, height }`.
+ * Each is kept once, here, and a question holds only `{ id, width, height, ext }`.
  */
 export const MAX_IMAGE_BYTES = 700 * 1024;
 const MAX_SIDE = 4000;
@@ -45,7 +45,8 @@ export async function saveQuestionImage(req, body, raw = {}) {
   if (!width || !height) throw new PublicTestError(400, 'The picture\'s size is missing.');
   const id = randomId(18);
   await questionImages().insertOne({ _id: id, ownerEmail: adminEmail(req), contentType, bytes: data.length, width, height, data: new Binary(data), createdAt: now() });
-  return { image: { id, width, height, bytes: data.length, url: imageUrl(id) } };
+  const ext = IMAGE_EXTENSIONS[contentType];
+  return { image: { id, width, height, bytes: data.length, ext, url: imageUrl(id, ext) } };
 }
 
 /** One picture, to send. Null when there is none by that id. */

@@ -14,9 +14,14 @@ export function safeEqual(a, b) {
 /**
  * Deterministic shuffle: the same seed always produces the same order, so a
  * student who reloads mid-test sees their questions and options unchanged.
+ * Each item's HMAC is worked out once, not on both sides of every comparison:
+ * the same order, at a fraction of the cost when a whole class begins at once.
  */
 export function stableSort(items, seed, key = (item) => item.id) {
-  return [...items].sort((a, b) => hmac(`${seed}:${key(a)}`, seed).localeCompare(hmac(`${seed}:${key(b)}`, seed)));
+  return items
+    .map((item) => [hmac(`${seed}:${key(item)}`, seed), item])
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([, item]) => item);
 }
 
 export const asInteger = (value, min, max) => {

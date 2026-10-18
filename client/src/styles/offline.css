@@ -1,0 +1,55 @@
+/* Server offline (components/ServerOffline.jsx): the sleeping student, the words, nothing else - centred in the window. */
+.server-offline{display:grid;justify-items:center;align-content:center;gap:var(--space-8);min-height:75dvh;padding:var(--space-6) var(--space-4);text-align:center}
+/* The lines under the heading in the game's handwriting; the heading keeps the app's own bold type. */
+.server-offline-message{display:grid;justify-items:center;gap:var(--space-2);font-family:var(--font-sketch)}
+/* On a soft light disc (round on the wrapper - rounding the picture itself would crop it): the drawing's dark
+   outlines and its Zzz would vanish on the dark page. */
+.server-offline-disc{display:grid;place-items:center;margin-bottom:var(--space-4);padding:var(--space-10);border-radius:50%;background:var(--sheet-hatch-a)}
+.server-offline-picture{display:block;width:min(220px,52vw);height:min(220px,52vw);object-fit:contain}
+.server-offline h1{margin:0;color:var(--text);font-size:clamp(1.5rem,4vw,2rem);line-height:var(--leading-tight)}
+.server-offline p{max-width:36ch;margin:0;color:var(--text-soft);font-size:var(--text-md);line-height:var(--leading)}
+.server-offline .server-offline-note{margin-top:var(--space-4);color:var(--text-muted);font-size:var(--text-sm)}
+.server-offline-back{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-2) var(--space-3);margin-top:var(--space-4)}
+
+/* The game under it (components/TicTacToe.jsx): hand-drawn in the page's ink, with a handwriting font this device has. */
+.ttt{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:var(--space-8) var(--space-10);width:100%;color:var(--text);font-family:var(--font-sketch)}
+.ttt-options{display:flex;flex-direction:column;gap:var(--space-5);min-width:190px}
+.ttt-pick{display:flex;flex-direction:column;align-items:stretch;gap:var(--space-2);font-size:var(--text-md)}
+.ttt-pick>span{color:var(--text-soft)}
+.ttt button{min-height:40px;padding:var(--space-0-5) var(--space-5);border:3px solid transparent;border-radius:var(--radius-sketch);background:none;color:var(--text);font:inherit;font-size:var(--text-md);cursor:pointer}
+.ttt button:hover{border-color:var(--border-strong)}
+.ttt button:active{border-color:var(--text-muted)}
+.ttt button[aria-pressed="true"],.ttt button[aria-pressed="true"]:hover{border-color:var(--text)}
+.ttt button.ttt-new{border-color:var(--text-muted)}
+.ttt button.ttt-new:hover{border-color:var(--text)}
+.ttt button:focus-visible{outline:3px dashed var(--text);outline-offset:3px}
+.ttt-play{display:flex;flex-direction:column;align-items:center;gap:var(--space-6)}
+/* The grid's lines run a little past the board: the gap above and below leaves them room. */
+.ttt .ttt-status{min-height:1.4em;max-width:none;margin:0;color:var(--text);font-size:var(--text-lg);line-height:var(--leading-tight)}
+.ttt-board{width:min(78vw,440px);aspect-ratio:1;margin:var(--space-3);touch-action:manipulation}
+.ttt-board svg{display:block;width:100%;height:100%;overflow:visible;user-select:none;-webkit-tap-highlight-color:transparent}
+.ttt-stroke{fill:none;stroke:var(--text);stroke-linecap:round;stroke-linejoin:round}
+.ttt-draw{stroke-dasharray:1;stroke-dashoffset:1;animation:ttt-draw .35s ease-out forwards}
+.ttt-strike{animation-duration:.5s;pointer-events:none}
+@keyframes ttt-draw{to{stroke-dashoffset:0}}
+.ttt-cell{fill:transparent;outline:none;cursor:pointer}
+.ttt-cell[aria-disabled="true"]{cursor:default}
+.ttt-cell:focus-visible{outline:3px dashed var(--text);outline-offset:-8px}
+.ttt .ttt-score{display:flex;gap:var(--space-5);max-width:none;margin:0;color:var(--text-muted);font-size:var(--text-md)}
+@media (prefers-reduced-motion:reduce){.ttt-draw{animation:none;stroke-dashoffset:0}}
+/* A phone: the choices in a row over the board. */
+@media (max-width:640px){
+  .ttt-options{flex-direction:row;flex-wrap:wrap;justify-content:center;min-width:0}
+  .ttt-pick{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:center}
+}
+/* Wide enough: the message on the left, the game on the right, the two fitting the window with nothing to scroll -
+   the game's choices in rows over a board as big as the height left allows. */
+@media (min-width:700px){
+  .server-offline{grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);align-items:center;gap:var(--space-8) clamp(1.5rem,4vw,3rem);min-height:calc(100dvh - var(--space-12) * 2);padding:var(--space-2) var(--space-4)}
+  .ttt{flex-direction:column;flex-wrap:nowrap;gap:var(--space-4);width:auto}
+  .ttt-options{flex-direction:row;flex-wrap:wrap;justify-content:center;gap:var(--space-2) var(--space-6);min-width:0}
+  .ttt-pick{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:center}
+  .ttt-play{gap:var(--space-6)}
+  .ttt-board{width:min(40vw,calc(100dvh - 370px),420px);min-width:260px}
+  .server-offline-picture{width:min(220px,22vw);height:min(220px,22vw)}
+}

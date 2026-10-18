@@ -50,17 +50,19 @@ export function lateAnswerDeadline(test, attempt, questionId, atMs, lateMs) {
 
   let questionEndMs = Infinity;
   if (isStrict(test)) {
-    const closed = (attempt.strict?.log || []).find((entry) => entry.questionId === questionId);
-    if (closed) {
-      // Moved on with Next: the answer went with the move, or there was none.
-      if (closed.how !== 'time') return null;
-      questionEndMs = dateMs(closed.closedAt) + STRICT_GRACE_MS;
-    } else {
-      // Still the open one when the paper was handed in; never one not reached.
-      const open = strictPaper(test, attempt)[attempt.strict?.index ?? 0];
-      if (!open || open.questionId !== questionId || !attempt.strict?.shownAt) return null;
+    const open = strictPaper(test, attempt)[attempt.strict?.index ?? 0];
+    if (open && open.questionId === questionId) {
+      // Still the open one (when the paper was handed in, say).
+      if (!attempt.strict?.shownAt) return null;
       const endsAt = openQuestionEndsAt(test, attempt, atMs);
       if (endsAt) questionEndMs = endsAt.getTime() + STRICT_GRACE_MS;
+    } else {
+      // Its last visit - one, or several where the test lets students go back.
+      // Left with Next or Previous: the answer went with the move, or there was
+      // none. Never one not reached.
+      const last = (attempt.strict?.log || []).findLast((entry) => entry.questionId === questionId);
+      if (!last || last.how !== 'time') return null;
+      questionEndMs = dateMs(last.closedAt) + STRICT_GRACE_MS;
     }
   }
 

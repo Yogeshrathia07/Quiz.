@@ -4,12 +4,15 @@ import { PublicTestError } from '../lib/errors.js';
 import { asInteger } from '../lib/crypto.js';
 import { dateMs } from '../lib/time.js';
 import { ESTIMATE_SECONDS, QUESTION_DRAWS, QUESTION_LAYOUTS, estimateSeconds, questionMixCount, questionMixFrom } from './question-bank.js';
-import { buildTypeSeconds, secondsOrNull, strictEstimateSeconds } from './strict-timing.js';
+import { buildTypeSeconds, hasQuestionTimers, secondsOrNull, strictEstimateSeconds } from './strict-timing.js';
 import { buildTypeMarks, marksField } from './marks.js';
 import { END_MODES } from './attempt-rules.js';
 import { imageField } from './question-image.js';
 
 export const RESULT_RELEASE_MODES = ['instant', 'after_quiz', 'admin'];
+/** How many answer options a choice question may have. */
+export const MIN_OPTIONS = 2;
+export const MAX_OPTIONS = 10;
 
 // Control characters, and the direction overrides that make a name display
 // as something else (U+202A-U+202E, U+2066-U+2069). Joiners stay: Indian
@@ -114,8 +117,8 @@ function buildQuestion(rawQuestion, index) {
   const image = imageField(rawQuestion.image, `Question ${index + 1}`);
   if (type === 'short') return { prompt, type, options: [], correctOptions: [], timeSeconds, marks, image };
 
-  if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length < 2 || rawQuestion.options.length > 8) {
-    throw new PublicTestError(400, `Question ${index + 1} needs 2 to 8 answer options.`);
+  if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length < MIN_OPTIONS || rawQuestion.options.length > MAX_OPTIONS) {
+    throw new PublicTestError(400, `Question ${index + 1} needs ${MIN_OPTIONS} to ${MAX_OPTIONS} answer options.`);
   }
   const options = rawQuestion.options.map((option, optionIndex) => cleanText(option, `Question ${index + 1}, option ${optionIndex + 1}`, 1, 600));
   const correctOptions = Array.isArray(rawQuestion.correctOptions) ? [...new Set(rawQuestion.correctOptions.map(String))] : [];
@@ -131,8 +134,9 @@ function buildQuestion(rawQuestion, index) {
  * needs. `estimatedSeconds` is what the chosen questions are expected to take;
  * `endsAt` is the wall-clock deadline the admin actually sets, defaulting to
  * start + estimate but free to be anything after the start.
+ * `keepPrevious`: the test is running with going back on, which stays on.
  */
-export function buildTest(raw) {
+export function buildTest(raw, { keepPrevious = false } = {}) {
   const title = cleanText(raw.title, 'Test title', 3, 120);
   const instructions = String(raw.instructions || '').trim().slice(0, 2000);
   const fullscreenExitLimit = asInteger(raw.fullscreenExitLimit ?? 3, 0, 20);
@@ -180,6 +184,12 @@ export function buildTest(raw) {
     throw new PublicTestError(400, 'Add between 1 and 100 questions.');
   }
   const questions = raw.questions.map(buildQuestion);
+  // Going back, on a paper held one at a time: only with no question timers -
+  // a timed question closes once it is left, so a timed paper goes forward
+  // only, with or without Next. (Free papers go back anyway.) A running test
+  // that already has it keeps it (`keepPrevious`): it is never taken away.
+  const strictPrevious = strictTiming && raw.strictPrevious === true
+    && (keepPrevious || !hasQuestionTimers({ strictTiming, typeSeconds, questions }));
 
   const hasQuestionMix = raw.questionMix !== undefined || raw.question_mix !== undefined;
   const questionMix = hasQuestionMix ? questionMixFrom(raw.questionMix ?? raw.question_mix, questions) : null;
@@ -217,6 +227,7 @@ export function buildTest(raw) {
     questionLayout,
     strictTiming,
     strictNext,
+    strictPrevious,
     typeSeconds,
     typeMarks,
     questionDraw,

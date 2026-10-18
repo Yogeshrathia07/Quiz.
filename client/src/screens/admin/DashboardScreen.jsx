@@ -11,8 +11,8 @@ import { Skeleton } from '../../components/Skeleton.jsx';
 import { usePageTitle } from '../../brand.js';
 import { ActionMenu } from '../../components/ActionMenu.jsx';
 import {
-  ArrowDownAZ, BadgeCheck, BarChart3, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, EyeOff, FileCheck2, FileCog, FileSpreadsheet, FileUp, LayoutDashboard,
-  LocateOff, Lock, LockOpen, MapPin, MapPinOff, MoreVertical, Pause, Pencil, PenLine, Play, QrCode, RotateCcw, Search, Send, ShieldCheck, TimerOff, Undo2, UserCheck,
+  ArrowDownAZ, ArrowLeft, BadgeCheck, BarChart3, CheckCheck, ChevronLeft, ChevronRight, ClipboardCheck, Hash, ListChecks, Trophy, UserRoundPlus, CircleCheck, CircleDashed, CircleHelp, CirclePlay, CircleStop, Clock, Eraser, EyeOff, FileCheck2, FileCog, FileSpreadsheet, FileUp, LayoutDashboard,
+  LocateOff, Lock, LockOpen, Mail, MapPin, MapPinOff, MoreVertical, Pause, Pencil, PenLine, Play, QrCode, RotateCcw, Search, Send, ShieldCheck, StepBack, StepForward, TimerOff, Undo2, UserCheck,
   UserCog, UserRound, UserX, Users
 } from 'lucide-react';
 import { SIGN_LEGEND, STATE_LEGEND, StateChip, StudentIdentity, StudentRow, StudentWindow, statesOf } from './StudentRow.jsx';
@@ -23,6 +23,7 @@ import { RESULT_FILTERS, awaitingMarking, studentFilters } from './student-filte
 import { ResponseRow } from './ResponseRow.jsx';
 import { QrModal } from './modals/QrModal.jsx';
 import { SapIdModal } from './modals/SapIdModal.jsx';
+import { EmailResultsModal } from './modals/EmailResultsModal.jsx';
 import { ReopenPaperModal } from './modals/ReopenPaperModal.jsx';
 import { StudentAnalysisModal } from './modals/StudentAnalysisModal.jsx';
 import { TestSetupModal } from './modals/TestSetupModal.jsx';
@@ -33,6 +34,7 @@ import { ResultReviewModal } from './modals/ResultReviewModal.jsx';
 import { SheetSwitch } from './modals/SheetSwitch.jsx';
 import { OverviewPanels, useOverview } from './TestOverview.jsx';
 import { AnalysisSection } from './AnalysisSection.jsx';
+import { decodeAnswerFilters, encodeAnswerFilters } from './answer-filters.js';
 import { useFitToScreen } from '../../lib/fit-to-screen.js';
 
 /** Each filter option's icon, coloured by what it means (filters.css). */
@@ -70,7 +72,6 @@ const LIVE_GAP_MS = 1_500;
  * while another app was open - and the teacher comes back to the same list,
  * not to everyone again.
  */
-const TABS = ['test', 'students', 'responses', 'analysis'];
 /**
  * The Results list's orders: a field, either way round (the first direction
  * is where choosing the field starts). The first field's first direction is
@@ -221,20 +222,22 @@ function ScheduleBanner({ test, serverTime, isBusy, act, actions, owed = 0, writ
   );
 }
 
-function Tabs({ tab, onSelect, counts }) {
+function Tabs({ tab, onSelect, counts, area }) {
   const tabs = [
-    { id: 'test', label: 'Test', icon: LayoutDashboard },
+    { id: 'test', label: 'Overview', icon: LayoutDashboard },
     { id: 'students', label: 'Students', icon: Users, count: counts.total, badge: counts.pending, badgeLabel: 'waiting for your decision' },
     { id: 'responses', label: 'Results', icon: FileCheck2, count: counts.submitted, badge: counts.awaitingMarking, badgeLabel: 'waiting to be marked' },
     // How the class did and why - from the submitted papers (AnalysisSection).
     { id: 'analysis', label: 'Analysis', icon: BarChart3 }
   ];
+  // Results opens on Analysis, left of the list of papers; a quiz on its Overview.
+  const shown = (area === 'results' ? ['analysis', 'responses'] : ['test', 'students']).map((id) => tabs.find((entry) => entry.id === id));
   // These are mutually exclusive dashboard views, so use native radio inputs
   // instead of button-like tabs. The visual radio makes the current view clear
   // without hiding the student/response totals.
   return (
-    <nav className="dashboard-tabs" role="radiogroup" aria-label="Dashboard sections">
-      {tabs.map((entry) => {
+    <div className="dashboard-tabs" role="radiogroup" aria-label="Dashboard sections">
+      {shown.map((entry) => {
         const selected = tab === entry.id;
         return (
         <label key={entry.id} className={`dashboard-tab${selected ? ' is-selected' : ''}`} title={entry.label}>
@@ -262,7 +265,7 @@ function Tabs({ tab, onSelect, counts }) {
         </label>
         );
       })}
-    </nav>
+    </div>
   );
 }
 
@@ -367,7 +370,7 @@ function finishedLine(test, counts, people) {
   ].filter(Boolean).join(' · ');
 }
 
-function TestSection({ test, serverTime, counts, isBusy, act, showToast, onOpenSetup, onOpenQr, onOpenRestart, onEdit, onOpenMarking, onOpenRelease, onOpenList }) {
+function TestSection({ test, serverTime, counts, isBusy, act, showToast, onOpenSetup, onOpenQr, onOpenRestart, onEdit, onOpenMarking, onOpenRelease, onOpenList, onOpenEmail }) {
   // Results frozen: marks final until unfrozen (domain/freeze.js).
   const frozen = Boolean(test.resultsFrozenAt);
   const live = test.isStarted && !test.isClosed;
@@ -400,7 +403,10 @@ function TestSection({ test, serverTime, counts, isBusy, act, showToast, onOpenS
       ? { label: 'Close test', icon: CircleStop, tone: 'danger', onSelect: () => act('close', closeQuestion(test, counts)) }
       : test.isClosed && (unreleased || heldForMarking)
         ? { label: 'Release marks', icon: Send, tone: 'primary', onSelect: heldForMarking ? onOpenRelease : () => act('results/release') }
-        : null;
+        // Marks out: what is left is telling the students - each their own, by email.
+        : test.isClosed && counts.submitted > 0
+          ? { label: 'Email results', icon: Mail, tone: 'primary', onSelect: onOpenEmail }
+          : null;
 
   return (
     <div ref={fitRef} className={`ov is-fit${waiting ? ' is-waiting' : ''}`}>
@@ -437,6 +443,19 @@ function TestSection({ test, serverTime, counts, isBusy, act, showToast, onOpenS
                   test.isStarted && !test.isClosed && {
                     label: test.endMode === 'each' ? 'Give more time' : test.untimed ? 'Set an end time' : 'Extend time', icon: Clock, tone: 'info', onSelect: onOpenSetup
                   },
+                  // One question at a time on the clock: Next on and off, and going back on, while it runs (setNavigation).
+                  test.isStarted && !test.isClosed && test.strictTiming && test.strictTimed && {
+                    label: test.strictNext ? 'Turn off Next' : 'Allow Next', icon: StepForward, tone: 'info',
+                    onSelect: () => (test.strictNext
+                      ? act('navigation', 'Turn off Next? Students then stay on each new question until its time runs out. You can turn it back on.', { next: false }, 'Next is off for every student.')
+                      : act('navigation', 'Allow Next? Students may then move on before a question\'s time runs out. You can turn it off again.', { next: true }, 'Students can now move on with Next.'))
+                  },
+                  // Going back: only on a paper with no question timers - a timed one goes forward only.
+                  test.isStarted && !test.isClosed && test.strictTiming && !test.strictTimed && !test.strictPrevious && {
+                    label: 'Allow going back', icon: StepBack, tone: 'info',
+                    onSelect: () => act('navigation', 'Let students go back to questions they have seen? This cannot be turned off again.',
+                      { previous: true }, 'Students can now go back with Previous.')
+                  },
                   !test.isClosed && counts.pending > 0 && {
                     label: `Approve all ${counts.pending} pending`,
                     icon: CheckCheck,
@@ -466,7 +485,8 @@ function TestSection({ test, serverTime, counts, isBusy, act, showToast, onOpenS
                     danger: true,
                     onSelect: () => act('attempts/restart', `Give all ${counts.started} students a blank paper? Their answers are cleared; the end time does not change.`)
                   },
-                  !frozen && {
+                  // Only once there is something to undo: a test not started yet is already there.
+                  (test.isStarted || test.isClosed) && !frozen && {
                     label: 'Reset to not started',
                     icon: Undo2,
                     danger: true,
@@ -480,7 +500,7 @@ function TestSection({ test, serverTime, counts, isBusy, act, showToast, onOpenS
       </div>
 
       <OverviewPanels test={test} counts={counts} overview={overview} isBusy={isBusy}
-        onOpenQr={onOpenQr} onOpenList={onOpenList} onOpenMarking={onOpenMarking}
+        onOpenQr={onOpenQr} onOpenList={onOpenList} onOpenMarking={onOpenMarking} onOpenEmail={onOpenEmail}
         onRelease={heldForMarking ? onOpenRelease : () => act('results/release')}
         onExport={() => downloadSpreadsheet(test.code).then(() => showToast('Excel download started.', 'success'), (error) => showToast(error.message))}
         />
@@ -548,7 +568,7 @@ function StudentPicker({ rows, current, query, setQuery, onPick }) {
   return (
     <div className="student-picker" ref={holder}>
       <Search size={15} aria-hidden="true"/>
-      <input className="text-input" type="search" role="combobox" aria-expanded={open} aria-controls="student-picker-list" aria-autocomplete="list"
+      <input className="text-input" type="search" name="student-search" role="combobox" aria-expanded={open} aria-controls="student-picker-list" aria-autocomplete="list"
         aria-label="Search students" placeholder="Search name or SAP ID" value={query}
         onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true); }} onKeyDown={onKeyDown}/>
       {open && (
@@ -647,7 +667,7 @@ function StudentModal({ test, rows, pool, openId, setOpenId, part, setPart, quer
       <StudentNavigator rows={rows} current={current} onPick={setOpenId} query={query} setQuery={setQuery} filterMenu={filterMenu}
         switchTo={current?.attemptStatus === 'submitted' && onReview ? (
           // A handed-in paper: on to its answers and marks, this window closing behind.
-          <SheetSwitch icon={FileCheck2} label="Answers & marks" short="Marks" tip={`${current.name}'s answers and marks`}
+          <SheetSwitch icon={FileCheck2} label="Answers & marks" short="Marks" tip={`${current.name}'s answers and marks`} who={current.name}
             onClick={() => onReview(current.id)}/>
         ) : null}/>
       {current ? (
@@ -673,7 +693,7 @@ function StudentModal({ test, rows, pool, openId, setOpenId, part, setPart, quer
  * (from everyone, so they are in it). A class too big to come whole is
  * searched on the server for them, by SAP ID or name.
  */
-function StudentLookup({ code, test, whole, start, isBusy, act, onOpenSapId, onOpenReopen, onReview, onClose }) {
+function StudentLookup({ code, test, whole, start, isBusy, act, onOpenSapId, onOpenReopen, onReview, onClose, answerFilter = '' }) {
   const [openId, setOpenId] = useState(start.registrationId);
   const [part, setPart] = useState(start.part || 'log');
   const [query, setQuery] = useState(whole ? '' : start.sapId || start.name || '');
@@ -683,7 +703,7 @@ function StudentLookup({ code, test, whole, start, isBusy, act, onOpenSapId, onO
   const local = useMemo(() => (whole
     ? paginateDashboard(whole, { section: 'students', page: 1, pageSize: 200, search: query.trim(), filters: filters.join(','), sort: sortKey })
     : null), [whole, query, filters, sortKey]);
-  const remote = useCached(whole ? null : dashboardPath(code, { section: 'students', page: 1, pageSize: 100, search: query.trim(), filters: filters.join(','), sort: sortKey }));
+  const remote = useCached(whole ? null : dashboardPath(code, { section: 'students', page: 1, pageSize: 100, search: query.trim(), filters: filters.join(','), sort: sortKey, af: answerFilter }));
   const view = local || remote.data || null;
   const rows = view?.registrations || [];
   return (
@@ -694,7 +714,7 @@ function StudentLookup({ code, test, whole, start, isBusy, act, onOpenSapId, onO
   );
 }
 
-function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, act, onOpenSapId, onOpenReopen, onReview }) {
+function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, act, onOpenSapId, onOpenReopen, onReview, answerFiltered = false }) {
   // The student open in the window, and the part of them open (kept moving from one student to the next).
   const [openId, setOpenId] = useState(null);
   const [part, setPart] = useState('details');
@@ -708,8 +728,10 @@ function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, s
         groups={studentFilters(test)} pool={pool} filterCounts={filterCounts} pagination={pagination} filterTitle="Sort & filter students" allLabel="Everyone"
         sorts={STUDENT_SORTS} sort={sort} onSort={setSort}
       >
-        <BulkDecisionMenu test={test} rows={rows} isBusy={isBusy} act={act}/>
-        <BulkAttemptMenu test={test} rows={rows} query={query} filters={filters} pagination={pagination} isBusy={isBusy} act={act}/>
+        {!answerFiltered && <>
+          <BulkDecisionMenu test={test} rows={rows} isBusy={isBusy} act={act}/>
+          <BulkAttemptMenu test={test} rows={rows} query={query} filters={filters} pagination={pagination} isBusy={isBusy} act={act}/>
+        </>}
       </TableToolbar>
       <div className="table-scroll">
         <table className="live-table student-accordion-table">
@@ -758,7 +780,7 @@ function StudentsSection({ test, rows, pool, counts, query, setQuery, filters, s
           </tbody>
         </table>
         {rows.length === 0 && (
-          <p className="empty">{counts.total === 0 ? 'Nobody has registered yet. Share the QR from the Test tab.' : 'No students match this filter.'}</p>
+          <p className="empty">{answerFiltered ? 'No students match this filter.' : counts.total === 0 ? 'Nobody has registered yet. Share the QR from Overview.' : 'No students match this filter.'}</p>
         )}
       </div>
       <PageControls pagination={pagination} onPage={onPage}/>
@@ -827,7 +849,7 @@ function freezeQuestion(counts) {
  * them one by one (modals/ResultReviewModal.jsx), take them to Excel and back,
  * and freeze them once the marks are final (or unfreeze them to change again).
  */
-function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, showToast, onReview, onUploadMarks, onFreeze }) {
+function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, setFilters, sort, setSort, filterCounts, pagination, onPage, isBusy, showToast, onReview, onUploadMarks, onFreeze, onEmail, onRelease, onHold, answerFiltered = false }) {
   const frozen = Boolean(test.resultsFrozenAt);
   return (
     <section className="card students-card is-compact results-section">
@@ -841,6 +863,7 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
           ? `${counts.awaitingMarking} of ${counts.submitted} papers still have answers to mark. Until they are marked, a score counts only what has been marked${rows.length > 1 && rows.every((row) => row.score === rows[0].score) ? ' - so for now every score is the same, and the order is by hand-in time' : ''}.`
           : null}
       >
+        {!answerFiltered && <>
         <button className="button button-primary" type="button" disabled={isBusy || !counts.submitted} aria-label="Review results" title="Go through the papers one by one: by student or by question"
           onClick={() => onReview(null)}>
           <ClipboardCheck size={16} aria-hidden="true"/><span className="toolbar-text">Review</span>
@@ -856,6 +879,11 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
             !frozen && { label: 'Upload marks', icon: FileUp, onSelect: onUploadMarks }
           ]}
         />
+        <ActionMenu label="Result actions" icon={MoreVertical} disabled={isBusy} items={[
+          test.isClosed && counts.submitted > 0 && { label: 'Email results', icon: Mail, onSelect: onEmail },
+          test.isClosed && ((test.resultReleaseMode === 'admin' && !test.resultsReleasedAt) || (counts.awaitingMarking > 0 && !test.releaseUnmarked)) && { label: 'Release marks', icon: Send, onSelect: onRelease },
+          test.releaseUnmarked && { label: 'Hold unmarked results', icon: EyeOff, onSelect: onHold }
+        ]}/>
         {/* Final marks: frozen once the test is closed, unfrozen to change them again. */}
         <button className={`button button-secondary freeze-toggle${frozen ? ' is-frozen' : ''}`} type="button"
           disabled={isBusy || (!frozen && !test.isClosed)} onClick={() => onFreeze(!frozen)}
@@ -865,7 +893,9 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
           {frozen ? <LockOpen size={16} aria-hidden="true"/> : <Lock size={16} aria-hidden="true"/>}
           <span className="toolbar-text">{frozen ? 'Unfreeze' : 'Freeze'}</span>
         </button>
+        </>}
       </TableToolbar>
+      {answerFiltered && <p className="results-frozen-note">Open a student's paper below. Clear the answer analysis choices for class-wide actions.</p>}
       {frozen && (
         <p className="results-frozen-note"><Lock size={14} aria-hidden="true"/>Results frozen: the marks are final. Unfreeze them to change any.</p>
       )}
@@ -884,7 +914,7 @@ function ResultsSection({ test, rows, pool, counts, query, setQuery, filters, se
           </tbody>
         </table>
         {rows.length === 0 && (
-          <p className="empty">{counts.submitted === 0 ? 'No results yet. Submitted papers appear here.' : 'No results match this filter.'}</p>
+          <p className="empty">{answerFiltered ? 'No results match this filter.' : counts.submitted === 0 ? 'No results yet. Submitted papers appear here.' : 'No results match this filter.'}</p>
         )}
       </div>
       <PageControls pagination={pagination} onPage={onPage}/>
@@ -941,23 +971,35 @@ const changeRows = (ids, change) => (current) => (current ? {
   registrations: current.registrations.map((row) => (ids.has(row.id) ? { ...row, ...change(row) } : row))
 } : current);
 
-export function DashboardScreen({ code, go, showToast }) {
+export function DashboardScreen({ code, area = 'quizzes', answerFilter = '', navigation, go, showToast }) {
+  const [answerFilterParam, setAnswerFilterParam] = useState(() => {
+    // A valid all-ignored link is no filter. Invalid links are left intact so
+    // the server/editor can explain them, never silently show an unfiltered list.
+    try { return encodeAnswerFilters(decodeAnswerFilters(answerFilter)); }
+    catch { return answerFilter; }
+  });
+  // ?tab=responses opens straight on a tab - the quiz list's "View results" does.
+  // A link from when the analysis was a view of Results (?rview=analysis) opens the Analysis tab.
+  const [tab, setTab] = useState(() => {
+    const asked = fromAddress('rview') === 'analysis' ? 'analysis' : fromAddress('tab');
+    const allowed = area === 'results' ? ['analysis', 'responses'] : ['test', 'students'];
+    return allowed.includes(asked) ? asked : allowed[0];
+  });
+  const listAnswerFilter = ['students', 'responses'].includes(tab) ? answerFilterParam : '';
   // A class that fits in one reply (most do) is fetched whole, once, and kept
   // (lib/cache.js): every tab, search, filter, order and page is then worked
   // out here with the server's own rules (domain/dashboard-view.js) - no
   // request, no wait. A bigger class is paged by the server as before.
-  const wholePath = wholeClassPath(code);
+  const wholePath = wholeClassPath(code, listAnswerFilter);
   const whole = useCached(wholePath);
   // null until the first reply says; then whether the whole class came.
   const fits = whole.data ? (Number(whole.data.pagination?.pages) || 1) <= 1 : null;
   const fitsRef = useRef(fits);
   fitsRef.current = fits;
   const [serverPage, setServerPage] = useState(null);
+  const [serverPagePath, setServerPagePath] = useState('');
   // Decisions and exceptions shown before the server has answered (QUICK_ACTIONS).
   const [quickActions, setQuickActions] = useState(0);
-  // ?tab=responses opens straight on a tab - the quiz list's "View results" does.
-  // A link from when the analysis was a view of Results (?rview=analysis) opens the Analysis tab.
-  const [tab, setTab] = useState(() => (fromAddress('rview') === 'analysis' ? 'analysis' : TABS.includes(fromAddress('tab')) ? fromAddress('tab') : 'test'));
   const [query, setQuery] = useState(() => fromAddress('q'));
   const [studentFilterIds, setStudentFilterIds] = useState(() => filtersFromAddress('students', STUDENT_FILTER_IDS));
   const [resultFilterIds, setResultFilterIds] = useState(() => filtersFromAddress('results', RESULT_FILTER_IDS));
@@ -968,9 +1010,11 @@ export function DashboardScreen({ code, go, showToast }) {
   const [studentSort, setStudentSort] = useState(() => (STUDENT_SORT_IDS.includes(fromAddress('ssort')) ? fromAddress('ssort') : USUAL_SORT));
   const [page, setPage] = useState(1);
   const [debouncedQuery, setDebouncedQuery] = useState(() => fromAddress('q').trim());
-  const [modal, setModal] = useState(null);
+  const [modal, setModal] = useState(() => !answerFilter && fromAddress('review') === 'question' ? { type: 'review', mode: 'question' } : null);
   // A student's window opened from another tab, on their Log (StudentLookup).
   const [lookup, setLookup] = useState(null);
+  // Beside the code in the header: the Analysis tab's line about the test (AnalysisSection).
+  const [headerLine, setHeaderLine] = useState(null);
   // A mark given or changed in the review: once it closes, the Analysis tab asks
   // for its figures again - one answer of several still to mark leaves the
   // counts as they were, so they alone would not tell it.
@@ -982,6 +1026,18 @@ export function DashboardScreen({ code, go, showToast }) {
   };
   const [actionPath, setActionPath] = useState('');
   const headRef = useRef(null);
+  const previousNavigation = useRef(navigation);
+
+  // Explicit navigation can target another tab of this same dashboard. Local
+  // tab clicks only replace the address; a new navigation object means go/Back.
+  useEffect(() => {
+    if (!navigation || previousNavigation.current === navigation) return;
+    previousNavigation.current = navigation;
+    const asked = navigation.rview === 'analysis' ? 'analysis' : navigation.tab;
+    const allowed = area === 'results' ? ['analysis', 'responses'] : ['test', 'students'];
+    setTab(allowed.includes(asked) ? asked : allowed[0]);
+    setModal(null); setLookup(null);
+  }, [navigation, area]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query.trim()), 250);
@@ -998,9 +1054,11 @@ export function DashboardScreen({ code, go, showToast }) {
     keep('results', resultFilterIds.join(','));
     keep('sort', resultSort === USUAL_RESULT_SORT ? '' : resultSort);
     keep('ssort', studentSort === USUAL_SORT ? '' : studentSort);
+    keep('af', answerFilterParam);
     keep('rview', '');
+    keep('review', '');
     if (url.href !== window.location.href) window.history.replaceState(window.history.state, '', url);
-  }, [tab, debouncedQuery, studentFilterIds, resultFilterIds, resultSort, studentSort]);
+  }, [tab, debouncedQuery, studentFilterIds, resultFilterIds, resultSort, studentSort, answerFilterParam]);
 
   const selectedFilters = tab === 'responses' ? resultFilterIds : tab === 'students' ? studentFilterIds : [];
   const filterKey = selectedFilters.join(',');
@@ -1022,7 +1080,7 @@ export function DashboardScreen({ code, go, showToast }) {
   // landing late: the old list flashed back - the flicker.
   // The Test and Analysis tabs show no list: the server sends no rows for them.
   const listSection = tab === 'analysis' ? 'test' : tab;
-  const pagePath = dashboardPath(code, { section: listSection, page, search: debouncedQuery, filters: filterKey, sort: sortKey });
+  const pagePath = dashboardPath(code, { section: listSection, page, search: debouncedQuery, filters: filterKey, sort: sortKey, af: listAnswerFilter });
   const latestRequest = useRef(0);
   const inFlightLoad = useRef(null);
   const loadPage = useCallback(async (silent = false) => {
@@ -1038,6 +1096,7 @@ export function DashboardScreen({ code, go, showToast }) {
         const next = await loadCached(path, { force: true });
         if (request !== latestRequest.current) return null;
         setServerPage(next);
+        setServerPagePath(path);
         return next;
       }
       catch (error) { if (!silent && request === latestRequest.current) showToast(error.message); }
@@ -1059,7 +1118,7 @@ export function DashboardScreen({ code, go, showToast }) {
   const view = useMemo(() => (whole.data && fits
     ? paginateDashboard(whole.data, { section: listSection, page, pageSize: 100, search: searchNow, filters: filterKey, sort: sortKey })
     : null), [whole.data, fits, listSection, page, searchNow, filterKey, sortKey]);
-  const dashboard = fits ? view : fits === false ? serverPage : null;
+  const dashboard = fits ? view : fits === false && serverPagePath === pagePath ? serverPage : null;
 
   // Admin mutation endpoints return only the changed test/row, not a full
   // class table. Paint that immediately, then reconcile counts and rows that
@@ -1085,7 +1144,7 @@ export function DashboardScreen({ code, go, showToast }) {
   useEffect(() => {
     if (fits !== false) return;
     const held = peekCached(pagePath);
-    if (held) setServerPage(held);
+    if (held) { setServerPage(held); setServerPagePath(pagePath); }
     void loadPage();
   }, [fits, pagePath, loadPage]);
 
@@ -1175,7 +1234,8 @@ export function DashboardScreen({ code, go, showToast }) {
     }
   };
 
-  const act = async (path, confirmText, body) => {
+  // `done`: what to say once it worked, where "Dashboard updated" says too little.
+  const act = async (path, confirmText, body, done = null) => {
     if (actionPath) return;
     if (confirmText && !window.confirm(confirmText)) return;
     const quick = quickAction(path, body, (fitsRef.current ? whole.data?.registrations : serverPage?.registrations) || []);
@@ -1188,9 +1248,9 @@ export function DashboardScreen({ code, go, showToast }) {
       // This one quiet reconciliation also covers totals or rows outside the
       // visible page, after the immediate response has already painted.
       scheduleReconcile();
-      showToast(typeof next?.affectedCount === 'number'
+      showToast(done || (typeof next?.affectedCount === 'number'
         ? `${next.affectedCount} student${next.affectedCount === 1 ? '' : 's'} updated.`
-        : 'Dashboard updated.');
+        : 'Dashboard updated.'), done ? 'success' : undefined);
     } catch (error) { showToast(error.message); }
     finally { setActionPath(''); }
   };
@@ -1226,11 +1286,22 @@ export function DashboardScreen({ code, go, showToast }) {
     handedInByClose: all.filter((row) => row.attemptStatus === 'submitted' && row.submittedBy === 'admin').length
   }), [all]);
   const counts = dashboard?.counts || localCounts;
+  const classCounts = dashboard?.classCounts || counts;
   // The To mark tile, and Release's "Mark them first": the review, question by
   // question, on the first question with answers still to mark.
-  const openMarking = () => { setTab('responses'); setModal({ type: 'review', mode: 'question' }); };
+  const openMarking = () => {
+    if (area !== 'results') { go(`/?admin=${encodeURIComponent(code)}&tab=responses&review=question`); return; }
+    setTab('responses'); setModal({ type: 'review', mode: 'question' });
+  };
   // A tile on the Test tab: the list it counts, filtered to just those.
   const openList = (nextTab, filters = []) => {
+    const nextArea = ['responses', 'analysis'].includes(nextTab) ? 'results' : 'quizzes';
+    if (nextArea !== area) {
+      const params = new URLSearchParams({ admin: code, tab: nextTab });
+      if (answerFilterParam) params.set('af', answerFilterParam);
+      if (filters.length) params.set(nextTab === 'responses' ? 'results' : 'students', filters.join(','));
+      go(`/?${params}`); return;
+    }
     setQuery('');
     if (nextTab === 'students') setStudentFilterIds(filters);
     if (nextTab === 'responses') setResultFilterIds(filters);
@@ -1238,7 +1309,11 @@ export function DashboardScreen({ code, go, showToast }) {
     window.scrollTo({ top: 0 });
   };
 
-  if (!dashboard) return <Skeleton rows={5} label="Loading the test"/>;
+  if (!dashboard) return wholeFailed ? <section className="card empty" role="alert">
+    <h1>Could not load this list</h1><p>{wholeFailed.message}</p>
+    {listAnswerFilter && <button type="button" className="button button-secondary" onClick={() => setAnswerFilterParam('')}>Clear answer analysis</button>}
+    <button type="button" className="button button-primary" onClick={() => { void loadWhole(); }}>Try again</button>
+  </section> : <Skeleton rows={5} label="Loading the test"/>;
 
   const { test } = dashboard;
   const joinUrl = `${window.location.origin}/?test=${encodeURIComponent(test.code)}`;
@@ -1247,31 +1322,62 @@ export function DashboardScreen({ code, go, showToast }) {
   // A student's paper in the review, and their window on its Log: each has a button to the other.
   const openReview = (registrationId, questionId = null) => { if (!isBusy) setModal({ type: 'review', registrationId, questionId }); };
   const openLog = (registrationId, hint = {}) => { setModal(null); setLookup({ registrationId, part: 'log', ...hint }); };
+  const matching = (section, af = answerFilterParam, { search: matchSearch = '' } = {}) => {
+    const params = new URLSearchParams({ admin: code, tab: section });
+    if (section === 'analysis') params.set('view', 'answers');
+    if (af) params.set('af', af);
+    if (matchSearch.trim()) params.set('q', matchSearch.trim());
+    go(`/?${params}`);
+  };
 
   return (
     <>
       <header className="dashboard-head" ref={headRef}>
-        <div className="dashboard-head-copy">
-          <h1>
-            <span className={`status-dot is-${phaseDot(test).tone}`} title={phaseDot(test).label} aria-label={phaseDot(test).label} role="img"/>
-            {test.title}
-          </h1>
-          <span className="dash-code" title="Test code">{test.code}</span>
-          {test.resultsFrozenAt && (
-            <span className="pill frozen-pill" title="Marks are final until you unfreeze them (More → Unfreeze results)">
-              <Lock size={12} aria-hidden="true"/>Results frozen
-            </span>
-          )}
+        <div className="dashboard-heading">
+          <button className="dashboard-back" type="button" onClick={() => go(`/?admin=${area}`)}
+            aria-label={`Back to ${area === 'results' ? 'Results' : 'Quizzes'}`} title={`Back to ${area === 'results' ? 'Results' : 'Quizzes'}`}>
+            <ArrowLeft size={18} aria-hidden="true"/>
+          </button>
+          <div className="dashboard-head-copy">
+            <h1>
+              <span className={`status-dot is-${phaseDot(test).tone}`} title={phaseDot(test).label} aria-label={phaseDot(test).label} role="img"/>
+              {test.title}
+            </h1>
+            <span className="dash-code" title="Test code">{test.code}</span>
+            {test.resultsFrozenAt && (
+              <span className="pill frozen-pill" title="Marks are final until you unfreeze them (More → Unfreeze results)">
+                <Lock size={12} aria-hidden="true"/>Results frozen
+              </span>
+            )}
+            {tab === 'analysis' && <span className="dash-meta" ref={setHeaderLine}/>}
+          </div>
         </div>
         {/* Released anyway, or frozen: the Results tab no longer flags papers to mark. */}
-        <Tabs tab={tab} onSelect={setTab} counts={test.releaseUnmarked || test.resultsFrozenAt ? { ...counts, awaitingMarking: 0 } : counts}/>
+        <div className="dashboard-section-nav">
+          <Tabs area={area} tab={tab} onSelect={setTab} counts={test.releaseUnmarked || test.resultsFrozenAt ? { ...classCounts, awaitingMarking: 0 } : classCounts}/>
+          <button className="button button-secondary dashboard-area-link" type="button"
+            onClick={() => (area === 'results' ? matching(answerFilterParam ? 'students' : 'test')
+              // Results opens on its Analysis; a matching group carries on to the matching papers.
+              : answerFilterParam ? matching('responses') : go(`/?admin=${encodeURIComponent(code)}&tab=analysis`))}>
+            {area === 'results' ? <FileCog size={16} aria-hidden="true"/> : <BarChart3 size={16} aria-hidden="true"/>}
+            {area === 'results' ? 'Manage quiz' : 'View results'}
+          </button>
+        </div>
       </header>
+
+      {listAnswerFilter && dashboard.answerFilter && <div className="dashboard-answer-filter" role="status">
+        <span>Answer analysis · {dashboard.answerFilter.matched} of {dashboard.answerFilter.totalSubmitted} submitted students</span>
+        <div className="answer-cohort-actions" role="group" aria-label="Answer analysis actions">
+          <button type="button" className="button button-secondary button-small" onClick={() => matching('analysis')}>Answer analysis</button>
+          <button type="button" className="button button-secondary button-small" onClick={() => setAnswerFilterParam('')}>Clear</button>
+        </div>
+      </div>}
 
       {tab === 'test' && (
         <TestSection
           test={test}
           serverTime={dashboard.serverTime}
-          counts={counts}
+          counts={classCounts}
           isBusy={isBusy}
           act={act}
           onOpenSetup={() => setModal('setup')}
@@ -1281,6 +1387,7 @@ export function DashboardScreen({ code, go, showToast }) {
           onOpenMarking={openMarking}
           onOpenRelease={() => setModal('release')}
           onOpenList={openList}
+          onOpenEmail={() => setModal('email')}
           showToast={showToast}
         />
       )}
@@ -1299,6 +1406,7 @@ export function DashboardScreen({ code, go, showToast }) {
           onOpenSapId={(row) => { if (!isBusy) setModal({ type: 'sap', registration: row }); }}
           onOpenReopen={(row) => { if (!isBusy) setModal({ type: 'reopen', registration: row }); }}
           onReview={openReview}
+          answerFiltered={Boolean(listAnswerFilter)}
         />
       )}
 
@@ -1316,19 +1424,26 @@ export function DashboardScreen({ code, go, showToast }) {
           onReview={openReview}
           onUploadMarks={() => { if (!isBusy) setModal('upload-marks'); }}
           onFreeze={(freeze) => act('results/freeze', freeze ? freezeQuestion(counts) : 'Unfreeze the results? Marks can be changed again.', { frozen: freeze })}
+          onEmail={() => setModal('email')}
+          onRelease={counts.awaitingMarking > 0 && !test.releaseUnmarked ? () => setModal('release') : () => act('results/release')}
+          onHold={() => act('results/unmarked', 'Hide marks from students whose short answers are not marked yet?', { show: false })}
+          answerFiltered={Boolean(listAnswerFilter)}
         />
       )}
 
       {tab === 'analysis' && (
-        <AnalysisSection test={test} counts={counts} serverTime={dashboard.serverTime} refresh={marksVersion} onReview={openReview} onLog={openLog}/>
+        <AnalysisSection test={test} counts={classCounts} serverTime={dashboard.serverTime} refresh={marksVersion} onReview={openReview} onLog={openLog}
+          answerFilter={answerFilterParam} onAnswerFilterChange={setAnswerFilterParam} onMatching={matching} headerLine={headerLine}/>
       )}
 
+      {modal === 'email' && <EmailResultsModal code={code} onClose={closeModal} showToast={showToast}/>}
       {modal === 'qr' && <QrModal test={test} joinUrl={joinUrl} onClose={closeModal} showToast={showToast}/>}
       {modal === 'setup' && <TestSetupModal code={code} test={test} onClose={closeModal} onSaved={(response) => { applyActionResult(response); scheduleReconcile(); }} showToast={showToast}/>}
       {modal?.type === 'review' && <ResultReviewModal code={code} startAt={modal.registrationId} startQuestion={modal.questionId ?? null} startMode={modal.mode || 'student'} onClose={() => { closeModal(); leaveReview(); }}
+        onlyRegistrationId={answerFilterParam ? modal.registrationId : null}
         onChanged={() => { marked.current = true; scheduleReconcile(); }} showToast={showToast} onOpenLog={(registrationId, hint) => { openLog(registrationId, hint); leaveReview(); }}/>}
       {lookup && (
-        <StudentLookup key={lookup.registrationId} code={code} test={test} whole={fits ? whole.data : null} start={lookup} isBusy={isBusy} act={act}
+        <StudentLookup key={lookup.registrationId} code={code} test={test} whole={fits && (!answerFilterParam || listAnswerFilter) ? whole.data : null} start={lookup} isBusy={isBusy} act={act} answerFilter={answerFilterParam}
           onOpenSapId={(row) => { if (!isBusy) setModal({ type: 'sap', registration: row }); }}
           onOpenReopen={(row) => { if (!isBusy) setModal({ type: 'reopen', registration: row }); }}
           onReview={(registrationId) => { setLookup(null); openReview(registrationId); }} onClose={() => setLookup(null)}/>

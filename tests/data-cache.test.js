@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createCache } from '../client/src/lib/cache.js';
-import { routeData } from '../client/src/lib/prefetch.js';
+import { routeData, routeScreens } from '../client/src/lib/prefetch.js';
+import { screens } from '../client/src/screens/loaders.js';
 
 /** A server whose replies arrive when the test says. */
 function slowServer() {
@@ -114,12 +115,29 @@ test('what each page reads first - and never anything for a test or a register',
   assert.deepEqual(data('/?page=results', 'student'), ['/api/me/results', '/api/student/profile']);
   assert.deepEqual(data('/?result=test-abc', 'student'), ['/api/me/results', '/api/me/results/TEST-ABC/responses']);
   assert.deepEqual(data('/?admin=tests', 'admin'), ['/api/admin/tests', '/api/me/results']);
+  assert.deepEqual(data('/?admin=tests&view=taken', 'admin'), ['/api/admin/tests', '/api/me/results']);
+  assert.deepEqual(data('/?admin=quizzes', 'admin'), ['/api/admin/tests']);
+  assert.deepEqual(data('/?admin=results', 'admin'), ['/api/admin/tests', '/api/me/results']);
+  assert.deepEqual(data('/?admin=results&view=taken', 'admin'), ['/api/admin/tests', '/api/me/results']);
   assert.deepEqual(data('/?admin=test-abc&tab=responses', 'admin'), ['/api/admin/tests/TEST-ABC?section=students&page=1&pageSize=200']);
   assert.deepEqual(data('/', 'admin'), ['/api/admin/home', '/api/admin/tests', '/api/admin/attendance']);
   assert.deepEqual(data('/', 'student'), ['/api/me/results', '/api/student/profile']);
   assert.deepEqual(data('/', null), [], 'no guess without a remembered account kind');
+  assert.deepEqual(data('/?result=test-abc', null), [], 'a results link opened signed out (from an email) reads nothing before sign-in');
+  assert.deepEqual(data('/?admin=test-abc', null), []);
+  assert.deepEqual(data('/?admin=quizzes', null), []);
+  assert.deepEqual(data('/?admin=results', null), []);
   assert.deepEqual(data('/?test=TEST-ABC', 'student'), []);
   assert.deepEqual(data('/?attend=ATT-1', 'student'), []);
   assert.deepEqual(data('/?admin=edit&code=TEST-ABC', 'admin'), [], 'an editor always reads the paper fresh');
   assert.deepEqual(data('https://elsewhere.example/?page=results', 'student'), []);
+});
+
+test('the canonical quiz and result lists preload their shared screen, never a RESULTS or QUIZZES dashboard', () => {
+  const origin = 'https://quiz.example';
+  for (const admin of ['quizzes', 'results', 'tests']) {
+    assert.deepEqual(routeScreens(`/?admin=${admin}`, 'admin', origin), [screens.admin, screens.testList]);
+  }
+  assert.deepEqual(routeScreens('/?admin=TEST-ABC&tab=analysis', 'admin', origin), [screens.admin, screens.dashboard]);
+  assert.deepEqual(routeScreens('https://elsewhere.example/?admin=results', 'admin', origin), []);
 });

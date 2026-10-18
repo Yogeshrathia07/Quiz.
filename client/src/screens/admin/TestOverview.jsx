@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
 import {
-  BarChart3, CircleCheck, Circle, Clock, FileSpreadsheet, Lock, PenLine, Send, UserCheck
+  BarChart3, CircleCheck, Circle, Clock, FileSpreadsheet, Lock, Mail, PenLine, Send, UserCheck
 } from 'lucide-react';
 import { loadCached, useCached } from '../../lib/cache.js';
 import { matrixPath, overviewPath } from '../../lib/dashboard-paths.js';
 import { durationLabel, shortDateTime } from '../../lib/format.js';
+import { secondsLabel } from '../../lib/quiz.js';
 
 /*
  * The Test tab below the status bar: how the class took part, what to do
@@ -92,7 +93,7 @@ const stepButton = (label, icon, onClick, disabled = false) => {
 };
 
 /** While the test runs, what needs you now; once it is over, what to do next, in order. */
-function StepsPanel({ test, counts, people, isBusy, hasShort, onOpenList, onOpenMarking, onRelease, onExport }) {
+function StepsPanel({ test, counts, people, isBusy, hasShort, onOpenList, onOpenMarking, onRelease, onExport, onOpenEmail }) {
   if (!test.isClosed) {
     const now = [
       people?.locked > 0 && { key: 'locked', text: `${plural(people.locked, 'student')} locked`, action: stepButton('Open', Lock, () => onOpenList('students', ['paper:locked'])) },
@@ -130,6 +131,11 @@ function StepsPanel({ test, counts, people, isBusy, hasShort, onOpenList, onOpen
             detail={counts.awaitingMarking ? `${plural(counts.awaitingMarking, 'paper')} to mark` : 'All answers are marked'}
             action={counts.awaitingMarking > 0 && stepButton(`Mark ${counts.awaitingMarking}`, PenLine, onOpenMarking)}/>
         )}
+        {/* Marks out: each student can be sent their own by email. */}
+        {released && !held && counts.submitted > 0 && onOpenEmail && (
+          <Step done={false} title="Email results" detail="Send each student their own marks and answers"
+            action={stepButton('Email', Mail, onOpenEmail)}/>
+        )}
         <Step done={false} title="Download results" detail="All answers and marks in one Excel file"
           action={stepButton('Excel', FileSpreadsheet, onExport)}/>
         {/* Freezing the results is in ⋮ → Freeze results. */}
@@ -142,6 +148,25 @@ function StepsPanel({ test, counts, people, isBusy, hasShort, onOpenList, onOpen
 
 const LEAVING_VERB = { warn: 'Warned', lock: 'Locked', warn_lock: 'Warned, then locked,' };
 const DEVICE_WORDS = { phone: 'Phones and tablets only', laptop: 'Laptops and desktops only' };
+
+/** Each question's time, for the types a paper draws: one time for all, or one per type. */
+function timerWords(test) {
+  const seconds = test.typeSeconds || {};
+  const drawn = ['mcq', 'msq', 'short'].filter((type) => !test.questionMix || test.questionMix[type]);
+  const times = drawn.map((type) => Number(seconds[type]) || 0);
+  if (times.length && times.every((time) => time === times[0])) return `${secondsLabel(times[0]).toLowerCase()} per question`;
+  return drawn.map((type, index) => `${TYPE_WORD[type]} ${secondsLabel(times[index]).toLowerCase()}`).join(', ');
+}
+
+/** How students move through the questions, when it is not the free paper one at a time. */
+function shownLine(test) {
+  if (!test.strictTiming) return test.questionLayout === 'all' ? ['Questions shown', 'All on one page'] : null;
+  // A timer on each question goes forward only (older tests saved with going back keep it).
+  const parts = test.strictTimed
+    ? ['One at a time', test.strictPrevious ? 'go back while time is left' : 'forward only', timerWords(test), test.strictNext ? 'Next on' : 'Next off']
+    : ['One at a time', test.strictPrevious ? 'going back allowed' : 'no going back', 'no timer'];
+  return ['Questions shown', parts.join(' · ')];
+}
 
 /** The test's settings that matter, one line each; what every test does by default is left out. */
 function detailRows(test, fullMarks) {
@@ -158,8 +183,10 @@ function detailRows(test, fullMarks) {
     ['Questions', `${test.questionCount} per student${mixLine ? ` (${mixLine})` : ''}`],
     fullMarks ? ['Full marks', marksText(fullMarks)] : null,
     ends,
-    test.strictTiming ? ['Questions shown', 'One at a time, no going back'] : null,
-    ['Leaving the page', leaving],
+    shownLine(test),
+    // Shuffled is what every test does unless told otherwise.
+    test.shuffleQuestions === false ? ['Question order', 'The same for every student'] : null,
+    ['Leaving the test', leaving],
     test.locationRequired ? ['Venue', `Within ${test.locationRadiusMeters} m`] : null,
     DEVICE_WORDS[test.devices] ? ['Devices', DEVICE_WORDS[test.devices]] : null,
     test.requirePrivateWindow ? ['Window', 'Private window required'] : null,
@@ -170,9 +197,12 @@ function detailRows(test, fullMarks) {
 
 function DetailsList({ test, fullMarks }) {
   return (
-    <dl className="ov-details">
-      {detailRows(test, fullMarks).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-    </dl>
+    // Fitted to the window, the list may scroll (its bar hidden): a named region reachable with Tab, so the keys scroll it too.
+    <div className="ov-details-scroll" role="region" aria-label="Test details" tabIndex={0}>
+      <dl className="ov-details">
+        {detailRows(test, fullMarks).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+    </div>
   );
 }
 
@@ -198,13 +228,13 @@ function QrBlock({ test, onOpenQr }) {
  * settings; once begun, what needs you or what is left to do, the QR while
  * students can still join, and the settings.
  */
-export function OverviewPanels({ test, counts, overview, isBusy, onOpenQr, onOpenList, onOpenMarking, onRelease, onExport }) {
+export function OverviewPanels({ test, counts, overview, isBusy, onOpenQr, onOpenList, onOpenMarking, onRelease, onExport, onOpenEmail }) {
   const begun = test.isStarted || test.isClosed;
   const hasShort = (test.questionMix?.short || 0) > 0 || counts.awaitingMarking > 0;
   const steps = (
     <StepsPanel test={test} counts={counts} people={overview?.people} isBusy={isBusy} hasShort={hasShort}
       onOpenList={onOpenList} onOpenMarking={onOpenMarking}
-      onRelease={onRelease} onExport={onExport}/>
+      onRelease={onRelease} onExport={onExport} onOpenEmail={onOpenEmail}/>
   );
   const fullMarks = overview?.marks?.fullMarks ?? overview?.paper?.fullMarks;
   // Before the start: the QR, big, beside the test's settings - one card,

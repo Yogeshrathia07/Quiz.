@@ -103,7 +103,7 @@ const ABSENT_FIELDS = {
   seen: (person) => Date.parse(person.lastSeenAt) || 0
 };
 const SESSION_FIELDS = {
-  date: (session) => Date.parse(session.createdAt) || 0,
+  date: (session) => { const at = Date.parse(session.createdAt); return Number.isFinite(at) ? at : null; },
   title: (session) => byText(session.title),
   present: (session) => session.presentCount
 };
@@ -114,24 +114,12 @@ export const sortSessions = (sessions, sort) => sortBy(sessions, sort, SESSION_F
 
 /* --------------------------------------------------- the list of sessions */
 
-/** The list's groups: a Class group once there are two classes to choose between. */
-export function sessionFilters(sessions, now = new Date()) {
-  const titles = [...new Set(sessions.map((session) => session.title))].sort((a, b) => a.localeCompare(b));
+/** Session-list status only. Calendar filters are separate; phone checks stay inside a session. */
+export function sessionFilters() {
   return [
     { id: 'state', title: 'State', options: [
       option('open', 'Open', (session) => session.isOpen),
       option('closed', 'Closed', (session) => !session.isOpen)
-    ] },
-    { id: 'when', title: 'When', options: [
-      option('when:today', 'Today', (session) => whenOf(session, now) === 'today'),
-      option('when:week', 'Earlier this week', (session) => whenOf(session, now) === 'week', { rare: true }),
-      option('when:month', 'Earlier this month', (session) => whenOf(session, now) === 'month', { rare: true }),
-      option('when:older', 'Before this month', (session) => whenOf(session, now) === 'older', { rare: true })
-    ] },
-    ...(titles.length > 1 ? [{ id: 'class', title: 'Class', options: titles.map((title) => option(`class:${title}`, title, (session) => session.title === title)) }] : []),
-    { id: 'flags', title: 'Phone check', options: [
-      option('flagged', 'Phones flagged', (session) => session.flaggedCount > 0),
-      option('unflagged', 'Nothing found', (session) => !session.flaggedCount)
     ] }
   ];
 }

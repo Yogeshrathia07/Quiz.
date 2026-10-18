@@ -12,6 +12,7 @@
     "test:regression": "node scripts/regression-check.js",
     "test:attendance": "node scripts/attendance-check.js",
     "test": "node --test \"tests/*.test.js\"",
+    "lint:css": "stylelint \"client/src/styles/**/*.css\"",
     "audit": "node scripts/audit.js",
     "check:http": "node scripts/http-check.js",
     "check:load": "node scripts/load-check.js",
@@ -26,6 +27,7 @@
   },
   "dependencies": {
     "@fontsource-variable/manrope": "^5.3.0",
+    "@resvg/resvg-js": "2.6.2",
     "compression": "^1.8.2",
     "cookie-parser": "^1.4.7",
     "detectincognitojs": "^1.9.0",
@@ -43,6 +45,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.1.1",
+    "stylelint": "17.15.0",
     "vite": "^8.3.0"
   },
   "overrides": {

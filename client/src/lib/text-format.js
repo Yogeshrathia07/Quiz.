@@ -7,6 +7,13 @@ const ANY_MARKER = /^[ \t]*([-*•]|\d{1,3}[.)])[ \t]+/;
 const BULLET_MARKER = /^[ \t]*[-*•][ \t]+/;
 const NUMBER_MARKER = /^[ \t]*\d{1,3}[.)][ \t]+/;
 
+/** A question's words on one line, without its formatting marks: the question list in the editor shows this. */
+export const promptPreview = (text) => String(text || '')
+  .replace(/\*\*/g, '')
+  .replace(/^[ \t]*([-*•]|\d{1,3}[.)])[ \t]+/gm, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 /** Bold on the selection - or off, if it is bold already. With nothing selected, a placeholder to type over. */
 export function toggleBold(text, start, end) {
   const before = text.slice(0, start);

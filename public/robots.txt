@@ -1,0 +1,3 @@
+# A private campus portal: nothing here is for search engines.
+User-agent: *
+Disallow: /

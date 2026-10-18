@@ -10,8 +10,8 @@ export const BRAND = {
   wordmark: 'QUIZ',
   // Shown small beside the name, e.g. a department. Leave empty to show none.
   org: '',
-  // One line under the name on the sign-in page.
-  tagline: 'Class tests and attendance, run from your own classroom.'
+  // The sign-in page's heading, beside the form, above today's date and the time.
+  welcome: 'Welcome'
 };
 
 /** "Students · DBMS Mid-term · Quiz" */

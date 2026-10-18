@@ -8,7 +8,7 @@ export const mailConfigured = () => Boolean(config.brevo.apiKey && config.brevo.
  * credentials, a development server prints the message to its console instead
  * so sign-in can still be tried locally; a production server refuses.
  */
-export async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html, attachments = [] }) {
   if (!mailConfigured()) {
     if (process.env.NODE_ENV === 'production') {
       throw new PublicTestError(503, 'Email sign-in is not configured on this server yet.');
@@ -26,7 +26,8 @@ export async function sendMail({ to, subject, text, html }) {
         to: [{ email: to }],
         subject,
         textContent: text,
-        htmlContent: html
+        htmlContent: html,
+        ...(attachments.length ? { attachment: attachments.map(({ name, content }) => ({ name, content })) } : {})
       })
     });
   } catch (error) {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, ClipboardList, House, KeyRound, LogOut, Menu, UserCheck, Users, X } from 'lucide-react';
+import { BarChart3, ChevronDown, ClipboardList, House, KeyRound, LogOut, Menu, UserCheck, Users, X } from 'lucide-react';
 import { BRAND } from '../brand.js';
+import { primaryLinkOf } from '../lib/admin-navigation.js';
 
 const initials = (name) => String(name || '?')
   .replace(/^Guest:\s*/, '')
@@ -9,20 +10,6 @@ const initials = (name) => String(name || '?')
   .slice(0, 2)
   .map((part) => part[0].toUpperCase())
   .join('') || '?';
-
-/** Which link the current page belongs to. */
-function activeLink(route, isAdmin) {
-  if (route.admin === 'attendance') return 'attendance';
-  if (route.admin === 'users') return 'users';
-  // A student's results are their Home; a teacher's own attempts sit in the account menu.
-  if (route.page === 'results') return isAdmin ? null : 'home';
-  // One handed-in test: a teacher reaches it from Tests (Taken), a student from Home.
-  if (route.result) return isAdmin ? 'tests' : 'home';
-  if (route.test || route.attend) return null;
-  // The quiz list, and a test's dashboard, creator or editor: all the Tests section.
-  if (route.admin && route.admin !== 'portal') return 'tests';
-  return 'home';
-}
 
 /** Closes a popup on Escape and on a tap outside `ref`. */
 function useDismiss(open, close, ref) {
@@ -53,15 +40,15 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
   const user = auth?.user || null;
   const isAdmin = user?.role === 'admin' && !user.isGuest;
 
-  // Faculty do everything with a test - marking and its results too - under
-  // Tests; a student's Home is their results.
+  // Preparation and live management are separate from evaluation.
   const links = [
     { id: 'home', url: '/', label: 'Home', icon: House },
-    isAdmin && { id: 'tests', url: '/?admin=tests', label: 'Tests', icon: ClipboardList },
+    isAdmin && { id: 'quizzes', url: '/?admin=quizzes', label: 'Quizzes', icon: ClipboardList },
+    isAdmin && { id: 'results', url: '/?admin=results', label: 'Results', icon: BarChart3 },
     isAdmin && { id: 'attendance', url: '/?admin=attendance', label: 'Attendance', icon: UserCheck },
     user?.canManageUsers && { id: 'users', url: '/?admin=users', label: 'Users', icon: Users }
   ].filter(Boolean);
-  const active = activeLink(route, isAdmin);
+  const active = primaryLinkOf(route, isAdmin);
   // A guest's password is not theirs to change, and a test page keeps the student on the test.
   const canChangePassword = user && !user.isGuest && !route.test;
 
@@ -93,10 +80,11 @@ export function SiteHeader({ auth, route, go, onChangePassword, onSignOut }) {
 
       {user && (
         <div className="nav-account" ref={accountRef}>
-          <button className="nav-account-button" type="button" aria-haspopup="menu" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}
-            aria-label={`${user.name.replace(/^Guest:\s*/, '')}, account menu`}>
+          {/* Named by what it shows - the name - and ", account menu" for a screen reader, so the two always agree. */}
+          <button className="nav-account-button" type="button" aria-haspopup="menu" aria-expanded={accountOpen} onClick={() => setAccountOpen((value) => !value)}>
             <span className="nav-avatar" aria-hidden="true">{initials(user.name)}</span>
             <span className="nav-account-name">{user.name.replace(/^Guest:\s*/, '')}</span>
+            <span className="sr-only">, account menu</span>
             <ChevronDown className="nav-caret" size={15} strokeWidth={2.5} aria-hidden="true"/>
           </button>
           {accountOpen && (

@@ -17,11 +17,15 @@ import { invalidateTestCache, serializeTestWrite } from '../data/test-repository
  * clock with it, and no paper is charged with leaving. A very long outage
  * (past OUTAGE_EXTEND_MAX_MINUTES) is recorded but not given back - the admin
  * decides what to do about a test interrupted for hours.
+ *
+ * The other kind of outage - the machine's internet down while the server
+ * runs on - is found by reachability.js and given back the same way
+ * (giveBackOutage).
  */
 
 const HEARTBEAT_ID = 'heartbeat';
 /** Shorter gaps are a quick restart, not an outage. */
-const MIN_OUTAGE_MS = 20_000;
+export const MIN_OUTAGE_MS = 20_000;
 
 // When this process last wrote its heartbeat (null until the scheduler has
 // run once). A laptop that sleeps pauses the server without restarting it, so
@@ -52,10 +56,39 @@ export async function compensateForOutage(nowMs = Date.now()) {
   lastBeatMs = nowMs;
   if (!beat?.at) return null;
   const downSince = new Date(beat.at);
-  const outageMs = nowMs - downSince.getTime();
-  if (outageMs < MIN_OUTAGE_MS) return null;
-  const now = new Date(nowMs);
+  if (nowMs - downSince.getTime() < MIN_OUTAGE_MS) return null;
+  return giveBackOutage(downSince, new Date(nowMs), 'server');
+}
+
+// The outage being given back right now, for requests to wait on (settleOutage).
+let settling = null;
+
+/**
+ * Before a paper is read or written: an outage of the server itself, not yet
+ * given back - the first moments after a restart, or after the machine woke
+ * from sleep, before the scheduler's first pass - is given back first. Without
+ * this, a student whose request arrived first had their question closed, or
+ * their paper handed in, by the time the outage took. Nothing to wait for (the
+ * usual case): null at once.
+ */
+export function settleOutage() {
+  if (lastBeatMs !== null && !justWokeUp()) return null;
+  settling ??= compensateForOutage().catch((error) => { console.error('Outage:', error); }).finally(() => { settling = null; });
+  return settling;
+}
+
+/**
+ * Gives the time from `downSince` to `now` back to every test running then:
+ * its end later by that much, each open strict question's clock with it, no
+ * paper charged with leaving - and the outage recorded on the test, with its
+ * `cause`: 'server' (it was down) or 'network' (it ran, but nobody could reach
+ * it). Past OUTAGE_EXTEND_MAX_MINUTES it is recorded only.
+ */
+export async function giveBackOutage(downSince, now, cause = 'server') {
+  const outageMs = now.getTime() - downSince.getTime();
   const giveBack = outageMs <= (Number(config.outageExtendMaxMinutes) || 30) * 60_000;
+  // Every clock moves on by exactly the outage: each question carries on with the time it had when it began.
+  const shiftMs = outageMs;
 
   // Running when the server went down: started before it, not closed.
   const running = await tests().find(
@@ -74,9 +107,9 @@ export async function compensateForOutage(nowMs = Date.now()) {
     const ownTimeLeft = { $gt: [{ $add: ['$attempt.startedAt', Number(test.durationMinutes) * 60_000 + END_GRACE_MS, extra] }, downSince] };
     await serializeTestWrite(test.code, () => tests().updateOne({ code: test.code }, [{
       $set: {
-        ...(extend && !ownTimes ? { endsAt: { $add: ['$endsAt', outageMs] } } : {}),
+        ...(extend && !ownTimes ? { endsAt: { $add: ['$endsAt', shiftMs] } } : {}),
         outages: {
-          $concatArrays: [{ $ifNull: ['$outages', []] }, [{ from: downSince, to: now, ms: outageMs, extended: extend }]]
+          $concatArrays: [{ $ifNull: ['$outages', []] }, [{ from: downSince, to: now, ms: outageMs, extended: extend, cause }]]
         }
       }
     }]));
@@ -87,14 +120,14 @@ export async function compensateForOutage(nowMs = Date.now()) {
       $set: {
         'attempt.lastSeenAt': now,
         'attempt.awaySince': later('$attempt.awaySince', outageMs),
-        ...(extend && ownTimes ? { 'attempt.extraMs': { $cond: [ownTimeLeft, { $add: [extra, outageMs] }, extra] } } : {}),
+        ...(extend && ownTimes ? { 'attempt.extraMs': { $cond: [ownTimeLeft, { $add: [extra, shiftMs] }, extra] } } : {}),
         'attempt.strict': {
           $cond: [
             { $ifNull: ['$attempt.strict', false] },
             // A question paused while its student was away moves its pause on too, or
             // coming back would give the outage back a second time.
             { $mergeObjects: ['$attempt.strict', giveBack
-              ? { shownAt: later('$attempt.strict.shownAt', outageMs), pausedSince: later('$attempt.strict.pausedSince', outageMs) }
+              ? { shownAt: later('$attempt.strict.shownAt', shiftMs), pausedSince: later('$attempt.strict.pausedSince', shiftMs) }
               : {}] },
             '$$REMOVE'
           ]
@@ -102,5 +135,5 @@ export async function compensateForOutage(nowMs = Date.now()) {
       }
     }]);
   }
-  return { from: downSince, ms: outageMs, tests: running.length, gaveBack: giveBack };
+  return { from: downSince, ms: outageMs, tests: running.length, gaveBack: giveBack, cause };
 }

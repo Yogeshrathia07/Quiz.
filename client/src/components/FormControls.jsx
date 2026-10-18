@@ -1,17 +1,22 @@
 import { useState } from 'react';
 import { QUESTION_LAYOUTS } from '../lib/quiz.js';
 import { InfoTip } from './InfoTip.jsx';
+import { useHoverHint } from './useHoverHint.jsx';
 
 /**
  * The clickable controls the test forms are built from, so the create form,
  * "Edit test setup" and "Edit running test" all look and behave alike.
  */
 
-/** A titled group inside a form grid: "Timing", "Questions", ... */
-export function FormGroupTitle({ title, hint }) {
+/**
+ * A titled group inside a form grid: "Timing", "Questions", ... - numbered
+ * (`step`) where the form is a set of steps, with a line on what it is for.
+ */
+export function FormGroupTitle({ title, hint, step = null, id }) {
   return (
-    <div className="form-wide form-group-title">
-      <h2>{title}</h2>
+    <div className={`form-wide form-group-title${step ? ' has-step' : ''}`}>
+      {step && <span className="form-step" aria-hidden="true">{step}</span>}
+      <h2 id={id}>{title}</h2>
       {hint && <p>{hint}</p>}
     </div>
   );
@@ -20,9 +25,11 @@ export function FormGroupTitle({ title, hint }) {
 /**
  * One choice out of a few, as a segmented control. What each option does is
  * an (i) away - beside the label, or after the options when there is none -
- * so the form stays short.
+ * so the form stays short. `hint`: also say, under it, what the option
+ * picked now does - for a form that a newcomer must understand at a glance.
  */
-export function ChoiceCards({ label, value, options, onChange, idPrefix, more = null }) {
+export function ChoiceCards({ label, value, options, onChange, idPrefix, more = null, disabled = false, hint = false }) {
+  const picked = hint ? options.find((option) => option.value === value) : null;
   const labelId = `${idPrefix}-label`;
   // `more`: a last line for the (i), after the options.
   const about = (more || options.some((option) => option.description)) && (
@@ -46,6 +53,7 @@ export function ChoiceCards({ label, value, options, onChange, idPrefix, more = 
           role="radio"
           aria-checked={option.value === value}
           className={option.value === value ? 'is-on' : ''}
+          disabled={disabled}
           onClick={() => onChange(option.value)}
         >
           {option.title}
@@ -59,6 +67,7 @@ export function ChoiceCards({ label, value, options, onChange, idPrefix, more = 
         ? <span className="field-label-row"><span className="field-label" id={labelId}>{label}</span>{about}</span>
         : <span className="field-label" id={labelId}>{label}</span>)}
       {!label && about ? <div className="choice-line">{segments}{about}</div> : segments}
+      {picked?.description && <p className="help choice-hint">{picked.description}</p>}
     </div>
   );
 }
@@ -82,7 +91,8 @@ export function Stepper({ id, label, value, min = 0, max = 100, step = 1, onChan
   return (
     <div className="stepper-field">
       {label && <label className="field-label" htmlFor={id}>{label}</label>}
-      <div className={`stepper${disabled ? ' is-disabled' : ''}`}>
+      {/* Disabled, the whole control says so - its unit word too, which fades with it. */}
+      <div className={`stepper${disabled ? ' is-disabled' : ''}`} aria-disabled={disabled || undefined}>
         <button type="button" aria-label={`Decrease ${label || ''}`} disabled={disabled || number <= min} onClick={() => set(number - step)}>−</button>
         <input
           id={id}
@@ -179,7 +189,7 @@ export function IntegrityFields({ values, onChange, idPrefix, live = false }) {
         <SwitchRow checked={locks} onChange={(on) => setMode(warns, on)} title="Lock"/>
       </div>
       {/* Both switches off: nothing happens on screen, so there are no limits to set. */}
-      {mode !== 'record' && <div className="leave-limits">
+      {mode !== 'record' && <div className="leave-limits dependent-fields">
         <Stepper id={`${idPrefix}-exits`} label="Exits allowed" unit={exits === 0 ? 'no limit' : 'exits'} value={values.fullscreenExitLimit} min={0} max={20}
           onChange={(value) => onChange('fullscreenExitLimit', value)}/>
         <TimeStepper id={`${idPrefix}-away`} label="Total time away" seconds={values.fullscreenAbsenceLimitSeconds} secondStep={10}
@@ -226,17 +236,32 @@ export function TimeStepper({ id, label, seconds, onChange, maxSeconds = 3600, s
   );
 }
 
-/** A checkbox drawn as a switch on a clickable row. */
-/** An on/off setting. What it does is an (i) beside its title; tapping the (i) does not flip it. */
-export function SwitchRow({ checked, onChange, title, description }) {
+/**
+ * An on/off setting, drawn as a switch on a clickable row. What it does is an
+ * (i) beside its title; tapping the (i) does not flip it. `hint`: one short
+ * line under the title, always shown (a settings list, `.switch-list`).
+ * `infoOnHover`: no info icon; show the description instantly over the row,
+ * also available on keyboard focus and touch, without expanding its height.
+ * `disabled`: shown as it stands, and why it cannot change is said.
+ */
+export function SwitchRow({ checked, onChange, title, description, hint = null, disabled = false, infoOnHover = false }) {
+  const hover = useHoverHint(infoOnHover ? description : null);
+  const text = (
+    <span className="switch-row-text">
+      <strong>{title}</strong>
+      {description && !infoOnHover && <InfoTip label={`About ${title.toLowerCase()}`}>{description}</InfoTip>}
+    </span>
+  );
   return (
-    <label className={`toggle-option switch-row${checked ? ' is-on' : ''}`}>
-      <input type="checkbox" role="switch" checked={checked} onChange={(event) => onChange(event.target.checked)}/>
-      <span className="switch" aria-hidden="true"/>
-      <span className="switch-row-text">
-        <strong>{title}</strong>
-        {description && <InfoTip label={`About ${title.toLowerCase()}`}>{description}</InfoTip>}
-      </span>
-    </label>
+    <>
+      <label {...hover.props} tabIndex={infoOnHover && disabled ? 0 : undefined}
+        aria-describedby={infoOnHover && disabled ? hover.describedBy : undefined}
+        className={`toggle-option switch-row${checked ? ' is-on' : ''}${disabled ? ' is-disabled' : ''}${hint ? ' has-hint' : ''}${infoOnHover ? ' has-hover-hint' : ''}`}>
+        <input type="checkbox" role="switch" aria-describedby={hover.describedBy} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)}/>
+        <span className="switch" aria-hidden="true"/>
+        {hint ? <span className="switch-row-body">{text}<small className="switch-row-hint">{hint}</small></span> : text}
+      </label>
+      {hover.hint}
+    </>
   );
 }

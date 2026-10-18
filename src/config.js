@@ -17,6 +17,13 @@ export const config = {
   // connections, instead of the driver's 600-connection combined default.
   mongoMaxPoolSize: atLeast(process.env.MONGODB_MAX_POOL_SIZE, 50, 1),
   mongoMaxConnecting: atLeast(process.env.MONGODB_MAX_CONNECTING, 8, 1),
+  // A database call that never answers must not hold a request for good - nor,
+  // through a shared read, every student of a test (14 Oct: one stuck read froze
+  // a whole class for three minutes, until a restart). It fails instead, and
+  // the student's device tries again.
+  mongoSocketTimeoutMs: atLeast(process.env.MONGODB_SOCKET_TIMEOUT_MS, 45_000, 5_000),
+  mongoWaitQueueTimeoutMs: atLeast(process.env.MONGODB_WAIT_QUEUE_TIMEOUT_MS, 15_000, 1_000),
+  mongoServerSelectionTimeoutMs: atLeast(process.env.MONGODB_SERVER_SELECTION_TIMEOUT_MS, 10_000, 1_000),
   redis: {
     // Optional for one local process; mandatory when PM2/WEB_CONCURRENCY starts
     // more than one. Redis stores locks only, never answers or results.
@@ -28,7 +35,10 @@ export const config = {
     // Shared test settings are read on nearly every student check-in. A short
     // cache removes thousands of identical MongoDB reads while invalidation
     // after a settings change keeps starts, extensions and closes immediate.
-    testCacheMs: nonNegative(process.env.REDIS_TEST_CACHE_MS, 5_000)
+    testCacheMs: nonNegative(process.env.REDIS_TEST_CACHE_MS, 5_000),
+    // How long requests wait on one shared read of a test before giving up on it,
+    // so the next request reads afresh rather than queueing behind a stuck one.
+    cacheLoadTimeoutMs: atLeast(process.env.CACHE_LOAD_TIMEOUT_MS, 6_000, 1_000)
   },
   performance: {
     // Pollable reads are shed first during an exceptional burst. Answer and
@@ -118,5 +128,13 @@ export const config = {
     // Brevo's free plan sends 300 emails a day; stop just short of it so the
     // last codes of the day are refused here, clearly, not lost at Brevo.
     dailyLimit: Number(process.env.OTP_DAILY_LIMIT || 295)
+  },
+  // Results by email, after marks are released (services/result-mail-service.js):
+  // a share of the same daily allowance as the codes above (otp.dailyLimit
+  // counts both), so sign-in codes always keep the rest of the day's emails.
+  resultMail: {
+    dailyLimit: Number(process.env.RESULT_MAIL_DAILY_LIMIT || 200),
+    // A pause between two emails, so a class's emails go out steadily, not in one burst.
+    gapMs: Number(process.env.RESULT_MAIL_GAP_MS || 400)
   }
 };

@@ -1,0 +1,155 @@
+/*
+ * The design tokens: the only place a colour, a type size, a spacing step, a
+ * radius or a shadow is written as a value. Every other stylesheet uses
+ * var(--token), and `npm run lint:css` refuses raw values anywhere else.
+ *
+ * Colours: the scheme's blue (tint #E3F1F8, base #1A7DAB made a touch more
+ * vivid, pressed #136790, deep #0C4A68) is the main colour, on its neutrals
+ * (#13161C / #1B1F27 / #232833 / #2E3440). Its accents mark the small things:
+ * teal for the open view, green success, pink highlight, red danger, orange
+ * warning, yellow notice. Shades worked out with the color MCP server; every
+ * text/background pair is checked at 4.5:1 or more. A see-through colour is
+ * built from a channel token:
+ *   rgb(var(--primary-rgb) / .12)
+ */
+:root{
+  color-scheme:dark;
+
+  /* Surfaces: the scheme's neutrals, darkest to lightest */
+  --bg-deep:#0E1015;    /* tooltips, the deepest wells */
+  --bg-page:#13161C;
+  --bg-nav:#171A21;
+  --bg-card:#1B1F27;
+  --bg-hover:#1F2430;   /* a card or row under the pointer */
+  --bg-raised:#232833;
+  --bg-input:#282E3A;
+  --border:#2E3440;
+  --border-strong:#3A3E42;
+  --grip:#5F6673;       /* drag handles and grey bars: 3.15:1 on the page */
+
+  /* Text */
+  --text:#ECECEE;
+  --text-soft:#C6CBD3;            /* secondary text that still reads as body */
+  --text-muted:#9AA3AF;           /* the quiet level: 5.34:1 even on inputs */
+  --white:#FFFFFF;                /* text on a dark coloured fill */
+
+  /* Brand and actions: blue, the main colour */
+  --primary:#0E95E4;              /* borders, icons, bars, focus, glows - not behind white text, not small text */
+  --primary-fill:#0B7BBD;         /* behind white text: 4.58:1 */
+  --primary-fill-hover:#0F6FA6;   /* 5.46:1 */
+  --primary-fill-pressed:#136790; /* 6.23:1 */
+  --primary-text:#56B8EA;         /* blue as text: 7.42:1 on cards, 6.12:1 on inputs */
+  --depends-line:#3277A1;         /* the line tying a setting to the choice that opened it: 3.37:1 on cards */
+  --primary-tint:#E3F1F8;         /* blue wash on the light sheet */
+  --primary-deep:#0C4A68;
+
+  /* Neutral buttons (the scheme's secondary) */
+  --secondary-fill:#353B47;       /* behind --text: 9.53:1 */
+  --secondary-fill-hover:#404756;
+  --answer-cohort-fill:#2D2F2A;   /* sampled from the answer analysis banner */
+  --answer-cohort-fill-hover:color-mix(in srgb,var(--answer-cohort-fill),var(--white) 8%);
+  --answer-cohort-fill-pressed:color-mix(in srgb,var(--answer-cohort-fill),var(--bg-page) 20%);
+
+  /* Accents for the small things */
+  --accent:#4DA5B5;               /* teal: the open view, with dark ink on it */
+  --on-accent:#13161C;            /* 6.35:1 on teal */
+  --accent-hover:#6AB5C2;         /* teal under the pointer: --on-accent 7.77:1 */
+  --accent-pressed:#408A97;       /* teal held down: --on-accent 4.57:1 */
+  --highlight-text:#EE6AA7;       /* pink: 5.7:1 on cards */
+  --highlight-fill:#C2307A;       /* pink on white (icons on white chips): 5.25:1 */
+  --highlight-fill-hover:color-mix(in srgb,var(--highlight-fill),var(--bg-page) 12%);
+  --highlight-fill-pressed:color-mix(in srgb,var(--highlight-fill),var(--bg-page) 20%);
+  --highlight-hover:color-mix(in srgb,var(--highlight-text),var(--white) 12%);
+  --highlight-pressed:color-mix(in srgb,var(--highlight-text),var(--bg-page) 8%);
+  --on-highlight:var(--on-accent);
+
+  /* Status: the colour, its text shade, a fill for white text */
+  --ok:#2FB67C;   --ok-text:#3CC88B;  --ok-fill:#1E865A;  --ok-fill-hover:#186E4A;  /* fills: 4.55:1 and 6.23:1 */
+  --ok-fill-pressed:#135A3C;      /* green held down: white on it 8.22:1 */
+  --warn:#F49D37;                      /* orange; also its text: 6.31:1 on inputs, 8.39:1 under dark ink */
+  --bad:#FF6B6B;  --bad-soft:#FFA3A3; --bad-fill:#BB1A39; --bad-fill-hover:#9A1530;  /* red, not pink: text 5.95:1 on cards, 4.91:1 on inputs; fills 6.33:1, 8.32:1 */
+  --gold:#F5C842; --gold-text:#F8D86E;  /* yellow: notices and Review, dark ink on the fill */
+
+  /* Marks: Analysis tiles, review dots, the student card - fill and ink */
+  --mark-right:#4ADE80;   --mark-right-ink:#064E3B;
+  --mark-part:#FDE047;    --mark-part-ink:#713F12;
+  --mark-part-hover:color-mix(in srgb,var(--mark-part),var(--white) 16%);
+  --mark-part-pressed:color-mix(in srgb,var(--mark-part),var(--bg-page) 10%);
+  --mark-wrong:#F87171;   --mark-wrong-ink:#450A0A;
+  --mark-pending:#FB923C; --mark-pending-ink:#431407;
+  --mark-blank:#CBD5E1;   --mark-blank-ink:#475569;
+  --answer-text:#7DC3EA;          /* light blue: 7.05:1 on inputs, 4.59:1 on a blue wash */
+  /* Rank badges */
+  --medal-gold:#FACC15;   --medal-silver:#CBD5E1; --medal-silver-ink:#1E293B;
+  --medal-bronze:#FDBA74; --medal-bronze-ink:#7C2D12;
+
+  /* The light sheet (rank list) */
+  --sheet-white:#F8FAFC;
+  --sheet-bg:#E8ECF0; --sheet-table:#F4F6F9; --sheet-head:#E1E6EC; --sheet-line:#D3DAE2;
+  --sheet-hover:var(--primary-tint); --sheet-key:#E2E8F0; --sheet-hatch-a:#EEF1F5; --sheet-hatch-b:#E2E7ED;
+  --sheet-text:#13161C; --sheet-text-2:#475569; --sheet-text-3:#556377; --sheet-link:var(--primary-fill-pressed);  /* 5.4:1 on the tint */
+  --pill-orange:#FFEDD5; --pill-orange-ink:#C2410C;
+  --pill-red:#FEE2E2;    --pill-red-ink:#B91C1C;
+
+  /* Channels, for see-through colours: rgb(var(--x-rgb) / alpha) */
+  --black-rgb:0 0 0;
+  --white-rgb:255 255 255;
+  --ink-rgb:14 16 21;
+  --card-rgb:27 31 39;
+  --text-rgb:236 236 238;
+  --muted-rgb:154 163 175;
+  --primary-rgb:14 149 228;
+  --accent-rgb:77 165 181;
+  --highlight-rgb:224 69 143;
+  --ok-rgb:47 182 124;
+  --warn-rgb:244 157 55;
+  --bad-rgb:255 107 107;
+  --bad-fill-rgb:187 26 57;
+  --gold-rgb:245 200 66;
+  --answer-rgb:125 195 234;
+  --mark-right-rgb:74 222 128;
+  --mark-part-rgb:253 224 71;
+  --mark-wrong-rgb:248 113 113;
+  --mark-pending-rgb:251 146 60;
+  --sheet-ink-rgb:19 22 28;
+
+  /* Type: seven sizes, plus fluid headings written as clamp() where they are used */
+  --text-xs:.75rem;     /* 12px  badges, labels, captions */
+  --text-sm:.8125rem;   /* 13px  meta lines, tables, chips */
+  --text-base:.875rem;  /* 14px  buttons, inputs, most of the interface */
+  --text-md:1rem;       /* 16px  body text, question prompts */
+  --text-lg:1.25rem;    /* 20px  card and section titles */
+  --text-xl:1.5rem;     /* 24px  large titles */
+  --text-2xl:1.75rem;   /* 28px  page titles at a fixed size */
+  --leading-tight:1.2; --leading:1.45; --leading-loose:1.6;
+  --font:"Manrope Variable",Manrope,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --head-font:var(--font);
+
+  /* Spacing: 2px steps to 16, then 4 and 8 */
+  --space-0-5:2px; --space-1:4px; --space-1-5:6px; --space-2:8px; --space-2-5:10px; --space-3:12px;
+  --space-3-5:14px; --space-4:16px; --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px; --space-12:48px;
+
+  /* Radii */
+  --radius-sm:8px;      /* tiles, inputs, small buttons */
+  --radius-md:12px;     /* cards, panels */
+  --radius-lg:16px;     /* windows and sheets */
+  --radius-pill:999px;  /* pills, round buttons, avatars */
+  --font-sketch:"Segoe Print","Bradley Hand","Comic Sans MS",cursive; /* handwriting, from the device (the offline page) */
+  --radius-sketch:255px 15px 225px 15px / 15px 225px 15px 255px; /* a hand-drawn outline (the offline page's game) */
+
+  /* Shadows */
+  --shadow-sm:0 2px 8px rgb(var(--black-rgb) / .28);   /* raised controls, chips */
+  --shadow-md:0 8px 24px rgb(var(--black-rgb) / .36);  /* menus, popovers, toasts */
+  --shadow-lg:0 24px 80px rgb(var(--black-rgb) / .42); /* windows */
+
+  /* The names the stylesheets used before these tokens */
+  --text-2:var(--text-muted); --text-3:var(--text-muted);
+  --primary-hover:var(--primary-fill-hover); --primary-pressed:var(--primary-fill-pressed);
+  --brand-dot:var(--primary);
+  --ink:var(--text); --muted:var(--text-muted); --faint:var(--text-muted); --line:var(--border);
+  --surface:var(--bg-card); --wash:var(--bg-raised);
+  --brand:var(--primary); --brand-dark:var(--primary-fill-hover);
+  --danger:var(--bad); --warning:var(--warn); --success:var(--ok);
+  --r-sm:var(--radius-sm); --r-md:var(--radius-md); --r-lg:var(--radius-md);
+  --radius:var(--radius-lg);
+}

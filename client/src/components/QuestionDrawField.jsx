@@ -14,7 +14,7 @@ export function QuestionDrawField({ value, onChange, pool, mix, idPrefix }) {
   }
   return (
     <div className="form-wide">
-      <ChoiceCards label="How questions are picked" idPrefix={`${idPrefix}-draw`} value={value} onChange={onChange} options={DRAW_OPTIONS}/>
+      <ChoiceCards label="How questions are picked" idPrefix={`${idPrefix}-draw`} value={value} onChange={onChange} options={DRAW_OPTIONS} hint/>
       <p className="help draw-summary">With this bank, {summary}</p>
     </div>
   );

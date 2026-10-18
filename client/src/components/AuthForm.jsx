@@ -228,24 +228,26 @@ export function AuthForm({ microsoft = null, returnTo = '/', onSignedIn, showToa
               Not there yet? Check Junk or Spam, and the Other tab in Outlook: the email can take a few minutes. If you press Resend, the code from either email works.
             </InfoTip>
           </span>
-          <div className="otp-row">
-            <input
-              id="auth-code"
-              className="text-input otp-input"
-              required
-              autoFocus
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              pattern="[0-9]{6}"
-              maxLength="6"
-              value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
-              placeholder="000000"
-            />
-            <button className="button button-secondary otp-resend" type="button" disabled={busy || resendIn > 0} onClick={() => sendCode()}>
-              {resendIn > 0 ? `Resend ${resendIn}s` : 'Resend'}
+          {/* The whole row for the six digits, so they always show in full; asking again is a line under it. */}
+          <input
+            id="auth-code"
+            className="text-input otp-input"
+            required
+            autoFocus
+            autoComplete="one-time-code"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength="6"
+            value={code}
+            onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+            placeholder="000000"
+          />
+          <p className="otp-resend-line">
+            <span>No code yet?</span>
+            <button className="link-button" type="button" disabled={busy || resendIn > 0} onClick={() => sendCode()}>
+              {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
             </button>
-          </div>
+          </p>
           <button className="button button-primary button-wide" disabled={busy || code.length !== 6} type="submit">
             {busy ? 'Checking…' : 'Continue'}
           </button>

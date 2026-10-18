@@ -61,8 +61,8 @@ export function ResultDetailScreen({ code, go, showToast, isStudent = true }) {
     if (list.error && !list.data && told.current !== list.error) { told.current = list.error; showToast(list.error.message); }
   }, [list.error, list.data, showToast]);
   const review = useMyResponses(code, row === undefined || Boolean(row?.canDownload));
-  const back = isStudent ? '/' : '/?admin=tests&view=taken';
-  const backLabel = `Back to ${isStudent ? 'My results' : 'Taken'}`;
+  const back = isStudent ? '/' : '/?admin=results&view=taken';
+  const backLabel = `Back to ${isStudent ? 'My results' : 'My attempts'}`;
   // A round arrow inside the card, not a link above it.
   const backButton = (
     <button className="result-back" type="button" onClick={() => go(back)} aria-label={backLabel} title={backLabel}>

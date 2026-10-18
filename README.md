@@ -22,7 +22,7 @@ Everyone logs in with **email + password** (the email is the username). Only add
 
 - `@stu.upes.ac.in` accounts are **students**. They register for tests, and their home page is **My results**: every test they took, the time it took, and their marks once released.
 - **Sign in with Microsoft** is an extra option for any UPES account (the `AZURE_*` values in `.env`, redirect URI `<PUBLIC_BASE_URL>/auth/microsoft/callback`). Students' and faculty's Microsoft accounts are in different tenants, so the Azure app must be **multi-tenant** and `AZURE_TENANT_ID=organizations`; `AZURE_ALLOWED_TENANTS` limits it to your directories. The button disappears if the Azure values are missing.
-- Every other UPES address (e.g. `@ddn.upes.ac.in`) is **faculty**. Faculty get a private admin portal showing only the tests they created: **Home · Tests · Attendance** (and **Users** for those allowed). Everything a test needs is under **Tests**, results and marking included: a quiz with papers to mark shows **Mark N**, opening that test's Results tab on the papers waiting, and the home page's "papers to mark", "to approve" and "live now" each open Tests filtered to them. Faculty can **also take tests** with no SAP ID; those attempts are under **My test attempts** in the account menu, where a test of their own opens on its manage page.
+- Every other UPES address (e.g. `@ddn.upes.ac.in`) is **faculty**. Faculty get a private admin portal showing only their quizzes: **Home · Quizzes · Results · Attendance** (and **Users** for those allowed). **Quizzes** handles creation, setup and students; **Results** handles submitted papers, marking and analysis, with a switch for **My attempts**. A quiz can link directly between its management and results workspaces. Old Tests links still work. Faculty can also take quizzes without a SAP ID.
 - In a results list, a test that ended without the person beginning a paper reads **Missed** (grey), not "Not started".
 
 Accounts are kept until an administrator deletes them. Test records and marks are stored on the tests, not the account, so deleting an account never removes marks.
@@ -96,14 +96,14 @@ Tests saved before these choices existed keep working: they start when the admin
 
 ### Editing a test
 
-**Edit test** on the dashboard opens the whole question paper in the same form used to create it: questions, options, answer keys, per-question times, questions per student, and the settings. It works before, during and after the test (`src/services/paper-service.js`). Questions students already have are marked **On N papers**.
+**Edit test** on the dashboard opens the whole question paper in the same form used to create it: questions, options, answer keys, marks, questions per student, and the settings. It works before, during and after the test (`src/services/paper-service.js`). Questions students already have are marked **On N papers**.
 
 Before anyone has a paper, saving simply saves. Once students have papers, saving asks who the changes should reach:
 
 - **Everyone, including papers already given out** — an edited question changes in place: students writing the test see it on their next refresh, and a changed answer key **re-marks papers already submitted**. A deleted question is taken off every paper and scores are recounted. An answer that no longer fits (fewer options, a switch between choice and written answer) is cleared.
 - **Only students who start from now** — papers already given out keep every question exactly as it was, and their marks. The old version stays in the bank marked *retired* for those papers; new papers get the edited one.
 
-Either way, new questions and a different number of questions per student reach only papers started from now. Once the test has started, the start time, whether the paper goes one way only (no Previous) with its question times and Next button, how questions are picked and shuffling stay fixed (a single question's own time can still be edited like the rest of the question), and the end time is changed with **Extend time**.
+Either way, new questions and a different number of questions per student reach only papers started from now. Once the test has started, the start time, whether the paper is held one question at a time with a timer on each, the question times, how questions are picked and shuffling stay fixed, and the end time is changed with **Extend time**. What can still change while it runs: **Next** (on or off), **Previous** on a paper with no timer (turned on — never off again, see *Strict timing*), and on a free paper **All on one page ↔ One at a time**. Students' open papers follow such a change at once.
 
 ### Restarting a quiz
 
@@ -129,12 +129,29 @@ The same control accepts an explicit end time through the API (`POST /api/admin/
 
 Restarting a student's attempt gives them a **blank paper**, not extra time: the deadline is the test's, shared by everyone. Reviving a locked attempt likewise clears the integrity counters without changing the end time. Extending the test is what gives time back.
 
+## The Create page
+
+**Create a test** is laid out for someone using it the first time (`client/src/screens/creator/CreatorScreen.jsx`). Along the top, always in view however far down the page you are, a bar holds the four parts as one row of pill tabs - **Questions**, **Schedule**, **Question settings**, **Rules**, the open one filled blue - and on the right **Import questions** (from a file, pasted JSON, or the template) and **Create quiz** (**Save changes** when editing). A tap on a part opens it under the **Title** and **Description**; a second tap closes it. While no part is open, **Your test so far** says in one line what each part holds, and a tap on a line opens that part:
+
+1. **Questions** — the bank as a list, one row a question (its words, type, number of options and marks); a row opens its editor underneath. **Add question** is under the list. A choice question has **2 to 10 options**: **Add option** adds one (up to 10) and ✕ removes one (never below 2), and the tick beside an option marks it right.
+2. **Schedule** — when the test starts (when you press Start, or by itself at a set time) and when it ends (when you press Close, at a set time, or after a duration from the test's start or each student's own Begin), summed up in one line. On a test that has started it shows what is running; the end time then changes with **Extend time**.
+3. **Question settings** — questions each student gets (how many of each type, shuffling, and how questions are picked when the bank is bigger than one paper), marks for each type and when students see them, and moving through the paper (one page or one at a time; Previous, Next and a timer on each question).
+4. **Rules** — who can take it (devices, private (Incognito) window only, guests, the venue) and **Leaving the test**: what happens when a student switches away or leaves fullscreen, always shown.
+
+Each group inside a part has a heading and one line on what it is for, and every choice says in a line what the option picked does, so the defaults can be left alone and only what matters changed. Anything not finished when you press **Create quiz** opens its part (and question) for you.
+
+**On every screen.** The bar is laid out for each size: from a laptop up (1000 px) the parts and the buttons share one row; narrower, the buttons come first and the parts take the whole width under them, with short names (Questions, Schedule, Settings, Rules) below 900 px; on a phone Import shows as its icon; on a phone turned sideways everything is one row, to save height. Nothing scrolls sideways, and a field the browser points at is never hidden under the bar.
+
+**Drafts.** A test being written is kept as a draft on the server for its teacher (`src/services/draft-service.js`, the `creatorDrafts` collection): saved a moment after each change and as the page is left, so leaving the page, closing the tab or signing in on another computer loses nothing. It saves quietly: the bar says nothing while all is well, and shows a red note only when a save fails (no connection, or the draft is too big). Opening **Create a test** again brings it back as it was, with **Clear** to throw it away; creating the test throws it away too. It is never stored on the device, because it holds the answer keys. One draft per teacher, up to 240 KB (pictures are uploaded separately).
+
 ## Question layout
 
-Each test chooses how students see their paper, in **Create a test** and in **Edit test setup**:
+Each test chooses how students see their paper, under **Question settings → How questions are shown**:
 
-- **One question at a time** — one question on screen with Next, and Previous unless the **Previous button** switch under it is turned off (one way only, see *Strict timing* below).
+- **One question at a time** — one question on screen, with three switches under it: **Previous**, **Next** and **Timer on each question** (see *Strict timing* below). With Previous on and no timer, students move freely.
 - **All questions on one page** — every question in one scrolling page, with a single Submit at the end.
+
+A test whose students move freely can swap between the two at any time, even while it runs.
 
 With Previous on, both keep the same behaviour underneath: free movement between questions, answers written to the server as you go, and automatic submission when time is up. Only the presentation differs. The question navigator is shown either way; on a single page it scrolls to the question instead of swapping it.
 
@@ -159,20 +176,21 @@ When the bank holds more questions of a type than one paper uses, **How question
 
 The order of questions *within* a paper is shuffled per student either way when **Shuffle question order** is on.
 
-### Strict timing (one way only, a timer on each question)
+### Strict timing (one at a time, held by the server)
 
-Under **Question layout → One at a time**, turn the **Previous button** off when creating a test (or editing it before it starts) to make the paper go one way only. **Timer on each question** (off to begin with) then decides whether questions have a time: off, students move on with Next whenever they are ready and the test's own end time is the only limit (they are told "Move on with Next when you are ready"); on, the times below and the **Next button** switch appear. Turning timers off saves no question times - neither the types' nor any question's own - but the form keeps them for turning it back on, and a test loaded or imported with any time shows it on.
+Under **How questions are shown → One at a time**, two switches put the paper in the server's hands, one question at a time: **Previous** off (one way only), or **Timer on each question** on. **A timer on each question means no going back:** a timed question closes once it is left, so the paper goes forward only, and **Next** is the only choice left (Previous is shown off and locked, with the reason). Without a timer, students move on with Next whenever they are ready and the test's own end time is the only limit, and Previous may be on or off. With a timer:
 
-- **Time per type** — MCQ, MSQ and short answer each get a default (1 min, 1 min, 2 min to begin with; 0 = no limit).
-- **Time per question** — any question can override that in the question editor (*Default*, *No limit*, 15 s … 5 min, or a custom number of seconds). JSON imports can carry `strictTiming`, `typeSeconds` and a question's `timeSeconds`.
-- **Submit test** is always on screen, so a student can hand in the paper at any point (confirming first). There is never a Back button.
-- **Next button** (on by default, shown once timers are on) is the admin's choice. Turned off, a timed question stays on screen for its full time and the server refuses any early move; a question with **no** timer still gets Next, so nobody is stuck.
-- Confirmations during a test (Submit, Skip) are drawn in the page. The browser's own `confirm()` box would take the page out of fullscreen, and dismissing it with Escape would count as leaving the test.
-- The paper shows **one question at a time, forward only**. A timed question counts down (red for the last 10 seconds); at zero the answer as it stands is kept and the next question opens by itself. **Next** moves on early; skipping an unanswered question asks first. A question with no limit waits for Next. There is **no going back**, and Next on the last question submits the paper.
-- The clock is the server's (`src/domain/strict-timing.js`). Only the open question is ever sent to the browser, and only it accepts answers — for its time plus a 3-second grace. A question's clock starts when it is first shown, so a dropped connection costs the question that was open, never the ones after it. **It counts only while the student is on the paper:** leaving it (another app or tab, out of fullscreen) or being locked stops the open question's clock, and it carries on from where it stopped once they are back, so its time on screen is time actually spent on it. The test's own end time keeps running, and every exit is still recorded and counted against the limits.
+- **Time for each question** — **Same for every question** (one time) or **By question type** (MCQ, MSQ and short answer; 1 min, 1 min, 2 min to begin with). 0 = no limit. The time is the test's, never a single question's: the question editor no longer has a time of its own (a time from an older test or a JSON import is kept on a test that has started, and dropped otherwise).
+- **Next** (on by default) lets students leave a question before its time is up. Off, the newest question stays on screen for its full time and the server refuses any early move; a question with **no** timer still gets Next, so nobody is stuck.
+- **Previous** is not offered with a timer (above), on a new test, through Edit test, or from the dashboard. A test saved with a timer and going back before this rule keeps both, and works as it did: each question keeps the time it did not use, a question whose time ran out is closed for good, and questions not reached yet still open only one at a time.
+- **While the test runs**, the dashboard's **More** menu has **Allow Next** / **Turn off Next** (Edit test does the same). On a one-way paper with no timer it also has **Allow going back**, which can be turned on, never off: questions students have gone back to and read cannot be taken away fairly. Open papers follow at once.
+- **Submit test** is always on screen, so a student can hand in the paper at any point (confirming first).
+- Confirmations during a test (Submit, Skip) are drawn in the page. The browser's own `confirm()` box would take the page out of fullscreen, and dismissing it with Escape would count as leaving the test. Without Previous, skipping an unanswered question asks first; with it, the question is still there while it has time.
+- **The numbers along the top** show each question opened so far as **answered (blue)** or **not answered (grey)**, however it closed — by Next or by its clock; the open one is solid blue. With Previous, a question that can still be opened is a button with a thin blue ring.
+- A timed question counts down (red for the last 10 seconds); at zero the answer as it stands is kept and the next question opens by itself.
+- The clock is the server's (`src/domain/strict-timing.js`). Only the open question is ever sent to the browser, and only it accepts answers — for what it has left plus a 3-second grace. A question's clock starts when it is shown, so a dropped connection costs the question that was open, never the ones after it. **It counts only while the student is on the paper:** leaving it (another app or tab, out of fullscreen) or being locked stops the open question's clock, and it carries on from where it stopped once they are back, so its time on screen is time actually spent on it. The test's own end time keeps running, and every exit is still recorded and counted against the limits.
 - The test's own start and end still apply on top: when the overall time is up, the paper is submitted as usual. The suggested duration adds up the longest question times a student could draw.
-- The panel shows how long a student's paper can take with the chosen timers (the longest questions each student could draw).
-- The admin's analysis view, activity log and Excel **Responses** sheet show each question's time allowed, time on screen, and whether it timed out. Strict settings are fixed once the test starts.
+- The admin's analysis view, activity log and Excel **Responses** sheet show each question's time allowed, time on screen (all its visits added up), and whether it timed out. The timer and its times are fixed once the test starts.
 
 ## Working through a bad connection
 
@@ -181,6 +199,7 @@ Campus Wi-Fi drops. The student's paper is built so that a short outage costs no
 - **An answer appears the moment it is tapped**, is written into this device's storage, and is queued for the server. A queued answer is marked *"Saved on this device, sending…"* and its number in the navigator is outlined, so the student can see what has not landed yet.
 - **The queue retries by itself** — when the browser reports the connection is back, and on a slow beat in case it never does (captive portals, flaky mobile data). A banner says how many answers are waiting.
 - **Reloading during an outage still opens the test.** A service worker caches the app itself, and the paper plus its queue are read back from this device.
+- **A Server offline page instead of the tunnel's error page.** With the server off, Cloudflare answers for it with its own error page (502, or 530 / Error 1033 with the tunnel down too). The service worker serves the saved app in its place, and any page but a test link opens on **Server offline** - a sleeping student (`client/public/server-offline.webp`, kept by the worker when it installs), "Studied too hard. Taking a quick nap." - which asks again every few seconds and opens the page the moment the server answers. With no connection on the device itself it says **No connection** instead. Under it, a hand-drawn tic-tac-toe (`components/TicTacToe.jsx`, drawn in code - nothing to fetch): 1 player against the computer (which starts, as X, unless you choose to; it never loses, wins as soon as it can and picks the moves that leave the most ways to go wrong) or 2 taking turns on the device, who starts, New game and the score; while a game is under way the page does not jump away when the server answers - it says **The server is back** with **Open the page**. A device that has never opened the site (or a private window, or a hard refresh) still gets Cloudflare's page.
 - **Submitting waits for the queue.** If anything is unsent, Submit flushes first and asks the student to stay on the page rather than finishing with answers the server never received.
 
 The server stays the authority throughout. The API is never cached, and anything the server refuses — an answer after time is up, a locked attempt, a closed test — is dropped from the queue and the screen reverts to what the server says. Nothing here can invent an answer the server rejected. The stored copy is cleared on submit, so a shared machine keeps nothing.
@@ -204,11 +223,25 @@ Moving the start time past the current end time, without supplying a new end tim
 - A row of coloured squares shows where every answer stands - full, part, none, to mark, blank - and jumps to any of them; a blue underline marks a mark you changed.
 - Each mark saves at once and reaches the student's result page straight away if their marks are released.
 
+**Answer analysis.** A test's Results area opens on **Analysis** (left of **Results**); beside the test code in the header an (i) shows, on a click, when it was held, how long, marks, questions, papers, how many are shown and how far marking has got, with just the date beside it. Beside **Questions**, **Answer analysis** fits the window. On the left, the question: its header (arrows either side of **Question N** with its type - MCQ, MSQ or Short - which opens the list of questions, each with its type too) stays fixed with the question text - folded to three lines when long, **More** to read it all and see its picture full size - while its options scroll below, each with how many picked it (a correct option has a green letter); on the right (the two halves equal) the students who picked what is chosen, each with their outcome. A small **Score** switch (on at first; turning it off is remembered in this browser) shows each student's marks for the whole test, as the rank list counts them - with **+ up to N to mark** while answers wait for marking. Beside it **Sort & filter** (the rank list's menu) orders the students by marks (highest first at the start), name, SAP ID or time taken, and filters them by the class average, by marking (fully marked or still to mark, while any paper waits) and by what was recorded while they wrote; the line above the list just counts them. Clicking options (a chosen one turns blue) chooses them. Beside the "Question N" heading one joined switch, **Correct | Incorrect | All**, chooses every correct option at once (exactly), answers recorded as incorrect, or everyone; once options are chosen a second, **Picked Exactly | All of | Any of** (**Only | At least** for one option), says how a paper must match: those and nothing else, those and maybe more, or any of them. Grey at rest, blue the one in use. Every click updates the list at once. It opens with the correct options chosen, exactly - the students who got it right; that opening view filters nothing else, so the charts and the Results tab stay whole until a choice is made. Chosen options belong to their own question: the next question opens on its correct answer. **Open in Results** carries the answer choices and search to the Results tab; list-only filters stay in Answer analysis. A name opens that student's selected answer. Answer analysis looks at one question at a time (a choice from a question's statistics replaces any earlier one); an older link with choices on other questions lists them as **Also Q…** chips to remove. On a phone the question comes first, then the students. The question's whole-class counts and option percentages stay visible for comparison; saved answers and marks never change. Charts, question statistics, ranking and CSV export can use the same matching cohort; class ranks and the comparison baseline stay unchanged. A question the student never received is not an unselected option. **Matching results** and **Matching students** preserve the choices in the address and narrow the whole class before pagination. Individual papers remain accessible; clear the analysis choices to restore class-wide export, email and bulk actions. Invalid or unavailable data shows an explicit error rather than silently widening the list.
+
+**Submission progress.** Students see confirmation immediately, then a compact progress window while queued answers save and the final submission is sent. Temporary failures show a waiting/retrying state; permanent refusals and unconfirmed submissions remain explicit. The page shows success only after the server confirms submission. The progress window also covers automatic time-up and the final strict-timing question, with duplicate final requests shared.
+
 **Freezing results.** Once a test is closed, **Freeze** on the Results tab (or **More → Freeze results**) makes its marks final: no marking (by hand or from Excel), no editing the questions or what they are worth, no restart, reset, resume or reopening a paper, and the test cannot be deleted - each is refused with a message saying so, and the test's page shows *Results frozen*. Releasing or holding the marks, viewing and exporting still work, and unmarked papers on a frozen test no longer count as *to mark*. **Unfreeze** (on the Results tab or in More) undoes it, so marks can be changed again; a copy made with Duplicate starts unfrozen ([`freeze.js`](src/domain/freeze.js)).
 
 Choose one mark-release policy: immediately after submission, after the test is closed, or only after the admin presses **Release marks**.
 
 A paper with a short answer still unmarked normally shows *Being marked* until every one is marked. Once the test is closed, **Release marks** on the test's page handles both: with nothing left to mark it releases at once; with papers still waiting it first lists them - each student and how many answers they have to mark - and offers **Mark them first** (the Results tab, on those papers) or **Release anyway**. Released anyway, each student sees the score of what is marked so far, with *N not marked yet* beside it (on the result page and in **My results**), and each mark you give then shows straight away. Those papers then stop counting as *to mark* - on the home page, the quiz card (its button goes back to **Results**), the *Papers to mark* filter and the Results tab's flag; the test's tile reads *Unmarked, released*, and its Results tab can still filter to them. **More → Hold marks until marking is done** goes back, and they count again; Restart, Reset and Resume turn it off too.
+
+### Email results
+
+Once a test is closed and its marks are released, **Email results** becomes the main button on the test's page (and a step under **Tasks**). It opens the class who handed in, to send each student their own results by email (`src/services/result-mail-service.js`, the email itself in `src/domain/result-mail.js`):
+
+- **Who** - every student who handed in, with their marks and where their email stands: *Not emailed*, *Waiting to send*, *Sending…*, *Emailed 5:20 PM* or *Failed* (with why). Search by name, email or SAP ID, and show **All**, **Not emailed**, **Emailed** or **Failed**. Everyone not emailed yet starts ticked; untick anyone to leave them out, or **Select all shown** / **Clear shown**. Guests (no email) and papers whose marks the student cannot see yet (a short answer still to mark) cannot be ticked, and say why.
+- **What it holds** - the test, the teacher's name and **email** (the faculty account that owns the test, as a link to write to them), when it was handed in; their marks and their **rank** in the class ("Rank 3 of 30", equal marks sharing a rank) always; then, as chosen: **their answers** (each question, what they answered and the marks it got - no right or wrong labels), **the correct answers** beside what they did not get right (leave off for a question bank you will reuse), and **how the class did** (the average and the highest mark - never another student's name). A short answer not marked yet shows as *not marked yet*, never 0. **Preview** (the eye) shows any student's email exactly as it will look. **See your full result** in the email opens the student's own result page (they sign in first if they are not signed in).
+- **Sending** - the emails go out one at a time in the background, and the list follows them. Each is claimed by one database write, so no student gets the same email twice by accident; one cut off mid-send by a restart is marked *Failed* rather than sent again blindly. A student already emailed can be ticked and sent again.
+
+**The day's allowance.** Brevo's free plan sends 300 emails a day, and sign-in codes use the same allowance. Results emails may use up to `RESULT_MAIL_DAILY_LIMIT` (200) of it, and the codes' limit (`OTP_DAILY_LIMIT`, 295) now counts both, so sign-in codes always keep the rest. The dialog says how many emails are left today; past that, the rest stay *Not emailed* to send another day. Without a Brevo key, a development server writes each email to its log instead of sending it.
 
 ## Fullscreen, attempt recovery, and mark release
 
@@ -239,7 +272,7 @@ Fullscreen is a browser-level deterrent, not a device lockdown. Students must ta
 
 ## Look and feel
 
-The whole app, test pages included, uses one dark theme defined in [`client/src/styles/theme.css`](client/src/styles/theme.css), loaded after every other stylesheet: page `#1E2124`, navigation `#232629`, cards `#2A2D31`, raised `#33373B`, inputs `#3A3E43`, borders `#474C52` (neutral charcoal greys), and primary blue `#1598D1` for actions; green, red and orange are kept for feedback. Text is Manrope, bundled with the app (no external font request). The **QUIZ.** wordmark, the name in browser tabs and the sign-in line are in [`client/src/brand.js`](client/src/brand.js); the browser-tab icon is [`public/favicon.svg`](public/favicon.svg).
+The whole app, test pages included, uses one dark theme. Every colour, type size, spacing step, radius and shadow is a token in [`client/src/styles/tokens.css`](client/src/styles/tokens.css), loaded before every other stylesheet; the rest only use `var(--token)`, and `npm run lint:css` refuses raw values. The palette: near-black neutrals (page `#13161C`, cards `#1B1F27`, borders `#2E3440`) with blue as the main colour (`#0B7BBD` behind white text, `#0E95E4` for icons and focus, `#56B8EA` as text). The accents mark the small things: teal for the open view, green for success, pink for highlights, red for danger, orange for warnings such as Block, and yellow for notices and Review. Every text/background pair is at least 4.5:1. Text is Manrope, bundled with the app (no external font request). The **QUIZ.** wordmark, the name in browser tabs and the sign-in line are in [`client/src/brand.js`](client/src/brand.js); the logo and browser-tab icon is [`client/public/logo.svg`](client/public/logo.svg).
 
 **My quizzes** (the admin home) shows totals for quizzes, registrations, average score and attendance (students present per class), then one card per quiz with its registrations, submissions, average score and submission rate. Search by name or code. The **Filter** button (the same panel as the Students and Attendance lists, each option with its count) narrows by status, registration requests waiting, papers to mark, whether students can see their marks yet, and when the quiz was created; it also sorts by created date, title, average score or registrations, either way round ([`test-filters.js`](client/src/screens/admin/test-filters.js)). Each card's menu exports, duplicates (a new, unstarted copy with the same questions and settings, and no students), archives or deletes after a confirmation that can download the results first.
 
@@ -274,7 +307,7 @@ On a test's dashboard: <kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch tabs, <kbd>
 
 ## Importing a quiz from JSON
 
-In **Create a test**, press **Import JSON** next to the title and choose a `.json` file. The app fills the title, timing, question mix, questions, options and correct answers, then lets the admin review and edit everything before creating the quiz. **Template** downloads [`quiz-template.json`](public/quiz-template.json), a working example, or copies it as text (**Copy template**) to paste wherever the questions are written. Correct answers can be option indexes (starting at `0`) or the exact option text.
+In **Create a test**, press **Import questions** beside the title and choose **From a file** (a `.json` file) or **Paste JSON**. The app fills the title, timing, question mix, questions, options and correct answers, and opens the question list for the admin to review and edit everything before creating the quiz. **Download template** saves [`quiz-template.json`](public/quiz-template.json), a working example, and **Copy template** copies it as text to paste wherever the questions are written. Correct answers can be option indexes (starting at `0`) or the exact option text.
 
 **Formatting a question.** The question box in the editor has buttons for **bold**, bullet points and numbered lists (Ctrl+B for bold; Enter starts a new line, and inside a list the next item), and shows a preview of the student's view. It is written as plain text — `**bold**`, `- ` bullets, `1. ` numbers — so a JSON file can use it too. Students see it formatted; spreadsheets get it as plain text with • bullets.
 
@@ -291,7 +324,8 @@ Every key is optional except `questions`; anything left out keeps the form's def
 | `questionMix` | `{ "mcq": 1, "msq": 1, "short": 1 }` — how many of each type each student gets |
 | `questionDraw` | `"spread"` (least overlap) or `"random"` |
 | `strictNext` | `false` hides Next under strict timing (default `true`) |
-| `strictTiming`, `typeSeconds` | One way only (no Previous button), and the default seconds per type (0 = no limit) |
+| `strictTiming`, `typeSeconds` | The server holds the paper one question at a time, and the seconds per type (0 = no limit) |
+| `strictPrevious` | `true`: students may go back - only on a one-at-a-time paper with no question timers (ignored when any question has a timer) |
 | `typeMarks` | What each type is worth: `{ "mcq": 1, "msq": 2, "short": 5 }` (1 each if left out) |
 | `questionLayout` | `"one"` (one at a time) or `"all"` (one page); ignored under strict timing |
 | `shuffleQuestions`, `allowGuests`, `requirePrivateWindow`, `locationRequired` | `true` / `false` |
@@ -299,7 +333,7 @@ Every key is optional except `questions`; anything left out keeps the form's def
 | `warningsBeforeLock` | With `"warn_lock"`: how many times going past a limit only warns before the next time locks (0 = lock at once) |
 | `violationAction` | `"lock"` (default: no warnings; past the limit the attempt waits for the admin's Revive), `"record"` (recorded only, no warning or lock), `"warn"` (a warning each time, never locked) or `"warn_lock"` (a numbered warning each time, then the lock after the last one) |
 | `resultReleaseMode` | `"instant"`, `"after_quiz"` or `"admin"` |
-| `questions[]` | `prompt`, `type` (`mcq` / `msq` / `short`), `options`, `correctOptions`, and optionally `timeSeconds` for strict timing and `marks` (what this question is worth, if not its type's). A `timeSeconds` or `marks` equal to its type's default follows that default. A `prompt` may be formatted: `**bold**`, a new line as `\n`, lines starting `- ` for bullet points and `1. ` for a numbered list (the template shows each) |
+| `questions[]` | `prompt`, `type` (`mcq` / `msq` / `short`), `options`, `correctOptions`, and optionally `marks` (what this question is worth, if not its type's; a `marks` equal to its type's default follows that default). A choice question has 2 to 10 `options`. A question's own `timeSeconds` is no longer used: times are the test's (`typeSeconds`). A `prompt` may be formatted: `**bold**`, a new line as `\n`, lines starting `- ` for bullet points and `1. ` for a numbered list (the template shows each) |
 
 ## Project layout
 
@@ -372,6 +406,9 @@ PUBLIC_BASE_URL=https://yogeshrathia.com
 BREVO_API_KEY=your-brevo-api-key
 MAIL_FROM_EMAIL=the-verified-sender@example.com
 MAIL_FROM_NAME=Quiz Portal
+# Optional: results emails a day (of the ~300 shared with sign-in codes), and the pause between two.
+RESULT_MAIL_DAILY_LIMIT=200
+RESULT_MAIL_GAP_MS=400
 ALLOWED_EMAIL_DOMAIN=upes.ac.in
 STUDENT_DOMAIN=stu.upes.ac.in
 # Optional: only these faculty may open the Users page. Empty = all faculty.
@@ -379,6 +416,12 @@ ADMIN_EMAIL=you@ddn.upes.ac.in
 ```
 
 Without `BREVO_API_KEY`, a development server prints each sign-up or reset code to its console instead of emailing it; a production server (`NODE_ENV=production`) refuses to send.
+
+### Optional class-analysis image in results emails
+
+In **Email results**, **Class analysis image** is off by default. Enabling it attaches a PNG with attempted/absent counts, average, median, highest/lowest marks, papers still to mark, score bands and the marks distribution. It always covers the whole class and all questions, not the current Analysis filters. Unmarked papers are excluded from score statistics and the histogram; mixed paper totals use percentages. The attachment contains no student names, email addresses, SAP IDs or individual results.
+
+Preview shows the generated attachment and offers a download before sending. A text alternative is included in the email. One image render is shared across recipients for each cached class-statistics snapshot. PNG generation uses `@resvg/resvg-js`, installed by `npm install`/`npm ci`; the server needs an installed sans-serif font (minimal Linux containers should include one, such as DejaVu Sans).
 
 ## Database
 
